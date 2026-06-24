@@ -112,7 +112,7 @@ select:focus-visible,
   min-height: 0;
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(210px, 15vw) minmax(520px, 1fr) minmax(340px, 27vw);
+  grid-template-columns: minmax(270px, 17vw) minmax(520px, 1fr) minmax(340px, 27vw);
 }
 
 .panel {
@@ -153,6 +153,23 @@ select:focus-visible,
 
 .panel-title.compact {
   margin-bottom: var(--space-2);
+}
+
+.palette-groups {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.palette-group {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.palette-group h3 {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
 }
 
 .palette-list {
@@ -342,6 +359,68 @@ select:focus-visible,
   line-height: 1.45;
 }
 
+.field-group {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.field-group-title {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.option-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-1);
+}
+
+.choice-card {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2) !important;
+  min-height: 34px;
+  padding: 6px 8px;
+  color: var(--color-text) !important;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
+}
+
+.choice-card:hover {
+  background: var(--color-surface-subtle);
+  border-color: var(--color-border-strong);
+}
+
+.choice-card input {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  accent-color: var(--color-accent);
+}
+
+.choice-card span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.choice-card small {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
 .checkbox-row {
   display: flex !important;
   grid-template-columns: auto 1fr;
@@ -430,6 +509,34 @@ button:disabled {
   --node-color: var(--color-chart-4);
   --node-bg: var(--color-warning-bg);
   --node-border: var(--color-warning-bd);
+}
+
+.palette-prior_recipe,
+.bayes-node-prior_recipe {
+  --node-color: var(--color-chart-4);
+  --node-bg: var(--color-warning-bg);
+  --node-border: var(--color-warning-bd);
+}
+
+.palette-regression_term,
+.bayes-node-regression_term {
+  --node-color: var(--color-chart-5);
+  --node-bg: var(--color-status-review-bg);
+  --node-border: var(--color-status-review-bd);
+}
+
+.palette-model_block,
+.bayes-node-model_block {
+  --node-color: var(--color-chart-6);
+  --node-bg: var(--color-surface-subtle);
+  --node-border: var(--color-border);
+}
+
+.palette-derived_quantity,
+.bayes-node-derived_quantity {
+  --node-color: var(--color-chart-3);
+  --node-bg: var(--color-success-bg);
+  --node-border: var(--color-success-bd);
 }
 
 .canvas {

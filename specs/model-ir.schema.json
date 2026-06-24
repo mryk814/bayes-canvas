@@ -34,10 +34,7 @@
         "required": ["id", "kind", "name"],
         "properties": {
           "id": { "type": "string" },
-          "kind": {
-            "type": "string",
-            "enum": ["data", "parameter", "hyperparameter", "latent", "deterministic", "likelihood"]
-          },
+          "kind": { "$ref": "#/$defs/nodeKind" },
           "name": { "type": "string" },
           "shape": { "type": "array", "items": { "type": "string" } },
           "observed": { "type": "boolean" },
@@ -186,10 +183,7 @@
               "nodeId": { "type": "string" },
               "baseSymbol": { "type": "string" },
               "displayName": { "type": "string" },
-              "kind": {
-                "type": "string",
-                "enum": ["data", "parameter", "hyperparameter", "latent", "deterministic", "likelihood"]
-              },
+              "kind": { "$ref": "#/$defs/nodeKind" },
               "observed": { "type": "boolean" },
               "plateId": { "type": "string" },
               "declaredIndex": { "type": "string" },
@@ -238,6 +232,21 @@
     }
   },
   "$defs": {
+    "nodeKind": {
+      "type": "string",
+      "enum": [
+        "data",
+        "parameter",
+        "hyperparameter",
+        "latent",
+        "deterministic",
+        "likelihood",
+        "prior_recipe",
+        "regression_term",
+        "model_block",
+        "derived_quantity"
+      ]
+    },
     "validationLevel": { "type": "string", "enum": ["opaque", "structured", "expanded", "linted"] },
     "constraint": {
       "type": "object",

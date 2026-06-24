@@ -16,28 +16,42 @@ function copyText(value: string) {
   void navigator.clipboard?.writeText(value);
 }
 
+const VISIBLE_SECTION_TITLES = new Set([
+  'Indices / Plates',
+  'Index Mappings',
+  'Data',
+  'Priors',
+  'Deterministic',
+  'Likelihood',
+  'Observation Process',
+]);
+
 export function MathView({ model, onSelectNode }: MathViewProps) {
   const sections = useMemo(() => generateModelTexSections(model), [model]);
+  const visibleSections = useMemo(
+    () => sections.filter((section) => VISIBLE_SECTION_TITLES.has(section.title)),
+    [sections],
+  );
   const fullTex = useMemo(() => generateModelTex(model), [model]);
   const markdown = useMemo(() => generateModelMarkdown(model), [model]);
 
-  const hasContent = sections.some((section) => section.lines.length > 0);
+  const hasContent = visibleSections.some((section) => section.lines.length > 0);
 
   if (!hasContent) {
-    return <p className="empty-note">Add nodes to see the model specification.</p>;
+    return <p className="empty-note">ノードを追加すると数式が表示されます。</p>;
   }
 
   return (
     <div className="math-view">
       <div className="math-view-actions">
         <button type="button" onClick={() => copyText(fullTex)}>
-          Copy TeX
+          TeXをコピー
         </button>
         <button type="button" onClick={() => copyText(markdown)}>
-          Copy Markdown
+          Markdownをコピー
         </button>
       </div>
-      {sections.map((section) => (
+      {visibleSections.map((section) => (
         <div className="math-section" key={section.title}>
           <h3 className="math-section-title">{section.title}</h3>
           <div className="math-section-lines">

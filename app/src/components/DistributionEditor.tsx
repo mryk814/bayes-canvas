@@ -16,26 +16,26 @@ interface DistributionEditorProps {
 }
 
 const SUPPORT_LABELS: Record<string, string> = {
-  real: 'Real (-inf, +inf)',
-  positive: 'Positive (0, +inf)',
-  unit_interval: 'Unit interval [0, 1]',
-  simplex: 'Simplex',
-  integer: 'Integer',
-  nonnegative_integer: 'Non-negative integer',
-  correlation_matrix: 'Correlation matrix',
-  cholesky_factor_corr: 'Cholesky correlation factor',
-  ordered: 'Ordered vector',
-  ordered_category: 'Ordered category',
-  positive_definite_matrix: 'Positive definite matrix',
-  custom: 'Custom',
+  real: '実数 (-inf, +inf)',
+  positive: '正の値 (0, +inf)',
+  unit_interval: '0から1 [0, 1]',
+  simplex: '合計1',
+  integer: '整数',
+  nonnegative_integer: '0以上の整数',
+  correlation_matrix: '相関行列',
+  cholesky_factor_corr: 'Cholesky相関因子',
+  ordered: '順序つきベクトル',
+  ordered_category: '順序カテゴリ',
+  positive_definite_matrix: '正定値行列',
+  custom: 'カスタム',
 };
 
 const FAMILY_LABELS: Record<string, string> = {
-  continuous: 'Continuous',
-  discrete: 'Discrete',
-  multivariate: 'Multivariate',
-  count: 'Count',
-  categorical: 'Categorical',
+  continuous: '連続',
+  discrete: '離散',
+  multivariate: '多変量',
+  count: 'カウント',
+  categorical: 'カテゴリ',
 };
 
 function mergeDistributionSelection(id: string, currentArgs?: Record<string, string>): DistributionSpec {
@@ -73,7 +73,7 @@ export function DistributionEditor({ distribution, onChange }: DistributionEdito
             )
           }
         >
-          <option value="">None</option>
+          <option value="">指定しない</option>
           {DISTRIBUTIONS.map((dist) => (
             <option key={dist.id} value={dist.id}>
               {dist.name}
@@ -91,7 +91,7 @@ export function DistributionEditor({ distribution, onChange }: DistributionEdito
             {support ? (
               <span className="dist-chip dist-chip-support">{SUPPORT_LABELS[support] ?? support}</span>
             ) : null}
-            {definition.deprecated ? <span className="dist-chip dist-chip-warning">Use carefully</span> : null}
+            {definition.deprecated ? <span className="dist-chip dist-chip-warning">要注意</span> : null}
           </div>
           {definition.notes ? <small className="dist-preview-note">{definition.notes}</small> : null}
 

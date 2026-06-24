@@ -8,7 +8,17 @@ import {
   type DistributionSpec,
 } from './distributionRegistry';
 
-export type BayesNodeKind = 'data' | 'parameter' | 'hyperparameter' | 'latent' | 'deterministic' | 'likelihood';
+export type BayesNodeKind =
+  | 'data'
+  | 'parameter'
+  | 'hyperparameter'
+  | 'latent'
+  | 'deterministic'
+  | 'likelihood'
+  | 'prior_recipe'
+  | 'regression_term'
+  | 'model_block'
+  | 'derived_quantity';
 
 export interface BayesNodeData extends Record<string, unknown> {
   kind: BayesNodeKind;
@@ -650,30 +660,31 @@ function buildIndexMappings(nodes: ModelIr['nodes'], plates: ModelIr['plates']):
 }
 
 function buildPriorRecipes(nodes: ModelIr['nodes']): PriorRecipe[] {
-  const recipes: PriorRecipe[] = [];
-  const hasBeta = nodes.some((node) => parseSymbolName(node.name).baseSymbol === 'beta');
+  return nodes
+    .filter((node) => node.kind === 'prior_recipe')
+    .map((node) => {
+      const parsed = parseSymbolName(node.name);
+      const expression = node.expression ?? `${parsed.baseSymbol} ~ prior_recipe`;
+      const targetSymbol = analyzeLooseSymbols(expression)[0] ?? parsed.baseSymbol;
+      const expanded = (node.notes ?? '')
+        .split('\n')
+        .map((line) => line.trim().replace(/^[-*]\s*/, ''))
+        .filter((line) => line.includes('~') || line.includes('='));
 
-  if (hasBeta) {
-    recipes.push({
-      id: 'horseshoe_beta',
-      name: 'Horseshoe shrinkage prior',
-      targetSymbol: 'beta',
-      collapsed: 'beta[k] ~ Horseshoe(scale = tau0)',
-      expanded: [
-        'beta[k] ~ Normal(0, tau * lambda[k])',
-        'lambda[k] ~ HalfCauchy(1)',
-        'tau ~ HalfCauchy(tau0)',
-      ],
-      validationLevel: 'expanded',
-      notes: 'Horseshoe is represented as an expandable recipe; the distribution registry keeps the collapsed label.',
+      return {
+        id: `${parsed.baseSymbol}_recipe`,
+        name: node.name,
+        targetSymbol,
+        collapsed: expression,
+        expanded,
+        validationLevel: node.validationLevel ?? 'structured',
+        notes: node.notes,
+      } satisfies PriorRecipe;
     });
-  }
-
-  return recipes;
 }
 
 function buildRegressionTerms(nodes: ModelIr['nodes']): RegressionTerm[] {
-  const deterministicNodes = nodes.filter((node) => node.kind === 'deterministic' && node.expression);
+  const deterministicNodes = nodes.filter((node) => node.kind === 'regression_term' && node.expression);
 
   return deterministicNodes.map((node) => {
     const parsed = parseSymbolName(node.name);
@@ -698,13 +709,13 @@ function buildRegressionTerms(nodes: ModelIr['nodes']): RegressionTerm[] {
 
 function buildModelBlocks(nodes: ModelIr['nodes']): ModelBlock[] {
   const blocks: ModelBlock[] = nodes
-    .filter((node) => node.validationLevel && node.validationLevel !== 'linted')
+    .filter((node) => node.kind === 'model_block')
     .map((node) => {
       const parsed = parseSymbolName(node.name);
 
       return {
         id: `${parsed.baseSymbol}_block`,
-        kind: node.kind,
+        kind: parsed.baseSymbol,
         label: node.name,
         inputs: node.expression ? analyzeLooseSymbols(node.expression) : [],
         outputs: [parsed.baseSymbol],
@@ -714,59 +725,37 @@ function buildModelBlocks(nodes: ModelIr['nodes']): ModelBlock[] {
       } satisfies ModelBlock;
     });
 
-  if (!blocks.some((block) => block.kind === 'gp')) {
-    blocks.push({
-      id: 'gp_term_template',
-      kind: 'gp',
-      label: 'Gaussian process regression term template',
-      inputs: ['time'],
-      outputs: ['f_gp'],
-      formulas: ['f_gp[i] = GP(time[i]; kernel=RBF, lengthscale=ell, amplitude=rho)'],
-      config: { kernel: 'RBF', implementation: 'unspecified' },
-      validationLevel: 'structured',
-      notes: 'Template block for GP/GAM/BNN-style regression terms; keep inputs, outputs, and implementation hint in AI handoff.',
-    });
-  }
-
   return blocks;
 }
 
 function buildQuantitiesOfInterest(nodes: ModelIr['nodes']): QuantityOfInterest[] {
-  const hasBeta = nodes.some((node) => parseSymbolName(node.name).baseSymbol === 'beta');
-  const hasMu = nodes.some((node) => parseSymbolName(node.name).baseSymbol === 'mu');
-  const quantities: QuantityOfInterest[] = [];
+  return nodes
+    .filter((node) => node.kind === 'derived_quantity')
+    .map((node) => {
+      const parsed = parseSymbolName(node.name);
 
-  if (hasBeta) {
-    quantities.push({
-      id: 'treatment_effect',
-      name: 'treatment_effect',
-      expression: 'beta',
-      description: 'Primary coefficient-scale effect.',
-      scale: 'linear',
+      return {
+        id: parsed.baseSymbol,
+        name: node.name,
+        expression: node.expression ?? parsed.baseSymbol,
+        description: node.notes,
+        scale: 'linear',
+        targetPlateId: node.plate,
+      } satisfies QuantityOfInterest;
     });
-  }
-
-  if (hasMu) {
-    quantities.push({
-      id: 'posterior_prediction_target',
-      name: 'posterior_prediction_target',
-      expression: 'mu[i]',
-      description: 'Mean-scale target for posterior predictive checks or implementation review.',
-      scale: 'linear',
-      targetPlateId: 'obs',
-    });
-  }
-
-  return quantities;
 }
 
 function lintModel(model: ModelIr): ModelDiagnostic[] {
   const diagnostics: ModelDiagnostic[] = [];
   const nodeById = new Map(model.nodes.map((node) => [node.id, node]));
-  const nodeIdBySymbol = new Map(model.nodes.map((node) => [parseSymbolName(node.name).baseSymbol, node.id]));
+  const nodeIdBySymbol = new Map(
+    model.nodes
+      .filter((node) => VARIABLE_NODE_KINDS.has(node.kind))
+      .map((node) => [parseSymbolName(node.name).baseSymbol, node.id]),
+  );
 
   for (const node of model.nodes) {
-    if (node.expression) {
+    if (node.expression && ['deterministic', 'regression_term'].includes(node.kind)) {
       diagnostics.push(...lintExpression(node.expression, node.id, model, nodeById, nodeIdBySymbol));
       diagnostics.push(...lintEdgeConsistency(node, model, nodeIdBySymbol));
     }
@@ -992,27 +981,40 @@ const RESERVED_FUNCTIONS: FunctionSymbol[] = [
   { name: 'dot', description: 'Vector dot product.' },
 ];
 
+const VARIABLE_NODE_KINDS = new Set<BayesNodeKind>([
+  'data',
+  'parameter',
+  'hyperparameter',
+  'latent',
+  'deterministic',
+  'likelihood',
+]);
+
 export function buildSymbolTable(
   nodes: ModelIr['nodes'],
   plates: ModelIr['plates'],
 ): SymbolTable {
   return {
-    variables: Object.fromEntries(nodes.map((node) => {
-      const parsedName = parseSymbolName(node.name);
-      return [
-        parsedName.baseSymbol,
-        {
-          nodeId: node.id,
-          baseSymbol: parsedName.baseSymbol,
-          displayName: node.name,
-          kind: node.kind,
-          observed: node.observed,
-          plateId: node.plate,
-          declaredIndex: parsedName.index,
-          shape: node.shape ?? [],
-        } satisfies VariableSymbol,
-      ];
-    })),
+    variables: Object.fromEntries(
+      nodes
+        .filter((node) => VARIABLE_NODE_KINDS.has(node.kind))
+        .map((node) => {
+          const parsedName = parseSymbolName(node.name);
+          return [
+            parsedName.baseSymbol,
+            {
+              nodeId: node.id,
+              baseSymbol: parsedName.baseSymbol,
+              displayName: node.name,
+              kind: node.kind,
+              observed: node.observed,
+              plateId: node.plate,
+              declaredIndex: parsedName.index,
+              shape: node.shape ?? [],
+            } satisfies VariableSymbol,
+          ];
+        }),
+    ),
     indices: Object.fromEntries(plates.map((plate) => [
       plate.index,
       {

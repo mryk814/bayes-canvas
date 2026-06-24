@@ -35,7 +35,6 @@ import {
   type ModelHint,
   type ObservationProcess,
   type PromptTarget,
-  type ValidationLevel,
 } from './lib/modelIr';
 import { initialEdges, initialNodes } from './samples/hierarchicalRegression';
 import { TexMath } from './components/TexMath';
@@ -45,24 +44,66 @@ import { MathView } from './components/MathView';
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   data: 'Data',
   deterministic: 'Deterministic',
+  derived_quantity: 'Derived quantity',
   hyperparameter: 'Hyperparameter',
   latent: 'Latent',
   likelihood: 'Likelihood',
+  model_block: 'Model block',
   parameter: 'Parameter',
+  prior_recipe: 'Prior recipe',
+  regression_term: 'Regression term',
 };
 
-const PALETTE_ITEMS = [
-  { kind: 'data', label: 'Data', note: 'Observed values' },
-  { kind: 'parameter', label: 'Parameter', note: 'Unknown quantity' },
-  { kind: 'latent', label: 'Latent', note: 'Unobserved value' },
-  { kind: 'deterministic', label: 'Deterministic', note: 'Derived expression' },
-  { kind: 'likelihood', label: 'Likelihood', note: 'Observed outcome' },
-  { kind: 'hyperparameter', label: 'Hyperparameter', note: 'Prior control' },
-] as const;
+const PALETTE_GROUPS: Array<{
+  title: string;
+  items: Array<{ kind: BayesNodeData['kind']; label: string; note: string }>;
+}> = [
+  {
+    title: 'Variables',
+    items: [
+      { kind: 'data', label: 'Data', note: 'Observed values' },
+      { kind: 'parameter', label: 'Parameter', note: 'Unknown quantity' },
+      { kind: 'latent', label: 'Latent', note: 'Unobserved value' },
+      { kind: 'deterministic', label: 'Deterministic', note: 'Derived expression' },
+      { kind: 'likelihood', label: 'Likelihood', note: 'Observed outcome' },
+      { kind: 'hyperparameter', label: 'Hyperparameter', note: 'Prior control' },
+    ],
+  },
+  {
+    title: 'Patterns',
+    items: [
+      { kind: 'prior_recipe', label: 'Prior recipe', note: 'Prior template' },
+      { kind: 'regression_term', label: 'Regression term', note: 'Additive term' },
+      { kind: 'model_block', label: 'Model block', note: 'Opaque structure' },
+    ],
+  },
+  {
+    title: 'Outputs',
+    items: [
+      { kind: 'derived_quantity', label: 'Derived quantity', note: 'Target value' },
+    ],
+  },
+];
 
 const STORAGE_KEY = 'bayes-canvas:model';
 const PROMPT_TARGETS: PromptTarget[] = ['generic', 'pymc', 'numpyro', 'stan', 'review'];
-const VALIDATION_LEVELS: ValidationLevel[] = ['linted', 'expanded', 'structured', 'opaque'];
+const CONSTRAINT_OPTIONS: Array<{ kind: Exclude<Constraint['kind'], 'sum_to_zero' | 'custom'>; label: string; note: string }> = [
+  { kind: 'positive', label: '正の値', note: '> 0' },
+  { kind: 'unit_interval', label: '0から1', note: '[0, 1]' },
+  { kind: 'simplex', label: '合計1', note: 'simplex' },
+  { kind: 'ordered', label: '順序あり', note: 'ordered' },
+  { kind: 'correlation_matrix', label: '相関行列', note: 'corr' },
+];
+
+const OBSERVATION_OPTIONS = [
+  { value: '', label: '通常の観測' },
+  { value: 'exact', label: 'そのまま観測' },
+  { value: 'missing', label: '欠測を潜在変数で補う' },
+  { value: 'measurement_error', label: '測定誤差あり' },
+  { value: 'censored', label: '打ち切りあり' },
+  { value: 'truncated', label: '切断あり' },
+  { value: 'rounded', label: '丸められた値' },
+] as const;
 
 const GREEK_UNICODE: Record<string, string> = {
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ',
@@ -299,6 +340,52 @@ function createNodeData(kind: BayesNodeData['kind'], count: number): BayesNodeDa
     return { kind, name: baseName, distribution: createDefaultDistribution('normal') };
   }
 
+  if (kind === 'prior_recipe') {
+    return {
+      kind,
+      name: 'beta_horseshoe',
+      expression: 'beta[k] ~ Horseshoe(scale = tau0)',
+      notes: [
+        'beta[k] ~ Normal(0, tau * lambda[k])',
+        'lambda[k] ~ HalfCauchy(1)',
+        'tau ~ HalfCauchy(tau0)',
+      ].join('\n'),
+      validationLevel: 'expanded',
+    };
+  }
+
+  if (kind === 'regression_term') {
+    return {
+      kind,
+      name: `${baseName}[i]`,
+      shape: ['N'],
+      plate: 'obs',
+      expression: 'beta * x[i]',
+      notes: 'Add this term into a deterministic predictor.',
+    };
+  }
+
+  if (kind === 'model_block') {
+    return {
+      kind,
+      name: 'f_gp[i]',
+      shape: ['N'],
+      plate: 'obs',
+      expression: 'GP(time[i]; kernel=RBF, lengthscale=ell, amplitude=rho)',
+      notes: 'Structured block. Keep inputs, outputs, and implementation detail explicit for handoff.',
+      validationLevel: 'structured',
+    };
+  }
+
+  if (kind === 'derived_quantity') {
+    return {
+      kind,
+      name: 'treatment_effect',
+      expression: 'beta',
+      notes: 'Quantity to report or inspect after inference.',
+    };
+  }
+
   return { kind, name: baseName, distribution: createDefaultDistribution('normal') };
 }
 
@@ -311,28 +398,37 @@ function parseList(value: string): string[] | undefined {
   return items.length ? items : undefined;
 }
 
-function parseConstraints(value: string): Constraint[] | undefined {
-  const constraints = parseList(value)?.map((item) => {
-    if (item === 'positive') return { kind: 'positive' } satisfies Constraint;
-    if (item === 'unit_interval') return { kind: 'unit_interval' } satisfies Constraint;
-    if (item === 'simplex') return { kind: 'simplex' } satisfies Constraint;
-    if (item === 'ordered') return { kind: 'ordered' } satisfies Constraint;
-    if (item === 'correlation_matrix') return { kind: 'correlation_matrix' } satisfies Constraint;
-    if (item.startsWith('sum_to_zero:')) {
-      return { kind: 'sum_to_zero', overPlateId: item.slice('sum_to_zero:'.length) } satisfies Constraint;
-    }
-    return { kind: 'custom', description: item } satisfies Constraint;
-  });
-
-  return constraints?.length ? constraints : undefined;
+function hasConstraint(constraints: Constraint[] | undefined, kind: Constraint['kind']): boolean {
+  return Boolean(constraints?.some((constraint) => constraint.kind === kind));
 }
 
-function formatConstraintsForInput(constraints?: Constraint[]): string {
-  return (constraints ?? []).map((constraint) => {
-    if (constraint.kind === 'sum_to_zero') return constraint.overPlateId ? `sum_to_zero:${constraint.overPlateId}` : 'sum_to_zero';
-    if (constraint.kind === 'custom') return constraint.description;
-    return constraint.kind;
-  }).join(', ');
+function toggleSimpleConstraint(
+  constraints: Constraint[] | undefined,
+  kind: Exclude<Constraint['kind'], 'sum_to_zero' | 'custom'>,
+  enabled: boolean,
+): Constraint[] | undefined {
+  const current = constraints ?? [];
+  const next = enabled
+    ? [...current.filter((constraint) => constraint.kind !== kind), { kind } satisfies Constraint]
+    : current.filter((constraint) => constraint.kind !== kind);
+
+  return next.length ? next : undefined;
+}
+
+function updateSumToZeroConstraint(constraints: Constraint[] | undefined, overPlateId: string): Constraint[] | undefined {
+  const current = constraints ?? [];
+  const withoutSumToZero = current.filter((constraint) => constraint.kind !== 'sum_to_zero');
+  const trimmedPlate = overPlateId.trim();
+  const next = trimmedPlate
+    ? [...withoutSumToZero, { kind: 'sum_to_zero', overPlateId: trimmedPlate } satisfies Constraint]
+    : withoutSumToZero;
+
+  return next.length ? next : undefined;
+}
+
+function getSumToZeroPlate(constraints?: Constraint[]): string {
+  const constraint = constraints?.find((item) => item.kind === 'sum_to_zero');
+  return constraint?.kind === 'sum_to_zero' ? constraint.overPlateId ?? '' : '';
 }
 
 function parseHints(value: string): ModelHint[] | undefined {
@@ -378,8 +474,8 @@ const nodeTypes = {
         <Handle className="node-handle" type="target" position={Position.Top} />
         <div className="node-heading">
           <span className="node-kind">{NODE_KIND_LABELS[data.kind]}</span>
-          {data.observed ? <span className="node-chip">Observed</span> : null}
-          {diagnosticCount ? <span className="node-chip node-chip-warning">{diagnosticCount} issue</span> : null}
+          {data.observed ? <span className="node-chip">観測</span> : null}
+          {diagnosticCount ? <span className="node-chip node-chip-warning">{diagnosticCount}件</span> : null}
         </div>
         <div className="node-name">{data.name}</div>
         {distributionText ? <div className="node-formula">{distributionText}</div> : null}
@@ -389,9 +485,8 @@ const nodeTypes = {
           </div>
         ) : null}
         <div className="node-meta">
-          {data.shape?.length ? <span>{data.shape.join(' x ')}</span> : <span>scalar</span>}
-          {data.plate ? <span>plate: {data.plate}</span> : null}
-          {data.validationLevel ? <span>{data.validationLevel}</span> : null}
+          {data.shape?.length ? <span>{data.shape.join(' x ')}</span> : <span>スカラー</span>}
+          {data.plate ? <span>繰り返し: {data.plate}</span> : null}
         </div>
         <Handle className="node-handle" type="source" position={Position.Bottom} />
       </div>
@@ -424,7 +519,29 @@ export function App() {
     [edges, selectedEdgeId],
   );
   const selectedData = selectedNode?.data;
-  const selectedLabel = selectedNode?.id ?? selectedEdge?.id ?? 'none';
+  const selectedKindLabel = selectedData ? NODE_KIND_LABELS[selectedData.kind] : selectedEdge ? 'リンク' : '未選択';
+  const showsDistributionEditor = Boolean(
+    selectedData && ['parameter', 'hyperparameter', 'latent', 'likelihood'].includes(selectedData.kind),
+  );
+  const showsExpressionEditor = Boolean(
+    selectedData && [
+      'deterministic',
+      'latent',
+      'prior_recipe',
+      'regression_term',
+      'model_block',
+      'derived_quantity',
+    ].includes(selectedData.kind),
+  );
+  const showsObservationEditor = Boolean(
+    selectedData && selectedData.observed && (selectedData.kind === 'data' || selectedData.kind === 'likelihood'),
+  );
+  const showsObservedEditor = Boolean(
+    selectedData && ['data', 'likelihood'].includes(selectedData.kind),
+  );
+  const showsConstraintsEditor = Boolean(
+    selectedData && ['parameter', 'hyperparameter', 'latent'].includes(selectedData.kind),
+  );
   const plateCount = useMemo(() => new Set(nodes.map((node) => node.data.plate).filter(Boolean)).size, [nodes]);
   const [savedModels, setSavedModels] = useState<SavedModelEntry[]>(loadSavedModelsList);
   const diagnosticCounts = useMemo(() => {
@@ -583,7 +700,7 @@ export function App() {
   }, [setEdges, setNodes]);
 
   const handleSave = useCallback(() => {
-    const name = window.prompt('Snapshot name:', `Model ${new Date().toLocaleString()}`);
+    const name = window.prompt('保存名:', `モデル ${new Date().toLocaleString()}`);
     if (!name) return;
     setSavedModels(saveModelSnapshot(name, nodes, edges));
   }, [nodes, edges]);
@@ -622,7 +739,7 @@ export function App() {
         setSelectedNodeId(null);
         setSelectedEdgeId(null);
       } catch {
-        // invalid file
+        window.alert('モデルJSONを読み込めませんでした。ファイル形式を確認してください。');
       }
     };
     input.click();
@@ -633,24 +750,24 @@ export function App() {
       <header className="topbar">
         <div className="brand-block">
           <h1>Bayes Canvas</h1>
-          <p>Visual model sketch, strict IR, AI-ready implementation handoff.</p>
+          <p>ベイズモデルを図で組み、実装へ渡すためのキャンバス。</p>
         </div>
-        <div className="model-summary" aria-label="Model summary">
+        <div className="model-summary" aria-label="モデル概要">
           <div>
             <span className="summary-value">{nodes.length}</span>
-            <span className="summary-label">nodes</span>
+            <span className="summary-label">ノード</span>
           </div>
           <div>
             <span className="summary-value">{edges.length}</span>
-            <span className="summary-label">links</span>
+            <span className="summary-label">リンク</span>
           </div>
           <div>
             <span className="summary-value">{plateCount}</span>
-            <span className="summary-label">plates</span>
+            <span className="summary-label">プレート</span>
           </div>
           <div>
             <span className="summary-value">{modelIr.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length}</span>
-            <span className="summary-label">checks</span>
+            <span className="summary-label">確認</span>
           </div>
         </div>
       </header>
@@ -658,26 +775,33 @@ export function App() {
       <section className="workspace">
         <aside className="panel left-panel">
           <div className="panel-title">
-            <h2>Palette</h2>
-            <span>Model blocks</span>
+            <h2>追加</h2>
+            <span>モデル要素</span>
           </div>
-          <div className="palette-list">
-            {PALETTE_ITEMS.map((item) => (
-              <button
-                className={`palette-item palette-${item.kind}`}
-                key={item.kind}
-                onClick={() => addNodeFromPalette(item.kind)}
-                type="button"
-              >
-                <span>{item.label}</span>
-                <small>{item.note}</small>
-              </button>
+          <div className="palette-groups">
+            {PALETTE_GROUPS.map((group) => (
+              <div className="palette-group" key={group.title}>
+                <h3>{group.title}</h3>
+                <div className="palette-list">
+                  {group.items.map((item) => (
+                    <button
+                      className={`palette-item palette-${item.kind}`}
+                      key={item.kind}
+                      onClick={() => addNodeFromPalette(item.kind)}
+                      type="button"
+                    >
+                      <span>{item.label}</span>
+                      <small>{item.note}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
           {savedModels.length > 0 ? (
             <div className="snapshots-panel">
               <div className="panel-title compact">
-                <h2>Snapshots</h2>
+                <h2>保存済み</h2>
                 <span>{savedModels.length}</span>
               </div>
               <div className="snapshots-list">
@@ -691,7 +815,7 @@ export function App() {
                     </div>
                     <div className="snapshot-actions">
                       <button type="button" onClick={() => handleLoad(model.id)}>
-                        Load
+                        読込
                       </button>
                       <button type="button" onClick={() => handleDeleteSnapshot(model.id)}>
                         ×
@@ -704,23 +828,23 @@ export function App() {
           ) : null}
           <div className="editor-panel">
             <div className="panel-title compact">
-              <h2>Selection</h2>
-              <span>{selectedLabel}</span>
+              <h2>編集</h2>
+              <span>{selectedKindLabel}</span>
             </div>
             {selectedData ? (
               <div className="node-editor">
                 <button className="danger-button compact-danger" onClick={deleteSelectedItem} type="button">
-                  Delete selected
+                  選択中を削除
                 </button>
                 <label>
-                  Name
+                  名前
                   <input
                     value={selectedData.name}
                     onChange={(event) => updateSelectedNodeData({ name: event.target.value })}
                   />
                 </label>
                 <label>
-                  Shape
+                  形
                   <input
                     placeholder="N, J"
                     value={selectedData.shape?.join(', ') ?? ''}
@@ -728,81 +852,109 @@ export function App() {
                   />
                 </label>
                 <label>
-                  Plate
+                  繰り返し
                   <input
                     placeholder="obs"
                     value={selectedData.plate ?? ''}
                     onChange={(event) => updateSelectedNodeData({ plate: event.target.value || undefined })}
                   />
                 </label>
+                {showsConstraintsEditor ? (
+                  <div className="field-group">
+                    <div className="field-group-title">制約</div>
+                    <div className="option-grid">
+                      {CONSTRAINT_OPTIONS.map((option) => (
+                        <label className="choice-card" key={option.kind}>
+                          <input
+                            checked={hasConstraint(selectedData.constraints, option.kind)}
+                            onChange={(event) =>
+                              updateSelectedNodeData({
+                                constraints: toggleSimpleConstraint(
+                                  selectedData.constraints,
+                                  option.kind,
+                                  event.target.checked,
+                                ),
+                              })
+                            }
+                            type="checkbox"
+                          />
+                          <span>{option.label}</span>
+                          <small>{option.note}</small>
+                        </label>
+                      ))}
+                    </div>
+                    <label>
+                      和を0にする単位
+                      <input
+                        placeholder="group"
+                        value={getSumToZeroPlate(selectedData.constraints)}
+                        onChange={(event) =>
+                          updateSelectedNodeData({
+                            constraints: updateSumToZeroConstraint(selectedData.constraints, event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                ) : null}
                 <label>
-                  Constraints
+                  実装メモ
                   <input
-                    placeholder="positive, ordered, sum_to_zero:group"
-                    value={formatConstraintsForInput(selectedData.constraints)}
-                    onChange={(event) => updateSelectedNodeData({ constraints: parseConstraints(event.target.value) })}
-                  />
-                </label>
-                <label>
-                  Hints
-                  <input
-                    placeholder="non_centered, sparse GP, warning:check identifiability"
+                    placeholder="non_centered, sparse GP, warning:識別性を確認"
                     value={formatHintsForInput(selectedData.hints)}
                     onChange={(event) => updateSelectedNodeData({ hints: parseHints(event.target.value) })}
                   />
                 </label>
-                <label>
-                  Observation
-                  <select
-                    value={selectedData.observationProcess?.kind ?? ''}
-                    onChange={(event) => updateSelectedNodeData({ observationProcess: createObservationProcess(event.target.value) })}
-                  >
-                    <option value="">Default</option>
-                    <option value="exact">Exact</option>
-                    <option value="missing">Missing / latent imputation</option>
-                    <option value="measurement_error">Measurement error</option>
-                    <option value="censored">Censored</option>
-                    <option value="truncated">Truncated</option>
-                    <option value="rounded">Rounded</option>
-                  </select>
-                </label>
-                <label>
-                  Validation
-                  <select
-                    value={selectedData.validationLevel ?? 'linted'}
-                    onChange={(event) => updateSelectedNodeData({ validationLevel: event.target.value as ValidationLevel })}
-                  >
-                    {VALIDATION_LEVELS.map((level) => (
-                      <option key={level} value={level}>
-                        {level}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="checkbox-row">
-                  <input
-                    checked={Boolean(selectedData.observed)}
-                    onChange={(event) => updateSelectedNodeData({ observed: event.target.checked || undefined })}
-                    type="checkbox"
+                {showsObservedEditor ? (
+                  <label className="checkbox-row">
+                    <input
+                      checked={Boolean(selectedData.observed)}
+                      onChange={(event) =>
+                        updateSelectedNodeData({
+                          observed: event.target.checked || undefined,
+                          observationProcess: event.target.checked ? selectedData.observationProcess : undefined,
+                        })
+                      }
+                      type="checkbox"
+                    />
+                    観測済み
+                  </label>
+                ) : null}
+                {showsObservationEditor ? (
+                  <label>
+                    観測の扱い
+                    <select
+                      value={selectedData.observationProcess?.kind ?? ''}
+                      onChange={(event) => updateSelectedNodeData({ observationProcess: createObservationProcess(event.target.value) })}
+                    >
+                      {OBSERVATION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {showsDistributionEditor ? (
+                  <DistributionEditor
+                    distribution={selectedData.distribution}
+                    onChange={(distribution) => updateSelectedNodeData({ distribution })}
                   />
-                  Observed
-                </label>
-                <DistributionEditor
-                  distribution={selectedData.distribution}
-                  onChange={(distribution) => updateSelectedNodeData({ distribution })}
-                />
+                ) : null}
+                {showsExpressionEditor ? (
+                  <label>
+                    式
+                    <textarea
+                      placeholder="alpha + beta * x"
+                      value={selectedData.expression ?? ''}
+                      onChange={(event) => updateSelectedNodeData({ expression: event.target.value || undefined })}
+                    />
+                  </label>
+                ) : null}
                 <label>
-                  Expression
+                  ノート
                   <textarea
-                    placeholder="alpha + beta * x"
-                    value={selectedData.expression ?? ''}
-                    onChange={(event) => updateSelectedNodeData({ expression: event.target.value || undefined })}
-                  />
-                </label>
-                <label>
-                  Notes
-                  <textarea
-                    placeholder="Modeling assumption, opaque block contract, or handoff note"
+                    placeholder="仮定、実装へ渡す注意、あとで確認すること"
                     value={selectedData.notes ?? ''}
                     onChange={(event) => updateSelectedNodeData({ notes: event.target.value || undefined })}
                   />
@@ -822,10 +974,10 @@ export function App() {
             ) : selectedEdge ? (
               <div className="node-editor">
                 <button className="danger-button compact-danger" onClick={deleteSelectedItem} type="button">
-                  Delete selected
+                  選択中を削除
                 </button>
                 <label>
-                  Role
+                  関係
                   <input
                     placeholder="dependency"
                     value={String(selectedEdge.data?.role ?? 'dependency')}
@@ -833,11 +985,11 @@ export function App() {
                   />
                 </label>
                 <p className="empty-note">
-                  {selectedEdge.source} to {selectedEdge.target}
+                  {selectedEdge.source} から {selectedEdge.target}
                 </p>
               </div>
             ) : (
-              <p className="empty-note">Select a node or link to edit or delete it.</p>
+              <p className="empty-note">ノードかリンクを選ぶと編集できます。</p>
             )}
           </div>
         </aside>
@@ -845,27 +997,27 @@ export function App() {
         <section className="canvas">
           <div className="canvas-toolbar">
             <div>
-              <strong>Hierarchical regression</strong>
-              <span>editable canvas</span>
+              <strong>階層回帰</strong>
+              <span>編集キャンバス</span>
             </div>
             <div className="toolbar-actions">
               <button type="button" onClick={handleSave}>
-                Save
+                保存
               </button>
               <button type="button" onClick={handleExport}>
-                Export
+                書き出し
               </button>
               <button type="button" onClick={handleImport}>
-                Import
+                読み込み
               </button>
               <button type="button" onClick={() => copyText(JSON.stringify(modelIr, null, 2))}>
-                Copy IR
+                IRコピー
               </button>
               <button disabled={!selectedNode && !selectedEdge} type="button" onClick={deleteSelectedItem}>
-                Delete
+                削除
               </button>
               <button type="button" onClick={resetSample}>
-                Reset
+                初期化
               </button>
             </div>
           </div>
@@ -890,10 +1042,10 @@ export function App() {
 
         <aside className="panel right-panel">
           <div className="panel-title">
-            <h2>Handoff</h2>
-            <span>Generated artifacts</span>
+            <h2>受け渡し</h2>
+            <span>生成される内容</span>
           </div>
-          <div className="output-tabs" role="tablist" aria-label="Output">
+          <div className="output-tabs" role="tablist" aria-label="出力">
             <button
               aria-selected={activeOutput === 'ir'}
               className={activeOutput === 'ir' ? 'is-active' : ''}
@@ -901,7 +1053,7 @@ export function App() {
               role="tab"
               type="button"
             >
-              Model IR
+              IR
             </button>
             <button
               aria-selected={activeOutput === 'prompt'}
@@ -910,7 +1062,7 @@ export function App() {
               role="tab"
               type="button"
             >
-              AI Prompt
+              AIメモ
             </button>
             <button
               aria-selected={activeOutput === 'math'}
@@ -919,7 +1071,7 @@ export function App() {
               role="tab"
               type="button"
             >
-              Math
+              数式
             </button>
           </div>
           {activeOutput === 'math' ? (
@@ -939,14 +1091,14 @@ export function App() {
           ) : (
             <>
               <div className="output-actions">
-                <span>{activeOutput === 'ir' ? 'JSON contract' : 'Implementation brief'}</span>
+                <span>{activeOutput === 'ir' ? 'JSON契約' : '実装用メモ'}</span>
                 <button type="button" onClick={() => copyText(outputText)}>
-                  Copy
+                  コピー
                 </button>
               </div>
               {activeOutput === 'prompt' ? (
                 <label className="prompt-target">
-                  Prompt target
+                  出力先
                   <select
                     value={promptTarget}
                     onChange={(event) => setPromptTarget(event.target.value as PromptTarget)}
