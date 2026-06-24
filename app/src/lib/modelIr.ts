@@ -15,8 +15,6 @@ export type BayesNodeKind =
   | 'latent'
   | 'deterministic'
   | 'likelihood'
-  | 'prior_recipe'
-  | 'regression_term'
   | 'model_block'
   | 'derived_quantity';
 
@@ -661,50 +659,25 @@ function buildIndexMappings(nodes: ModelIr['nodes'], plates: ModelIr['plates']):
 
 function buildPriorRecipes(nodes: ModelIr['nodes']): PriorRecipe[] {
   return nodes
-    .filter((node) => node.kind === 'prior_recipe')
+    .filter((node) => node.distribution?.id === 'horseshoe' || node.distribution?.name === 'Horseshoe')
     .map((node) => {
       const parsed = parseSymbolName(node.name);
-      const expression = node.expression ?? `${parsed.baseSymbol} ~ prior_recipe`;
-      const targetSymbol = analyzeLooseSymbols(expression)[0] ?? parsed.baseSymbol;
-      const expanded = (node.notes ?? '')
-        .split('\n')
-        .map((line) => line.trim().replace(/^[-*]\s*/, ''))
-        .filter((line) => line.includes('~') || line.includes('='));
+      const scale = node.distribution?.args.scale ?? 'tau0';
 
       return {
-        id: `${parsed.baseSymbol}_recipe`,
-        name: node.name,
-        targetSymbol,
-        collapsed: expression,
-        expanded,
-        validationLevel: node.validationLevel ?? 'structured',
+        id: `${parsed.baseSymbol}_horseshoe`,
+        name: `${parsed.baseSymbol} Horseshoe prior`,
+        targetSymbol: parsed.baseSymbol,
+        collapsed: `${node.name} ~ Horseshoe(scale = ${scale})`,
+        expanded: [],
+        validationLevel: 'structured',
         notes: node.notes,
       } satisfies PriorRecipe;
     });
 }
 
 function buildRegressionTerms(nodes: ModelIr['nodes']): RegressionTerm[] {
-  const deterministicNodes = nodes.filter((node) => node.kind === 'regression_term' && node.expression);
-
-  return deterministicNodes.map((node) => {
-    const parsed = parseSymbolName(node.name);
-    const expression = node.expression ?? '';
-    const inputSymbols = [...new Set(expression.match(/[a-zA-Z][a-zA-Z0-9_]*/g) ?? [])]
-      .filter((symbol) => symbol !== parsed.baseSymbol && !['exp', 'log', 'logit', 'inv_logit', 'softmax', 'dot'].includes(symbol))
-      .filter((symbol) => !['i', 'j', 'k', 't'].includes(symbol));
-
-    return {
-      id: `${parsed.baseSymbol}_additive_terms`,
-      kind: 'linear',
-      label: `${parsed.baseSymbol} additive predictor`,
-      inputSymbols,
-      outputSymbol: parsed.baseSymbol,
-      outputPlateId: node.plate,
-      formulaShort: `${node.name} = ${expression}`,
-      formulaExpanded: [expression],
-      validationLevel: 'expanded',
-    };
-  });
+  return [];
 }
 
 function buildModelBlocks(nodes: ModelIr['nodes']): ModelBlock[] {
@@ -755,7 +728,7 @@ function lintModel(model: ModelIr): ModelDiagnostic[] {
   );
 
   for (const node of model.nodes) {
-    if (node.expression && ['deterministic', 'regression_term'].includes(node.kind)) {
+    if (node.expression && node.kind === 'deterministic') {
       diagnostics.push(...lintExpression(node.expression, node.id, model, nodeById, nodeIdBySymbol));
       diagnostics.push(...lintEdgeConsistency(node, model, nodeIdBySymbol));
     }

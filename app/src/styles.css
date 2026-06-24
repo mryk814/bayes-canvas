@@ -242,6 +242,12 @@ select:focus-visible,
   display: none;
 }
 
+.palette-preset {
+  --node-color: var(--color-accent);
+  --node-bg: var(--color-accent-subtle-bg);
+  --node-border: var(--color-accent-subtle-bd);
+}
+
 .snapshots-panel {
   margin-top: var(--space-4);
   padding-top: var(--space-3);
@@ -509,20 +515,6 @@ button:disabled {
   --node-color: var(--color-chart-4);
   --node-bg: var(--color-warning-bg);
   --node-border: var(--color-warning-bd);
-}
-
-.palette-prior_recipe,
-.bayes-node-prior_recipe {
-  --node-color: var(--color-chart-4);
-  --node-bg: var(--color-warning-bg);
-  --node-border: var(--color-warning-bd);
-}
-
-.palette-regression_term,
-.bayes-node-regression_term {
-  --node-color: var(--color-chart-5);
-  --node-bg: var(--color-status-review-bg);
-  --node-border: var(--color-status-review-bd);
 }
 
 .palette-model_block,

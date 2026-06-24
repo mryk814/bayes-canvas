@@ -50,37 +50,41 @@ const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   likelihood: 'Likelihood',
   model_block: 'Model block',
   parameter: 'Parameter',
-  prior_recipe: 'Prior recipe',
-  regression_term: 'Regression term',
 };
+
+type PaletteItem =
+  | { type: 'node'; kind: BayesNodeData['kind']; label: string; note: string }
+  | { type: 'preset'; preset: 'horseshoe_prior' | 'linear_term' | 'group_effect' | 'interaction_term'; label: string; note: string };
 
 const PALETTE_GROUPS: Array<{
   title: string;
-  items: Array<{ kind: BayesNodeData['kind']; label: string; note: string }>;
+  items: PaletteItem[];
 }> = [
   {
     title: 'Variables',
     items: [
-      { kind: 'data', label: 'Data', note: 'Observed values' },
-      { kind: 'parameter', label: 'Parameter', note: 'Unknown quantity' },
-      { kind: 'latent', label: 'Latent', note: 'Unobserved value' },
-      { kind: 'deterministic', label: 'Deterministic', note: 'Derived expression' },
-      { kind: 'likelihood', label: 'Likelihood', note: 'Observed outcome' },
-      { kind: 'hyperparameter', label: 'Hyperparameter', note: 'Prior control' },
+      { type: 'node', kind: 'data', label: 'Data', note: 'Observed values' },
+      { type: 'node', kind: 'parameter', label: 'Parameter', note: 'Unknown quantity' },
+      { type: 'node', kind: 'latent', label: 'Latent', note: 'Unobserved value' },
+      { type: 'node', kind: 'deterministic', label: 'Deterministic', note: 'Derived expression' },
+      { type: 'node', kind: 'likelihood', label: 'Likelihood', note: 'Observed outcome' },
+      { type: 'node', kind: 'hyperparameter', label: 'Hyperparameter', note: 'Prior control' },
     ],
   },
   {
     title: 'Patterns',
     items: [
-      { kind: 'prior_recipe', label: 'Prior recipe', note: 'Prior template' },
-      { kind: 'regression_term', label: 'Regression term', note: 'Additive term' },
-      { kind: 'model_block', label: 'Model block', note: 'Opaque structure' },
+      { type: 'preset', preset: 'horseshoe_prior', label: 'Horseshoe prior', note: 'Apply to parameter' },
+      { type: 'preset', preset: 'linear_term', label: 'Linear term', note: 'Insert into predictor' },
+      { type: 'preset', preset: 'group_effect', label: 'Group effect', note: 'Insert varying effect' },
+      { type: 'preset', preset: 'interaction_term', label: 'Interaction', note: 'Insert product term' },
+      { type: 'node', kind: 'model_block', label: 'Model block', note: 'Opaque structure' },
     ],
   },
   {
     title: 'Outputs',
     items: [
-      { kind: 'derived_quantity', label: 'Derived quantity', note: 'Target value' },
+      { type: 'node', kind: 'derived_quantity', label: 'Derived quantity', note: 'Target value' },
     ],
   },
 ];
@@ -193,6 +197,41 @@ const initialCanvasEdges = initialEdges.map((edge) => ({
   markerEnd: { type: MarkerType.ArrowClosed },
 }));
 
+function migrateLegacyNodeData(data: BayesNodeData): BayesNodeData {
+  const kind = String(data.kind);
+
+  if (kind === 'prior_recipe') {
+    return {
+      ...data,
+      kind: 'parameter',
+      name: data.name === 'beta_horseshoe' ? 'beta' : data.name,
+      expression: undefined,
+      distribution: { id: 'horseshoe', name: 'Horseshoe', args: { scale: 'tau0' } },
+      notes: data.notes || 'Migrated from Prior recipe. Connect or define tau0 when the scale should be explicit.',
+    };
+  }
+
+  if (kind === 'regression_term') {
+    return {
+      ...data,
+      kind: 'deterministic',
+      name: data.name,
+      expression: data.expression || 'beta * x[i]',
+      notes: data.notes || 'Migrated from Regression term preset.',
+    };
+  }
+
+  return data;
+}
+
+function prepareCanvasNode(node: BayesCanvasNode): BayesCanvasNode {
+  return {
+    ...node,
+    type: 'bayesNode',
+    data: migrateLegacyNodeData(node.data),
+  };
+}
+
 function loadInitialCanvas(): CanvasState {
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -206,7 +245,7 @@ function loadInitialCanvas(): CanvasState {
     }
 
     return {
-      nodes: (parsed.nodes as BayesCanvasNode[]).map((node) => ({ ...node, type: 'bayesNode' })),
+      nodes: (parsed.nodes as BayesCanvasNode[]).map(prepareCanvasNode),
       edges: parsed.edges.map((edge) => ({
         ...edge,
         type: 'smoothstep',
@@ -259,7 +298,7 @@ function loadModelSnapshot(id: string): CanvasState | null {
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
     return {
-      nodes: (parsed.nodes as BayesCanvasNode[]).map((node) => ({ ...node, type: 'bayesNode' })),
+      nodes: (parsed.nodes as BayesCanvasNode[]).map(prepareCanvasNode),
       edges: parsed.edges.map((edge: Edge) => ({
         ...edge,
         type: 'smoothstep',
@@ -300,7 +339,7 @@ function parseCanvasFile(file: File): Promise<CanvasState> {
           return;
         }
         resolve({
-          nodes: (parsed.nodes as BayesCanvasNode[]).map((node) => ({ ...node, type: 'bayesNode' })),
+          nodes: (parsed.nodes as BayesCanvasNode[]).map(prepareCanvasNode),
           edges: parsed.edges.map((edge: Edge) => ({
             ...edge,
             type: 'smoothstep',
@@ -338,31 +377,6 @@ function createNodeData(kind: BayesNodeData['kind'], count: number): BayesNodeDa
 
   if (kind === 'hyperparameter') {
     return { kind, name: baseName, distribution: createDefaultDistribution('normal') };
-  }
-
-  if (kind === 'prior_recipe') {
-    return {
-      kind,
-      name: 'beta_horseshoe',
-      expression: 'beta[k] ~ Horseshoe(scale = tau0)',
-      notes: [
-        'beta[k] ~ Normal(0, tau * lambda[k])',
-        'lambda[k] ~ HalfCauchy(1)',
-        'tau ~ HalfCauchy(tau0)',
-      ].join('\n'),
-      validationLevel: 'expanded',
-    };
-  }
-
-  if (kind === 'regression_term') {
-    return {
-      kind,
-      name: `${baseName}[i]`,
-      shape: ['N'],
-      plate: 'obs',
-      expression: 'beta * x[i]',
-      notes: 'Add this term into a deterministic predictor.',
-    };
   }
 
   if (kind === 'model_block') {
@@ -431,6 +445,19 @@ function getSumToZeroPlate(constraints?: Constraint[]): string {
   return constraint?.kind === 'sum_to_zero' ? constraint.overPlateId ?? '' : '';
 }
 
+function appendTerm(expression: string | undefined, term: string): string {
+  const trimmedExpression = expression?.trim();
+  if (!trimmedExpression || trimmedExpression === 'replace_with_expression') {
+    return term;
+  }
+
+  if (trimmedExpression.includes(term)) {
+    return trimmedExpression;
+  }
+
+  return `${trimmedExpression} + ${term}`;
+}
+
 function parseHints(value: string): ModelHint[] | undefined {
   const hints = parseList(value)?.map((item) => {
     if (['centered', 'non_centered', 'unspecified'].includes(item)) {
@@ -474,7 +501,7 @@ const nodeTypes = {
         <Handle className="node-handle" type="target" position={Position.Top} />
         <div className="node-heading">
           <span className="node-kind">{NODE_KIND_LABELS[data.kind]}</span>
-          {data.observed ? <span className="node-chip">観測</span> : null}
+          {data.observed ? <span className="node-chip">Observed</span> : null}
           {diagnosticCount ? <span className="node-chip node-chip-warning">{diagnosticCount}件</span> : null}
         </div>
         <div className="node-name">{data.name}</div>
@@ -485,8 +512,8 @@ const nodeTypes = {
           </div>
         ) : null}
         <div className="node-meta">
-          {data.shape?.length ? <span>{data.shape.join(' x ')}</span> : <span>スカラー</span>}
-          {data.plate ? <span>繰り返し: {data.plate}</span> : null}
+          {data.shape?.length ? <span>{data.shape.join(' x ')}</span> : <span>scalar</span>}
+          {data.plate ? <span>plate: {data.plate}</span> : null}
         </div>
         <Handle className="node-handle" type="source" position={Position.Bottom} />
       </div>
@@ -527,8 +554,6 @@ export function App() {
     selectedData && [
       'deterministic',
       'latent',
-      'prior_recipe',
-      'regression_term',
       'model_block',
       'derived_quantity',
     ].includes(selectedData.kind),
@@ -675,6 +700,108 @@ export function App() {
     [selectedEdgeId, setEdges],
   );
 
+  const applyHorseshoePrior = useCallback(() => {
+    const horseshoeDistribution = {
+      id: 'horseshoe',
+      name: 'Horseshoe',
+      args: { scale: 'tau0' },
+    };
+
+    if (selectedNodeId && selectedData && ['parameter', 'latent'].includes(selectedData.kind)) {
+      updateSelectedNodeData({
+        distribution: horseshoeDistribution,
+        notes: selectedData.notes ?? 'Horseshoe prior. Connect or define tau0 when the scale should be explicit.',
+      });
+      return;
+    }
+
+    const count = nodes.filter((node) => node.data.kind === 'parameter').length + 1;
+    const id = `parameter_${Date.now()}`;
+    const column = (nodes.length % 4) * 210 + 120;
+    const row = Math.floor(nodes.length / 4) * 150 + 80;
+
+    setNodes((currentNodes) => [
+      ...currentNodes.map((node) => ({ ...node, selected: false })),
+      {
+        id,
+        type: 'bayesNode',
+        position: { x: column, y: row },
+        selected: true,
+        data: {
+          kind: 'parameter',
+          name: count === 1 ? 'beta' : `beta_${count}`,
+          distribution: horseshoeDistribution,
+          notes: 'Horseshoe prior. Connect or define tau0 when the scale should be explicit.',
+        },
+      },
+    ]);
+    setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
+    setSelectedNodeId(id);
+    setSelectedEdgeId(null);
+  }, [nodes, selectedData, selectedNodeId, setEdges, setNodes, updateSelectedNodeData]);
+
+  const applyRegressionTermPreset = useCallback(
+    (term: string) => {
+      if (selectedNodeId && selectedData?.kind === 'deterministic') {
+        updateSelectedNodeData({ expression: appendTerm(selectedData.expression, term) });
+        return;
+      }
+
+      const count = nodes.filter((node) => node.data.kind === 'deterministic').length + 1;
+      const id = `deterministic_${Date.now()}`;
+      const column = (nodes.length % 4) * 210 + 120;
+      const row = Math.floor(nodes.length / 4) * 150 + 80;
+
+      setNodes((currentNodes) => [
+        ...currentNodes.map((node) => ({ ...node, selected: false })),
+        {
+          id,
+          type: 'bayesNode',
+          position: { x: column, y: row },
+          selected: true,
+          data: {
+            kind: 'deterministic',
+            name: `mu_${count}[i]`,
+            shape: ['N'],
+            plate: 'obs',
+            expression: term,
+          },
+        },
+      ]);
+      setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
+      setSelectedNodeId(id);
+      setSelectedEdgeId(null);
+    },
+    [nodes, selectedData, selectedNodeId, setEdges, setNodes, updateSelectedNodeData],
+  );
+
+  const applyPaletteItem = useCallback(
+    (item: PaletteItem) => {
+      if (item.type === 'node') {
+        addNodeFromPalette(item.kind);
+        return;
+      }
+
+      if (item.preset === 'horseshoe_prior') {
+        applyHorseshoePrior();
+        return;
+      }
+
+      if (item.preset === 'linear_term') {
+        applyRegressionTermPreset('beta * x[i]');
+        return;
+      }
+
+      if (item.preset === 'group_effect') {
+        applyRegressionTermPreset('alpha[group_id[i]]');
+        return;
+      }
+
+      applyRegressionTermPreset('beta_interaction * x1[i] * x2[i]');
+    },
+    [addNodeFromPalette, applyHorseshoePrior, applyRegressionTermPreset],
+  );
+
   const deleteSelectedItem = useCallback(() => {
     if (selectedNodeId) {
       setNodes((currentNodes) => currentNodes.filter((node) => node.id !== selectedNodeId));
@@ -785,9 +912,9 @@ export function App() {
                 <div className="palette-list">
                   {group.items.map((item) => (
                     <button
-                      className={`palette-item palette-${item.kind}`}
-                      key={item.kind}
-                      onClick={() => addNodeFromPalette(item.kind)}
+                      className={`palette-item ${item.type === 'node' ? `palette-${item.kind}` : 'palette-preset'}`}
+                      key={item.type === 'node' ? item.kind : item.preset}
+                      onClick={() => applyPaletteItem(item)}
                       type="button"
                     >
                       <span>{item.label}</span>
