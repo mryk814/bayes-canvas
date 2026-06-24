@@ -1,0 +1,94 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #172033;
+  background: #f4f6fb;
+}
+
+body {
+  margin: 0;
+}
+
+button {
+  border: 1px solid #d0d7e2;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: white;
+  cursor: pointer;
+  text-align: left;
+}
+
+.app-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  padding: 16px 20px;
+  background: white;
+  border-bottom: 1px solid #dfe5ef;
+}
+
+.topbar h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.topbar p {
+  margin: 0;
+  color: #566072;
+}
+
+.workspace {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 220px 1fr 420px;
+}
+
+.canvas {
+  min-height: 0;
+}
+
+.panel {
+  padding: 16px;
+  background: #fbfcff;
+  border-right: 1px solid #dfe5ef;
+  overflow: auto;
+}
+
+.right-panel {
+  border-right: 0;
+  border-left: 1px solid #dfe5ef;
+}
+
+.panel h2 {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+
+.left-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+pre {
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  background: #0e1726;
+  color: #e5ecff;
+  padding: 12px;
+  border-radius: 10px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.react-flow__node {
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  background: white;
+  padding: 10px 12px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}

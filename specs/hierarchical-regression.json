@@ -1,0 +1,34 @@
+{
+  "version": "0.1.0",
+  "model": {
+    "name": "hierarchical_regression",
+    "description": "Random-intercept Bayesian regression example."
+  },
+  "plates": [
+    { "id": "obs", "label": "observations", "index": "i", "size": "N" },
+    { "id": "group", "label": "groups", "index": "j", "size": "J" }
+  ],
+  "nodes": [
+    { "id": "x", "kind": "data", "name": "x", "shape": ["N"], "observed": true },
+    { "id": "y", "kind": "data", "name": "y", "shape": ["N"], "observed": true },
+    { "id": "group_id", "kind": "data", "name": "group_id", "shape": ["N"], "observed": true },
+    { "id": "alpha_bar", "kind": "hyperparameter", "name": "alpha_bar", "distribution": { "name": "Normal", "args": { "mu": "0", "sigma": "2" } } },
+    { "id": "tau_alpha", "kind": "hyperparameter", "name": "tau_alpha", "distribution": { "name": "HalfNormal", "args": { "sigma": "1" } } },
+    { "id": "alpha", "kind": "parameter", "name": "alpha", "shape": ["J"], "plate": "group", "distribution": { "name": "Normal", "args": { "mu": "alpha_bar", "sigma": "tau_alpha" } } },
+    { "id": "beta", "kind": "parameter", "name": "beta", "distribution": { "name": "Normal", "args": { "mu": "0", "sigma": "1" } } },
+    { "id": "sigma", "kind": "parameter", "name": "sigma", "distribution": { "name": "HalfNormal", "args": { "sigma": "1" } } },
+    { "id": "mu", "kind": "deterministic", "name": "mu", "shape": ["N"], "plate": "obs", "expression": "alpha[group_id[i]] + beta * x[i]" },
+    { "id": "likelihood_y", "kind": "likelihood", "name": "y_likelihood", "plate": "obs", "distribution": { "name": "Normal", "args": { "mu": "mu[i]", "sigma": "sigma" } } }
+  ],
+  "edges": [
+    { "from": "alpha_bar", "to": "alpha", "role": "prior-parameter" },
+    { "from": "tau_alpha", "to": "alpha", "role": "prior-parameter" },
+    { "from": "alpha", "to": "mu", "role": "deterministic-input" },
+    { "from": "group_id", "to": "mu", "role": "index" },
+    { "from": "beta", "to": "mu", "role": "deterministic-input" },
+    { "from": "x", "to": "mu", "role": "data-input" },
+    { "from": "mu", "to": "likelihood_y", "role": "likelihood-parameter" },
+    { "from": "sigma", "to": "likelihood_y", "role": "likelihood-parameter" },
+    { "from": "y", "to": "likelihood_y", "role": "observed-value" }
+  ]
+}
