@@ -2,8 +2,12 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   addEdge,
   Background,
+  BaseEdge,
   type Connection,
   Controls,
+  EdgeLabelRenderer,
+  type EdgeProps,
+  getSmoothStepPath,
   Handle,
   MarkerType,
   MiniMap,
@@ -49,6 +53,76 @@ const PALETTE_ITEMS = [
 const STORAGE_KEY = 'bayes-canvas:model';
 const PROMPT_TARGETS: PromptTarget[] = ['generic', 'pymc', 'numpyro', 'stan', 'review'];
 
+const GREEK_UNICODE: Record<string, string> = {
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ',
+  epsilon: 'ε', lambda: 'λ', mu: 'μ', nu: 'ν',
+  sigma: 'σ', tau: 'τ', theta: 'θ', phi: 'φ',
+  psi: 'ψ', omega: 'ω',
+};
+
+function formatParamLabel(name: string): string {
+  if (GREEK_UNICODE[name]) return GREEK_UNICODE[name];
+  const parts = name.split('_');
+  return parts.map((p) => GREEK_UNICODE[p] ?? p).join('_');
+}
+
+function resolveEdgeParam(
+  sourceId: string,
+  targetData: BayesNodeData,
+): string | undefined {
+  if (targetData.expression) {
+    const escaped = sourceId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escaped}\\b`).test(targetData.expression)) {
+      return formatParamLabel(sourceId);
+    }
+  }
+
+  if (targetData.distribution?.args) {
+    for (const [paramKey, paramValue] of Object.entries(targetData.distribution.args)) {
+      const baseValue = paramValue.replace(/\[.*$/, '');
+      if (baseValue === sourceId) {
+        return formatParamLabel(paramKey);
+      }
+    }
+  }
+
+  return undefined;
+}
+
+const edgeTypes = {
+  paramEdge: memo(function ParamEdge({
+    sourceX, sourceY, targetX, targetY,
+    sourcePosition, targetPosition,
+    markerEnd, style, data,
+  }: EdgeProps) {
+    const [edgePath, labelX, labelY] = getSmoothStepPath({
+      sourceX, sourceY, targetX, targetY,
+      sourcePosition, targetPosition,
+    });
+
+    const paramLabel = data?.paramLabel as string | undefined;
+
+    return (
+      <>
+        <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
+        {paramLabel ? (
+          <EdgeLabelRenderer>
+            <div
+              className="edge-param-label"
+              style={{
+                position: 'absolute',
+                transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              }}
+            >
+              {paramLabel}
+            </div>
+          </EdgeLabelRenderer>
+        ) : null}
+      </>
+    );
+  }),
+};
+
 type BayesCanvasNode = Node<BayesNodeData>;
 
 interface CanvasState {
@@ -90,6 +164,104 @@ function loadInitialCanvas(): CanvasState {
   } catch {
     return { nodes: initialCanvasNodes, edges: initialCanvasEdges };
   }
+}
+
+interface SavedModelEntry {
+  id: string;
+  name: string;
+  savedAt: string;
+  nodeCount: number;
+  edgeCount: number;
+}
+
+const SAVED_MODELS_KEY = 'bayes-canvas:saved-models';
+
+function loadSavedModelsList(): SavedModelEntry[] {
+  try {
+    const stored = localStorage.getItem(SAVED_MODELS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveModelSnapshot(name: string, nodes: BayesCanvasNode[], edges: Edge[]): SavedModelEntry[] {
+  const models = loadSavedModelsList();
+  const id = `snap_${Date.now()}`;
+  models.unshift({
+    id,
+    name,
+    savedAt: new Date().toISOString(),
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
+  });
+  localStorage.setItem(SAVED_MODELS_KEY, JSON.stringify(models));
+  localStorage.setItem(`bayes-canvas:saved:${id}`, JSON.stringify({ nodes, edges }));
+  return models;
+}
+
+function loadModelSnapshot(id: string): CanvasState | null {
+  try {
+    const stored = localStorage.getItem(`bayes-canvas:saved:${id}`);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
+    return {
+      nodes: (parsed.nodes as BayesCanvasNode[]).map((node) => ({ ...node, type: 'bayesNode' })),
+      edges: parsed.edges.map((edge: Edge) => ({
+        ...edge,
+        type: 'smoothstep',
+        markerEnd: { type: MarkerType.ArrowClosed },
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function deleteModelSnapshot(id: string): SavedModelEntry[] {
+  const models = loadSavedModelsList().filter((m) => m.id !== id);
+  localStorage.setItem(SAVED_MODELS_KEY, JSON.stringify(models));
+  localStorage.removeItem(`bayes-canvas:saved:${id}`);
+  return models;
+}
+
+function exportCanvasToFile(nodes: BayesCanvasNode[], edges: Edge[]) {
+  const data = JSON.stringify({ nodes, edges }, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bayes-canvas-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function parseCanvasFile(file: File): Promise<CanvasState> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result as string);
+        if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
+          reject(new Error('Invalid model file'));
+          return;
+        }
+        resolve({
+          nodes: (parsed.nodes as BayesCanvasNode[]).map((node) => ({ ...node, type: 'bayesNode' })),
+          edges: parsed.edges.map((edge: Edge) => ({
+            ...edge,
+            type: 'smoothstep',
+            markerEnd: { type: MarkerType.ArrowClosed },
+          })),
+        });
+      } catch {
+        reject(new Error('Invalid JSON'));
+      }
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
 }
 
 function createNodeData(kind: BayesNodeData['kind'], count: number): BayesNodeData {
@@ -185,6 +357,17 @@ export function App() {
   const selectedData = selectedNode?.data;
   const selectedLabel = selectedNode?.id ?? selectedEdge?.id ?? 'none';
   const plateCount = useMemo(() => new Set(nodes.map((node) => node.data.plate).filter(Boolean)).size, [nodes]);
+  const [savedModels, setSavedModels] = useState<SavedModelEntry[]>(loadSavedModelsList);
+
+  const labeledEdges = useMemo(() => {
+    const nodeMap = new Map(nodes.map((n) => [n.id, n.data]));
+    return edges.map((edge) => {
+      const targetData = nodeMap.get(edge.target);
+      if (!targetData) return { ...edge, type: 'paramEdge' as const };
+      const paramLabel = resolveEdgeParam(edge.source, targetData);
+      return { ...edge, type: 'paramEdge' as const, data: { ...edge.data, paramLabel } };
+    });
+  }, [nodes, edges]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ nodes, edges }));
@@ -307,6 +490,52 @@ export function App() {
     setSelectedEdgeId(null);
   }, [setEdges, setNodes]);
 
+  const handleSave = useCallback(() => {
+    const name = window.prompt('Snapshot name:', `Model ${new Date().toLocaleString()}`);
+    if (!name) return;
+    setSavedModels(saveModelSnapshot(name, nodes, edges));
+  }, [nodes, edges]);
+
+  const handleLoad = useCallback(
+    (id: string) => {
+      const state = loadModelSnapshot(id);
+      if (!state) return;
+      setNodes(state.nodes);
+      setEdges(state.edges);
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+    },
+    [setNodes, setEdges],
+  );
+
+  const handleDeleteSnapshot = useCallback((id: string) => {
+    setSavedModels(deleteModelSnapshot(id));
+  }, []);
+
+  const handleExport = useCallback(() => {
+    exportCanvasToFile(nodes, edges);
+  }, [nodes, edges]);
+
+  const handleImport = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const state = await parseCanvasFile(file);
+        setNodes(state.nodes);
+        setEdges(state.edges);
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+      } catch {
+        // invalid file
+      }
+    };
+    input.click();
+  }, [setNodes, setEdges]);
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -349,6 +578,34 @@ export function App() {
               </button>
             ))}
           </div>
+          {savedModels.length > 0 ? (
+            <div className="snapshots-panel">
+              <div className="panel-title compact">
+                <h2>Snapshots</h2>
+                <span>{savedModels.length}</span>
+              </div>
+              <div className="snapshots-list">
+                {savedModels.map((model) => (
+                  <div className="snapshot-row" key={model.id}>
+                    <div className="snapshot-info">
+                      <span className="snapshot-name">{model.name}</span>
+                      <span className="snapshot-meta">
+                        {model.nodeCount}n {model.edgeCount}e · {new Date(model.savedAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <div className="snapshot-actions">
+                      <button type="button" onClick={() => handleLoad(model.id)}>
+                        Load
+                      </button>
+                      <button type="button" onClick={() => handleDeleteSnapshot(model.id)}>
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="editor-panel">
             <div className="panel-title compact">
               <h2>Selection</h2>
@@ -433,21 +690,31 @@ export function App() {
               <span>editable canvas</span>
             </div>
             <div className="toolbar-actions">
+              <button type="button" onClick={handleSave}>
+                Save
+              </button>
+              <button type="button" onClick={handleExport}>
+                Export
+              </button>
+              <button type="button" onClick={handleImport}>
+                Import
+              </button>
               <button type="button" onClick={() => copyText(JSON.stringify(modelIr, null, 2))}>
                 Copy IR
               </button>
               <button disabled={!selectedNode && !selectedEdge} type="button" onClick={deleteSelectedItem}>
-                Delete selected
+                Delete
               </button>
               <button type="button" onClick={resetSample}>
-                Reset sample
+                Reset
               </button>
             </div>
           </div>
           <ReactFlow
             nodes={nodes}
-            edges={edges}
+            edges={labeledEdges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             onConnect={onConnect}
             onEdgesChange={onEdgesChange}
             onNodesChange={onNodesChange}
