@@ -16,7 +16,11 @@ export type DistributionParamRole =
   | 'probability'
   | 'rate'
   | 'concentration'
-  | 'df';
+  | 'df'
+  | 'correlation'
+  | 'covariance'
+  | 'component'
+  | 'weight';
 
 export interface DistributionParamDefinition {
   name: string;
@@ -36,6 +40,8 @@ export interface DistributionDefinition {
   latexTemplate: string;
   textTemplate: string;
   description?: string;
+  notes?: string;
+  deprecated?: boolean;
 }
 
 export interface DistributionSpec {
@@ -179,6 +185,184 @@ export const DISTRIBUTIONS: DistributionDefinition[] = [
     params: [{ name: 'p', required: true, role: 'probability', defaultExpression: 'p', support: 'simplex' }],
     latexTemplate: '\\operatorname{Categorical}({p})',
     textTemplate: 'Categorical({p})',
+  },
+  {
+    id: 'laplace',
+    name: 'Laplace',
+    aliases: ['DoubleExponential', 'Double Exponential'],
+    family: 'continuous',
+    support: 'real',
+    params: [
+      { name: 'mu', required: true, role: 'location', defaultExpression: '0', support: 'real' },
+      { name: 'b', required: true, role: 'scale', defaultExpression: '1', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{Laplace}({mu}, {b})',
+    textTemplate: 'Laplace({mu}, {b})',
+    description: 'Sharp-peaked robust prior often used for lasso-style shrinkage.',
+  },
+  {
+    id: 'cauchy',
+    name: 'Cauchy',
+    family: 'continuous',
+    support: 'real',
+    params: [
+      { name: 'alpha', required: true, role: 'location', defaultExpression: '0', support: 'real' },
+      { name: 'beta', required: true, role: 'scale', defaultExpression: '1', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{Cauchy}({alpha}, {beta})',
+    textTemplate: 'Cauchy({alpha}, {beta})',
+    description: 'Heavy-tailed continuous distribution.',
+  },
+  {
+    id: 'halfcauchy',
+    name: 'HalfCauchy',
+    aliases: ['Half-Cauchy'],
+    family: 'continuous',
+    support: 'positive',
+    params: [{ name: 'beta', required: true, role: 'scale', defaultExpression: '1', support: 'positive' }],
+    latexTemplate: '\\operatorname{HalfCauchy}({beta})',
+    textTemplate: 'HalfCauchy({beta})',
+    description: 'Positive heavy-tailed scale prior used in hierarchical and shrinkage models.',
+  },
+  {
+    id: 'horseshoe',
+    name: 'Horseshoe',
+    family: 'continuous',
+    support: 'real',
+    params: [{ name: 'scale', required: true, role: 'scale', defaultExpression: 'tau0', support: 'positive' }],
+    latexTemplate: '\\operatorname{Horseshoe}({scale})',
+    textTemplate: 'Horseshoe({scale})',
+    description: 'Collapsed shrinkage prior. Expanded structure should be represented as a prior recipe.',
+    notes: 'Use the Horseshoe prior recipe when local and global shrinkage variables must be explicit.',
+  },
+  {
+    id: 'multivariate_normal',
+    name: 'MultivariateNormal',
+    aliases: ['MvNormal', 'MVN'],
+    family: 'multivariate',
+    support: 'real',
+    params: [
+      { name: 'mu', required: true, role: 'location', defaultExpression: 'mu', support: 'real' },
+      { name: 'cov', required: false, role: 'covariance', defaultExpression: 'Sigma', support: 'positive' },
+      { name: 'chol', required: false, role: 'covariance', defaultExpression: 'L', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{MVN}({mu}, {cov})',
+    textTemplate: 'MultivariateNormal({mu}, {cov})',
+    description: 'Vector-valued normal distribution using covariance or Cholesky parameterization.',
+    notes: 'Prefer either cov or chol, not both. Cholesky parameterization is usually more stable.',
+  },
+  {
+    id: 'lkj_correlation',
+    name: 'LKJCorrelation',
+    aliases: ['LKJ'],
+    family: 'multivariate',
+    support: 'correlation_matrix',
+    params: [{ name: 'eta', required: true, role: 'shape', defaultExpression: '1', support: 'positive' }],
+    latexTemplate: '\\operatorname{LKJCorrelation}({eta})',
+    textTemplate: 'LKJCorrelation({eta})',
+    description: 'Prior over correlation matrices.',
+  },
+  {
+    id: 'lkj_cholesky',
+    name: 'LKJCholesky',
+    family: 'multivariate',
+    support: 'cholesky_factor_corr',
+    params: [
+      { name: 'eta', required: true, role: 'shape', defaultExpression: '1', support: 'positive' },
+      { name: 'sd_dist', required: false, role: 'scale', defaultExpression: 'HalfNormal(1)', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{LKJCholesky}({eta})',
+    textTemplate: 'LKJCholesky({eta})',
+    description: 'Cholesky-factor representation for correlated random effects.',
+  },
+  {
+    id: 'ordered_logistic',
+    name: 'OrderedLogistic',
+    family: 'categorical',
+    support: 'ordered_category',
+    params: [
+      { name: 'eta', required: true, role: 'location', defaultExpression: 'eta', support: 'real' },
+      { name: 'cutpoints', required: true, role: 'component', defaultExpression: 'cutpoints', support: 'ordered' },
+    ],
+    latexTemplate: '\\operatorname{OrderedLogistic}({eta}, {cutpoints})',
+    textTemplate: 'OrderedLogistic({eta}, {cutpoints})',
+    description: 'Likelihood for ordered categorical outcomes.',
+  },
+  {
+    id: 'multinomial',
+    name: 'Multinomial',
+    family: 'categorical',
+    support: 'nonnegative_integer',
+    params: [
+      { name: 'n', required: true, role: 'shape', defaultExpression: 'n', support: 'nonnegative_integer' },
+      { name: 'p', required: true, role: 'probability', defaultExpression: 'p', support: 'simplex' },
+    ],
+    latexTemplate: '\\operatorname{Multinomial}({n}, {p})',
+    textTemplate: 'Multinomial({n}, {p})',
+  },
+  {
+    id: 'dirichlet_multinomial',
+    name: 'DirichletMultinomial',
+    family: 'categorical',
+    support: 'nonnegative_integer',
+    params: [
+      { name: 'n', required: true, role: 'shape', defaultExpression: 'n', support: 'nonnegative_integer' },
+      { name: 'alpha', required: true, role: 'concentration', defaultExpression: 'alpha', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{DirichletMultinomial}({n}, {alpha})',
+    textTemplate: 'DirichletMultinomial({n}, {alpha})',
+  },
+  {
+    id: 'zero_inflated_poisson',
+    name: 'ZeroInflatedPoisson',
+    family: 'count',
+    support: 'nonnegative_integer',
+    params: [
+      { name: 'psi', required: true, role: 'probability', defaultExpression: 'psi', support: 'unit_interval' },
+      { name: 'lambda', required: true, role: 'rate', defaultExpression: 'lambda', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{ZIP}({psi}, {lambda})',
+    textTemplate: 'ZeroInflatedPoisson({psi}, {lambda})',
+  },
+  {
+    id: 'zero_inflated_negative_binomial',
+    name: 'ZeroInflatedNegativeBinomial',
+    family: 'count',
+    support: 'nonnegative_integer',
+    params: [
+      { name: 'psi', required: true, role: 'probability', defaultExpression: 'psi', support: 'unit_interval' },
+      { name: 'mu', required: true, role: 'location', defaultExpression: 'mu', support: 'positive' },
+      { name: 'alpha', required: true, role: 'shape', defaultExpression: 'alpha', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{ZINB}({psi}, {mu}, {alpha})',
+    textTemplate: 'ZeroInflatedNegativeBinomial({psi}, {mu}, {alpha})',
+  },
+  {
+    id: 'mixture',
+    name: 'Mixture',
+    family: 'multivariate',
+    support: 'custom',
+    params: [
+      { name: 'weights', required: true, role: 'weight', defaultExpression: 'w', support: 'simplex' },
+      { name: 'components', required: true, role: 'component', defaultExpression: 'components' },
+    ],
+    latexTemplate: '\\operatorname{Mixture}({weights}, {components})',
+    textTemplate: 'Mixture({weights}, {components})',
+    description: 'Generic mixture wrapper; component distributions should be listed in handoff notes.',
+  },
+  {
+    id: 'wishart',
+    name: 'Wishart',
+    family: 'multivariate',
+    support: 'positive_definite_matrix',
+    params: [
+      { name: 'nu', required: true, role: 'df', defaultExpression: 'K + 1', support: 'positive' },
+      { name: 'scale', required: true, role: 'scale', defaultExpression: 'S', support: 'positive_definite_matrix' },
+    ],
+    latexTemplate: '\\operatorname{Wishart}({nu}, {scale})',
+    textTemplate: 'Wishart({nu}, {scale})',
+    notes: 'Often discouraged for covariance modeling; consider LKJ plus scale priors.',
+    deprecated: true,
   },
 ];
 

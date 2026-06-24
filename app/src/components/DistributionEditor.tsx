@@ -22,6 +22,12 @@ const SUPPORT_LABELS: Record<string, string> = {
   simplex: 'Simplex',
   integer: 'Integer',
   nonnegative_integer: 'Non-negative integer',
+  correlation_matrix: 'Correlation matrix',
+  cholesky_factor_corr: 'Cholesky correlation factor',
+  ordered: 'Ordered vector',
+  ordered_category: 'Ordered category',
+  positive_definite_matrix: 'Positive definite matrix',
+  custom: 'Custom',
 };
 
 const FAMILY_LABELS: Record<string, string> = {
@@ -85,7 +91,9 @@ export function DistributionEditor({ distribution, onChange }: DistributionEdito
             {support ? (
               <span className="dist-chip dist-chip-support">{SUPPORT_LABELS[support] ?? support}</span>
             ) : null}
+            {definition.deprecated ? <span className="dist-chip dist-chip-warning">Use carefully</span> : null}
           </div>
+          {definition.notes ? <small className="dist-preview-note">{definition.notes}</small> : null}
 
           <fieldset className="dist-params">
             <legend>Parameters</legend>

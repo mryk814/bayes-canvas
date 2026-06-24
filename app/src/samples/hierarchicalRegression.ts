@@ -29,6 +29,7 @@ export const initialNodes: Node<BayesNodeData>[] = [
       shape: ['J'],
       plate: 'group',
       distribution: { id: 'normal', name: 'Normal', args: { mu: 'alpha_bar', sigma: 'tau_alpha' } },
+      hints: [{ kind: 'parameterization', value: 'non_centered' }],
     },
   },
   {
@@ -47,17 +48,25 @@ export const initialNodes: Node<BayesNodeData>[] = [
       kind: 'parameter',
       name: 'sigma',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
+      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'x',
     position: { x: 120, y: 320 },
-    data: { kind: 'data', name: 'x[i]', shape: ['N'], observed: true },
+    data: {
+      kind: 'data',
+      name: 'x[i]',
+      shape: ['N'],
+      observed: true,
+      plate: 'obs',
+      observationProcess: { kind: 'measurement_error', latentTrueSymbol: 'x_true[i]', errorScaleSymbol: 'sigma_x' },
+    },
   },
   {
     id: 'group_id',
     position: { x: 330, y: 320 },
-    data: { kind: 'data', name: 'group_id[i]', shape: ['N'], observed: true },
+    data: { kind: 'data', name: 'group_id[i]', shape: ['N'], observed: true, plate: 'obs' },
   },
   {
     id: 'mu',
@@ -79,6 +88,7 @@ export const initialNodes: Node<BayesNodeData>[] = [
       plate: 'obs',
       distribution: { id: 'normal', name: 'Normal', args: { mu: 'mu[i]', sigma: 'sigma' } },
       observed: true,
+      observationProcess: { kind: 'censored', direction: 'right', boundSymbol: 'y_limit' },
     },
   },
 ];
