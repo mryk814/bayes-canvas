@@ -8,7 +8,7 @@ export const initialNodes: Node<BayesNodeData>[] = [
     data: {
       kind: 'hyperparameter',
       name: 'alpha_bar',
-      distribution: { name: 'Normal', args: { mu: '0', sigma: '2' } },
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '2' } },
     },
   },
   {
@@ -17,7 +17,7 @@ export const initialNodes: Node<BayesNodeData>[] = [
     data: {
       kind: 'hyperparameter',
       name: 'tau_alpha',
-      distribution: { name: 'HalfNormal', args: { sigma: '1' } },
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
     },
   },
   {
@@ -28,7 +28,7 @@ export const initialNodes: Node<BayesNodeData>[] = [
       name: 'alpha[j]',
       shape: ['J'],
       plate: 'group',
-      distribution: { name: 'Normal', args: { mu: 'alpha_bar', sigma: 'tau_alpha' } },
+      distribution: { id: 'normal', name: 'Normal', args: { mu: 'alpha_bar', sigma: 'tau_alpha' } },
     },
   },
   {
@@ -37,7 +37,7 @@ export const initialNodes: Node<BayesNodeData>[] = [
     data: {
       kind: 'parameter',
       name: 'beta',
-      distribution: { name: 'Normal', args: { mu: '0', sigma: '1' } },
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
     },
   },
   {
@@ -46,7 +46,7 @@ export const initialNodes: Node<BayesNodeData>[] = [
     data: {
       kind: 'parameter',
       name: 'sigma',
-      distribution: { name: 'HalfNormal', args: { sigma: '1' } },
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
     },
   },
   {
@@ -77,7 +77,7 @@ export const initialNodes: Node<BayesNodeData>[] = [
       kind: 'likelihood',
       name: 'y[i]',
       plate: 'obs',
-      distribution: { name: 'Normal', args: { mu: 'mu[i]', sigma: 'sigma' } },
+      distribution: { id: 'normal', name: 'Normal', args: { mu: 'mu[i]', sigma: 'sigma' } },
       observed: true,
     },
   },

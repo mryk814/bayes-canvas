@@ -21,13 +21,15 @@ button {
 }
 
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
+select:focus-visible,
 .react-flow__controls-button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
@@ -240,7 +242,8 @@ textarea:focus-visible,
 }
 
 .node-editor input,
-.node-editor textarea {
+.node-editor textarea,
+.node-editor select {
   width: 100%;
   min-width: 0;
   padding: var(--space-2);
@@ -249,6 +252,10 @@ textarea:focus-visible,
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
+}
+
+.node-editor select {
+  cursor: pointer;
 }
 
 .node-editor textarea {
@@ -451,6 +458,38 @@ button:disabled {
   font-size: var(--text-xs);
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.node-tex {
+  margin-top: var(--space-1);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.distribution-preview {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.distribution-preview span,
+.distribution-preview code {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.distribution-preview small {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.35;
 }
 
 .node-meta {

@@ -1,4 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
+import { normalizeDistribution, type DistributionSpec } from './distributionRegistry';
 
 export type BayesNodeKind = 'data' | 'parameter' | 'hyperparameter' | 'latent' | 'deterministic' | 'likelihood';
 
@@ -8,10 +9,7 @@ export interface BayesNodeData extends Record<string, unknown> {
   shape?: string[];
   observed?: boolean;
   plate?: string;
-  distribution?: {
-    name: string;
-    args: Record<string, string>;
-  };
+  distribution?: DistributionSpec;
   expression?: string;
 }
 
@@ -46,12 +44,20 @@ export function exportModelIr(nodes: Node[], edges: Edge[]): ModelIr {
       { id: 'obs', label: 'observations', index: 'i', size: 'N' },
       { id: 'group', label: 'groups', index: 'j', size: 'J' },
     ],
-    nodes: nodes.map((node) => ({ id: node.id, ...(node.data as BayesNodeData) })),
+    nodes: nodes.map((node) => normalizeNodeForExport(node.id, node.data as BayesNodeData)),
     edges: edges.map((edge) => ({
       from: edge.source,
       to: edge.target,
       role: String(edge.data?.role ?? 'dependency'),
     })),
+  };
+}
+
+function normalizeNodeForExport(id: string, data: BayesNodeData): BayesNodeData & { id: string } {
+  return {
+    id,
+    ...data,
+    distribution: data.distribution ? normalizeDistribution(data.distribution) : undefined,
   };
 }
 
