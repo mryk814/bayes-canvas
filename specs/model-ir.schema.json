@@ -241,8 +241,6 @@
         "latent",
         "deterministic",
         "likelihood",
-        "prior_recipe",
-        "regression_term",
         "model_block",
         "derived_quantity"
       ]
