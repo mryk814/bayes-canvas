@@ -1,5 +1,6 @@
 import type { Edge, Node } from '@xyflow/react';
 import {
+  DISTRIBUTIONS,
   formatDistributionTex,
   formatDistributionText,
   formatTexExpression,
@@ -37,9 +38,47 @@ export interface ModelIr {
     to: string;
     role: string;
   }>;
+  symbolTable: SymbolTable;
 }
 
 export type PromptTarget = 'generic' | 'pymc' | 'numpyro' | 'stan' | 'review';
+
+export interface VariableSymbol {
+  nodeId: string;
+  baseSymbol: string;
+  displayName: string;
+  kind: BayesNodeKind;
+  observed?: boolean;
+  plateId?: string;
+  declaredIndex?: string;
+  shape: string[];
+}
+
+export interface IndexSymbol {
+  plateId: string;
+  label: string;
+  index: string;
+  size: string;
+}
+
+export interface FunctionSymbol {
+  name: string;
+  description: string;
+}
+
+export interface DistributionSymbol {
+  id: string;
+  name: string;
+  support: string;
+  parameterNames: string[];
+}
+
+export interface SymbolTable {
+  variables: Record<string, VariableSymbol>;
+  indices: Record<string, IndexSymbol>;
+  functions: Record<string, FunctionSymbol>;
+  distributions: Record<string, DistributionSymbol>;
+}
 
 const PROMPT_TARGETS: Record<PromptTarget, { label: string; instruction: string; preferences: string[] }> = {
   generic: {
@@ -85,22 +124,26 @@ const PROMPT_TARGETS: Record<PromptTarget, { label: string; instruction: string;
 };
 
 export function exportModelIr(nodes: Node[], edges: Edge[]): ModelIr {
+  const plates = [
+    { id: 'obs', label: 'observations', index: 'i', size: 'N' },
+    { id: 'group', label: 'groups', index: 'j', size: 'J' },
+  ];
+  const normalizedNodes = nodes.map((node) => normalizeNodeForExport(node.id, node.data as BayesNodeData));
+
   return {
     version: '0.1.0',
     model: {
       name: 'hierarchical_regression',
       description: 'Random-intercept Bayesian regression example.',
     },
-    plates: [
-      { id: 'obs', label: 'observations', index: 'i', size: 'N' },
-      { id: 'group', label: 'groups', index: 'j', size: 'J' },
-    ],
-    nodes: nodes.map((node) => normalizeNodeForExport(node.id, node.data as BayesNodeData)),
+    plates,
+    nodes: normalizedNodes,
     edges: edges.map((edge) => ({
       from: edge.source,
       to: edge.target,
       role: String(edge.data?.role ?? 'dependency'),
     })),
+    symbolTable: buildSymbolTable(normalizedNodes, plates),
   };
 }
 
@@ -149,6 +192,9 @@ export function generateAiPrompt(model: ModelIr, target: PromptTarget = 'generic
     '',
     'Indices / plates / shapes:',
     formatPlateList(model),
+    '',
+    'Symbol table:',
+    formatSymbolTable(model.symbolTable),
     '',
     'Priors:',
     formatNodeList(sections.priors),
@@ -286,6 +332,72 @@ function summarizeModel(model: ModelIr) {
   };
 }
 
+const RESERVED_FUNCTIONS: FunctionSymbol[] = [
+  { name: 'exp', description: 'Exponential transform.' },
+  { name: 'log', description: 'Natural logarithm.' },
+  { name: 'logit', description: 'Logit transform.' },
+  { name: 'inv_logit', description: 'Inverse logit transform.' },
+  { name: 'softmax', description: 'Simplex-valued softmax transform.' },
+  { name: 'dot', description: 'Vector dot product.' },
+];
+
+export function buildSymbolTable(
+  nodes: ModelIr['nodes'],
+  plates: ModelIr['plates'],
+): SymbolTable {
+  return {
+    variables: Object.fromEntries(nodes.map((node) => {
+      const parsedName = parseSymbolName(node.name);
+      return [
+        parsedName.baseSymbol,
+        {
+          nodeId: node.id,
+          baseSymbol: parsedName.baseSymbol,
+          displayName: node.name,
+          kind: node.kind,
+          observed: node.observed,
+          plateId: node.plate,
+          declaredIndex: parsedName.index,
+          shape: node.shape ?? [],
+        } satisfies VariableSymbol,
+      ];
+    })),
+    indices: Object.fromEntries(plates.map((plate) => [
+      plate.index,
+      {
+        plateId: plate.id,
+        label: plate.label,
+        index: plate.index,
+        size: plate.size,
+      } satisfies IndexSymbol,
+    ])),
+    functions: Object.fromEntries(RESERVED_FUNCTIONS.map((fn) => [fn.name, fn])),
+    distributions: Object.fromEntries(DISTRIBUTIONS.map((distribution) => [
+      distribution.name,
+      {
+        id: distribution.id,
+        name: distribution.name,
+        support: distribution.support,
+        parameterNames: distribution.params.map((param) => param.name),
+      } satisfies DistributionSymbol,
+    ])),
+  };
+}
+
+export function parseSymbolName(name: string): { baseSymbol: string; index?: string } {
+  const trimmed = name.trim();
+  const match = /^([a-zA-Z][a-zA-Z0-9_]*)(?:\[([^\]]+)\])?/.exec(trimmed);
+
+  if (!match) {
+    return { baseSymbol: trimmed };
+  }
+
+  return {
+    baseSymbol: match[1],
+    index: match[2],
+  };
+}
+
 function formatNodeList(nodes: ModelIr['nodes']): string {
   if (!nodes.length) {
     return '- None declared';
@@ -316,4 +428,32 @@ function formatPlateList(model: ModelIr): string {
     .map((node) => `- ${node.name}: ${node.shape?.join(' x ')}`);
 
   return [...plateLines, ...(shapeLines.length ? ['- Variable shapes:', ...shapeLines] : [])].join('\n');
+}
+
+function formatSymbolTable(symbolTable: SymbolTable): string {
+  const variableLines = Object.values(symbolTable.variables).map((symbol) => {
+    const parts = [
+      `${symbol.baseSymbol}: ${symbol.displayName}`,
+      symbol.kind,
+      symbol.plateId ? `plate ${symbol.plateId}` : undefined,
+      symbol.declaredIndex ? `index ${symbol.declaredIndex}` : undefined,
+      symbol.shape.length ? `shape ${symbol.shape.join(' x ')}` : 'scalar',
+    ].filter(Boolean);
+
+    return `- ${parts.join('; ')}`;
+  });
+  const indexLines = Object.values(symbolTable.indices).map(
+    (symbol) => `- ${symbol.index}: ${symbol.label}; size ${symbol.size}; plate ${symbol.plateId}`,
+  );
+  const functionNames = Object.keys(symbolTable.functions).join(', ');
+  const distributionNames = Object.values(symbolTable.distributions).map((distribution) => distribution.name).join(', ');
+
+  return [
+    'Variables:',
+    ...(variableLines.length ? variableLines : ['- None declared']),
+    'Indices:',
+    ...(indexLines.length ? indexLines : ['- None declared']),
+    `Functions: ${functionNames || 'None declared'}`,
+    `Distributions: ${distributionNames || 'None declared'}`,
+  ].join('\n');
 }

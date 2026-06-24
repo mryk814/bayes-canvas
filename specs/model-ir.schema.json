@@ -3,7 +3,7 @@
   "$id": "https://example.com/bayes-canvas/model-ir.schema.json",
   "title": "Bayes Canvas Model IR",
   "type": "object",
-  "required": ["version", "model", "nodes", "edges"],
+  "required": ["version", "model", "nodes", "edges", "symbolTable"],
   "properties": {
     "version": { "type": "string" },
     "model": {
@@ -67,6 +67,69 @@
           "from": { "type": "string" },
           "to": { "type": "string" },
           "role": { "type": "string" }
+        }
+      }
+    },
+    "symbolTable": {
+      "type": "object",
+      "required": ["variables", "indices", "functions", "distributions"],
+      "properties": {
+        "variables": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["nodeId", "baseSymbol", "displayName", "kind", "shape"],
+            "properties": {
+              "nodeId": { "type": "string" },
+              "baseSymbol": { "type": "string" },
+              "displayName": { "type": "string" },
+              "kind": {
+                "type": "string",
+                "enum": ["data", "parameter", "hyperparameter", "latent", "deterministic", "likelihood"]
+              },
+              "observed": { "type": "boolean" },
+              "plateId": { "type": "string" },
+              "declaredIndex": { "type": "string" },
+              "shape": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "indices": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["plateId", "label", "index", "size"],
+            "properties": {
+              "plateId": { "type": "string" },
+              "label": { "type": "string" },
+              "index": { "type": "string" },
+              "size": { "type": "string" }
+            }
+          }
+        },
+        "functions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["name", "description"],
+            "properties": {
+              "name": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "distributions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["id", "name", "support", "parameterNames"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "support": { "type": "string" },
+              "parameterNames": { "type": "array", "items": { "type": "string" } }
+            }
+          }
         }
       }
     }
