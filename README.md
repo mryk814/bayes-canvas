@@ -31,10 +31,11 @@ Visual graph → Model IR YAML/JSON → PPL code / AI prompt → Inference → D
 ## Development
 
 ```bash
-cd app
 npm install
 npm run dev
 ```
+
+The root scripts delegate to `app/`, so `npm run dev`, `npm run build`, and `npm run preview` can be run from the repository root.
 
 ## First example
 
@@ -49,4 +50,3 @@ sigma ~ HalfNormal(1)
 mu[i] = alpha[group_id[i]] + beta * x[i]
 y[i] ~ Normal(mu[i], sigma)
 ```
-
