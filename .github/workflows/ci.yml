@@ -21,4 +21,5 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run cli:lint:sample
+      - run: npm run cli:handoff:sample
       - run: npm run build
