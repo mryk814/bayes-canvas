@@ -16,6 +16,15 @@ import {
   useEdgesState,
   useNodesState,
 } from '@xyflow/react';
+import {
+  createDefaultDistribution,
+  DISTRIBUTIONS,
+  findDistribution,
+  formatDistributionTex,
+  formatDistributionText,
+  getDistributionSupport,
+  normalizeDistribution,
+} from './lib/distributionRegistry';
 import { exportModelIr, generateAiPrompt } from './lib/modelIr';
 import { initialEdges, initialNodes } from './samples/hierarchicalRegression';
 import type { BayesNodeData } from './lib/modelIr';
@@ -98,16 +107,16 @@ function createNodeData(kind: BayesNodeData['kind'], count: number): BayesNodeDa
     return {
       kind,
       name: `${baseName}[i]`,
-      distribution: { name: 'Normal', args: { mu: 'mu[i]', sigma: 'sigma' } },
+      distribution: { id: 'normal', name: 'Normal', args: { mu: 'mu[i]', sigma: 'sigma' } },
       observed: true,
     };
   }
 
   if (kind === 'hyperparameter') {
-    return { kind, name: baseName, distribution: { name: 'Normal', args: { mu: '0', sigma: '1' } } };
+    return { kind, name: baseName, distribution: createDefaultDistribution('normal') };
   }
 
-  return { kind, name: baseName, distribution: { name: 'Normal', args: { mu: '0', sigma: '1' } } };
+  return { kind, name: baseName, distribution: createDefaultDistribution('normal') };
 }
 
 function parseList(value: string): string[] | undefined {
@@ -143,11 +152,8 @@ function parseArgs(value: string): Record<string, string> {
 
 const nodeTypes = {
   bayesNode: memo(function BayesNode({ data }: NodeProps<Node<BayesNodeData>>) {
-    const distribution = data.distribution
-      ? `${data.distribution.name}(${Object.entries(data.distribution.args)
-          .map(([key, value]) => `${key}: ${value}`)
-          .join(', ')})`
-      : data.expression;
+    const distributionText = data.distribution ? formatDistributionText(data.distribution) : data.expression;
+    const distributionTex = data.distribution ? formatDistributionTex(data.distribution) : undefined;
 
     return (
       <div className={`bayes-node bayes-node-${data.kind}`}>
@@ -157,7 +163,8 @@ const nodeTypes = {
           {data.observed ? <span className="node-chip">Observed</span> : null}
         </div>
         <div className="node-name">{data.name}</div>
-        {distribution ? <div className="node-formula">{distribution}</div> : null}
+        {distributionText ? <div className="node-formula">{distributionText}</div> : null}
+        {distributionTex ? <div className="node-tex">{distributionTex}</div> : null}
         <div className="node-meta">
           {data.shape?.length ? <span>{data.shape.join(' x ')}</span> : <span>scalar</span>}
           {data.plate ? <span>plate: {data.plate}</span> : null}
@@ -192,6 +199,10 @@ export function App() {
   );
   const selectedData = selectedNode?.data;
   const selectedLabel = selectedNode?.id ?? selectedEdge?.id ?? 'none';
+  const selectedDistribution = selectedData?.distribution ? normalizeDistribution(selectedData.distribution) : undefined;
+  const selectedDistributionDefinition = selectedDistribution
+    ? findDistribution(selectedDistribution.id ?? selectedDistribution.name)
+    : undefined;
   const plateCount = useMemo(() => new Set(nodes.map((node) => node.data.plate).filter(Boolean)).size, [nodes]);
 
   useEffect(() => {
@@ -400,17 +411,23 @@ export function App() {
                 </label>
                 <label>
                   Distribution
-                  <input
-                    placeholder="Normal"
-                    value={selectedData.distribution?.name ?? ''}
+                  <select
+                    value={selectedDistribution?.id ?? ''}
                     onChange={(event) =>
                       updateSelectedNodeData({
                         distribution: event.target.value
-                          ? { name: event.target.value, args: selectedData.distribution?.args ?? {} }
+                          ? mergeDistributionSelection(event.target.value, selectedData.distribution?.args)
                           : undefined,
                       })
                     }
-                  />
+                  >
+                    <option value="">None</option>
+                    {DISTRIBUTIONS.map((distribution) => (
+                      <option key={distribution.id} value={distribution.id}>
+                        {distribution.name}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label>
                   Args
@@ -421,11 +438,25 @@ export function App() {
                       updateSelectedNodeData({
                         distribution: selectedData.distribution
                           ? { ...selectedData.distribution, args: parseArgs(event.target.value) }
-                          : { name: 'Normal', args: parseArgs(event.target.value) },
+                          : { ...createDefaultDistribution('normal'), args: parseArgs(event.target.value) },
                       })
                     }
                   />
                 </label>
+                {selectedDistribution ? (
+                  <div className="distribution-preview">
+                    <span>{formatDistributionText(selectedDistribution)}</span>
+                    <code>{formatDistributionTex(selectedDistribution)}</code>
+                    {selectedDistributionDefinition ? (
+                      <small>
+                        support: {getDistributionSupport(selectedDistribution)} / params:{' '}
+                        {selectedDistributionDefinition.params.map((param) => param.name).join(', ')}
+                      </small>
+                    ) : (
+                      <small>Custom distribution</small>
+                    )}
+                  </div>
+                ) : null}
                 <label>
                   Expression
                   <textarea
@@ -530,4 +561,20 @@ export function App() {
       </section>
     </main>
   );
+}
+
+function mergeDistributionSelection(id: string, currentArgs?: Record<string, string>) {
+  const next = createDefaultDistribution(id);
+
+  return {
+    ...next,
+    args: {
+      ...next.args,
+      ...Object.fromEntries(
+        Object.entries(currentArgs ?? {}).filter(([key]) =>
+          Boolean(findDistribution(id)?.params.some((param) => param.name === key)),
+        ),
+      ),
+    },
+  };
 }

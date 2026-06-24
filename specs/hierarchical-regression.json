@@ -12,13 +12,13 @@
     { "id": "x", "kind": "data", "name": "x", "shape": ["N"], "observed": true },
     { "id": "y", "kind": "data", "name": "y", "shape": ["N"], "observed": true },
     { "id": "group_id", "kind": "data", "name": "group_id", "shape": ["N"], "observed": true },
-    { "id": "alpha_bar", "kind": "hyperparameter", "name": "alpha_bar", "distribution": { "name": "Normal", "args": { "mu": "0", "sigma": "2" } } },
-    { "id": "tau_alpha", "kind": "hyperparameter", "name": "tau_alpha", "distribution": { "name": "HalfNormal", "args": { "sigma": "1" } } },
-    { "id": "alpha", "kind": "parameter", "name": "alpha", "shape": ["J"], "plate": "group", "distribution": { "name": "Normal", "args": { "mu": "alpha_bar", "sigma": "tau_alpha" } } },
-    { "id": "beta", "kind": "parameter", "name": "beta", "distribution": { "name": "Normal", "args": { "mu": "0", "sigma": "1" } } },
-    { "id": "sigma", "kind": "parameter", "name": "sigma", "distribution": { "name": "HalfNormal", "args": { "sigma": "1" } } },
+    { "id": "alpha_bar", "kind": "hyperparameter", "name": "alpha_bar", "distribution": { "id": "normal", "name": "Normal", "args": { "mu": "0", "sigma": "2" } } },
+    { "id": "tau_alpha", "kind": "hyperparameter", "name": "tau_alpha", "distribution": { "id": "halfnormal", "name": "HalfNormal", "args": { "sigma": "1" } } },
+    { "id": "alpha", "kind": "parameter", "name": "alpha", "shape": ["J"], "plate": "group", "distribution": { "id": "normal", "name": "Normal", "args": { "mu": "alpha_bar", "sigma": "tau_alpha" } } },
+    { "id": "beta", "kind": "parameter", "name": "beta", "distribution": { "id": "normal", "name": "Normal", "args": { "mu": "0", "sigma": "1" } } },
+    { "id": "sigma", "kind": "parameter", "name": "sigma", "distribution": { "id": "halfnormal", "name": "HalfNormal", "args": { "sigma": "1" } } },
     { "id": "mu", "kind": "deterministic", "name": "mu", "shape": ["N"], "plate": "obs", "expression": "alpha[group_id[i]] + beta * x[i]" },
-    { "id": "likelihood_y", "kind": "likelihood", "name": "y_likelihood", "plate": "obs", "distribution": { "name": "Normal", "args": { "mu": "mu[i]", "sigma": "sigma" } } }
+    { "id": "likelihood_y", "kind": "likelihood", "name": "y_likelihood", "plate": "obs", "distribution": { "id": "normal", "name": "Normal", "args": { "mu": "mu[i]", "sigma": "sigma" } } }
   ],
   "edges": [
     { "from": "alpha_bar", "to": "alpha", "role": "prior-parameter" },

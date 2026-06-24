@@ -44,7 +44,12 @@
           "plate": { "type": "string" },
           "distribution": {
             "type": "object",
+            "required": ["id", "name", "args"],
             "properties": {
+              "id": {
+                "type": "string",
+                "description": "Canonical distribution registry ID, independent of any backend PPL."
+              },
               "name": { "type": "string" },
               "args": { "type": "object", "additionalProperties": { "type": "string" } }
             }
