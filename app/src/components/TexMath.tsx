@@ -9,15 +9,23 @@ interface TexMathProps {
 }
 
 export function TexMath({ tex, block = false, className, onClick }: TexMathProps) {
-  const html = useMemo(() => {
+  const rendered = useMemo(() => {
     try {
-      return katex.renderToString(tex, {
+      return {
+        html: katex.renderToString(tex, {
         displayMode: block,
         throwOnError: false,
-        trust: true,
-      });
-    } catch {
-      return tex;
+          strict: 'warn',
+          // User-authored TeX is untrusted. Keep URL/HTML-like KaTeX extensions disabled.
+          trust: false,
+        }),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        html: null,
+        error: error instanceof Error ? error.message : 'TeXの表示に失敗しました。',
+      };
     }
   }, [tex, block]);
 
@@ -25,11 +33,21 @@ export function TexMath({ tex, block = false, className, onClick }: TexMathProps
 
   return (
     <Tag
-      className={`tex-math ${block ? 'tex-block' : 'tex-inline'} ${className ?? ''}`}
-      dangerouslySetInnerHTML={{ __html: html }}
+      className={`tex-math ${block ? 'tex-block' : 'tex-inline'} ${rendered.error ? 'tex-error' : ''} ${className ?? ''}`}
+      dangerouslySetInnerHTML={rendered.html ? { __html: rendered.html } : undefined}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (!onClick) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick();
+        }
+      }}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
-    />
+      title={rendered.error ? `${rendered.error} 入力したTeX: ${tex}` : undefined}
+    >
+      {rendered.html ? null : tex}
+    </Tag>
   );
 }

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bayes-canvas.local/schemas/model-document.schema.json",
+  "title": "Bayes Canvas ModelDocument",
+  "type": "object",
+  "required": ["schemaVersion", "documentId", "revision", "model", "axes", "plates", "entities", "entityOrder", "notes", "noteOrder"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "documentId": { "type": "string", "minLength": 1 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "model": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "intent": { "type": "string" }
+      },
+      "unevaluatedProperties": false
+    },
+    "axes": { "type": "object", "additionalProperties": { "$ref": "#/$defs/axis" } },
+    "plates": { "type": "object", "additionalProperties": { "$ref": "#/$defs/plate" } },
+    "entities": { "type": "object", "additionalProperties": { "$ref": "#/$defs/entity" } },
+    "entityOrder": { "type": "array", "items": { "type": "string" } },
+    "macros": { "type": "object", "additionalProperties": { "$ref": "#/$defs/macro" } },
+    "loweringSourceMap": { "type": "array", "items": { "$ref": "#/$defs/loweringSourceMap" } },
+    "notes": { "type": "object", "additionalProperties": { "$ref": "#/$defs/note" } },
+    "noteOrder": { "type": "array", "items": { "type": "string" } },
+    "extensions": {
+      "type": "object",
+      "description": "Only namespaced extension payloads are allowed here."
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "sourceText": {
+      "type": "object",
+      "required": ["language", "source"],
+      "properties": {
+        "language": { "const": "bayes-expr@1" },
+        "source": { "type": "string" }
+      },
+      "unevaluatedProperties": false
+    },
+    "axis": {
+      "type": "object",
+      "required": ["id", "symbol", "label", "size"],
+      "properties": {
+        "id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "label": { "type": "string" },
+        "size": { "$ref": "#/$defs/sourceText" },
+        "coordinateDataId": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "unevaluatedProperties": false
+    },
+    "plate": {
+      "type": "object",
+      "required": ["id", "label", "axisId", "indexSymbol", "parentPlateIds", "assumption"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "axisId": { "type": "string" },
+        "indexSymbol": { "type": "string" },
+        "parentPlateIds": { "type": "array", "items": { "type": "string" } },
+        "assumption": { "enum": ["conditionally_independent", "exchangeable", "declared_only"] },
+        "notes": { "type": "string" }
+      },
+      "unevaluatedProperties": false
+    },
+    "entity": {
+      "type": "object",
+      "required": ["id", "symbol", "kind", "valueType", "plateIds"],
+      "properties": {
+        "id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "label": { "type": "string" },
+        "kind": { "enum": ["data", "random_variable", "deterministic", "factor", "block_instance", "query"] },
+        "valueType": { "type": "object" },
+        "plateIds": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "note": {
+      "type": "object",
+      "required": ["id", "kind", "text", "status", "relatedEntityIds"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "enum": ["assumption", "decision", "warning", "review_question", "implementation_note"] },
+        "text": { "type": "string" },
+        "status": { "enum": ["open", "accepted", "rejected", "resolved"] },
+        "relatedEntityIds": { "type": "array", "items": { "type": "string" } },
+        "blocking": { "type": "boolean" },
+        "author": { "enum": ["user", "ai", "import"] }
+      },
+      "unevaluatedProperties": false
+    },
+    "macro": {
+      "type": "object",
+      "required": ["id", "macroTypeId", "macroVersion", "bindings", "config"],
+      "properties": {
+        "id": { "type": "string" },
+        "macroTypeId": { "type": "string" },
+        "macroVersion": { "type": "string" },
+        "bindings": { "type": "object" },
+        "config": { "type": "object" },
+        "status": { "enum": ["collapsed", "expanded", "partially_expanded"] }
+      },
+      "unevaluatedProperties": false
+    },
+    "loweringSourceMap": {
+      "type": "object",
+      "required": ["generatedEntityId", "macroInstanceId", "macroFieldPath"],
+      "properties": {
+        "generatedEntityId": { "type": "string" },
+        "macroInstanceId": { "type": "string" },
+        "macroFieldPath": { "type": "string" }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

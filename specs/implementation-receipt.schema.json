@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bayes-canvas.local/schemas/implementation-receipt.schema.json",
+  "title": "Bayes Canvas Implementation Receipt",
+  "type": "object",
+  "required": ["receiptVersion", "inputSpecificationFingerprint", "backend", "mappings", "deviations", "addedAssumptions", "approximations", "unresolvedQuestions"],
+  "properties": {
+    "receiptVersion": { "const": "1.0.0" },
+    "inputSpecificationFingerprint": { "type": "string" },
+    "backend": { "type": "string" },
+    "mappings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["entityId", "implementationSymbol", "file"],
+        "properties": {
+          "entityId": { "type": "string" },
+          "implementationSymbol": { "type": "string" },
+          "file": { "type": "string" },
+          "lineRange": {
+            "type": "array",
+            "prefixItems": [{ "type": "integer", "minimum": 1 }, { "type": "integer", "minimum": 1 }],
+            "items": false
+          }
+        },
+        "unevaluatedProperties": false
+      }
+    },
+    "deviations": { "type": "array", "items": { "type": "string" } },
+    "addedAssumptions": { "type": "array", "items": { "type": "string" } },
+    "approximations": { "type": "array", "items": { "type": "string" } },
+    "unresolvedQuestions": { "type": "array", "items": { "type": "string" } }
+  },
+  "unevaluatedProperties": false
+}

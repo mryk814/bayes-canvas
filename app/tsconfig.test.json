@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist-test",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/lib/core/**/*.ts", "src/lib/documentAdapter.ts", "src/lib/distributionRegistry.ts", "src/lib/modelIr.ts", "src/samples/**/*.ts"]
+}

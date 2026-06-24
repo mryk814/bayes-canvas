@@ -1,4 +1,3 @@
-import type { Edge, Node } from '@xyflow/react';
 import {
   DISTRIBUTIONS,
   formatDistributionTex,
@@ -7,6 +6,17 @@ import {
   normalizeDistribution,
   type DistributionSpec,
 } from './distributionRegistry';
+
+interface CanvasNodeLike {
+  id: string;
+  data: BayesNodeData;
+}
+
+interface CanvasEdgeLike {
+  source: string;
+  target: string;
+  data?: Record<string, unknown> | null;
+}
 
 export type BayesNodeKind =
   | 'data'
@@ -248,12 +258,9 @@ const PROMPT_TARGETS: Record<PromptTarget, { label: string; instruction: string;
   },
 };
 
-export function exportModelIr(nodes: Node[], edges: Edge[]): ModelIr {
-  const plates = [
-    { id: 'obs', label: 'observations', index: 'i', size: 'N' },
-    { id: 'group', label: 'groups', index: 'j', size: 'J' },
-  ];
-  const normalizedNodes = nodes.map((node) => normalizeNodeForExport(node.id, node.data as BayesNodeData));
+export function exportModelIr(nodes: CanvasNodeLike[], edges: CanvasEdgeLike[]): ModelIr {
+  const plates = buildPlatesFromNodes(nodes);
+  const normalizedNodes = nodes.map((node) => normalizeNodeForExport(node.id, node.data));
   const normalizedEdges = edges.map((edge) => ({
     from: edge.source,
     to: edge.target,
@@ -268,8 +275,8 @@ export function exportModelIr(nodes: Node[], edges: Edge[]): ModelIr {
   const diagnostics = lintModel({
     version: '0.1.0',
     model: {
-      name: 'hierarchical_regression',
-      description: 'Random-intercept Bayesian regression example.',
+      name: inferModelName(normalizedNodes),
+      description: 'Bayes Canvas authoring model.',
     },
     plates,
     nodes: normalizedNodes,
@@ -286,8 +293,8 @@ export function exportModelIr(nodes: Node[], edges: Edge[]): ModelIr {
   return {
     version: '0.1.0',
     model: {
-      name: 'hierarchical_regression',
-      description: 'Random-intercept Bayesian regression example.',
+      name: inferModelName(normalizedNodes),
+      description: 'Bayes Canvas authoring model.',
     },
     plates,
     nodes: normalizedNodes,
@@ -633,24 +640,23 @@ function readBalancedBracket(value: string, startIndex: number): { raw: string; 
 }
 
 function buildIndexMappings(nodes: ModelIr['nodes'], plates: ModelIr['plates']): IndexMapping[] {
-  const obs = plates.find((plate) => plate.id === 'obs');
-  const group = plates.find((plate) => plate.id === 'group');
   const mappingNodes = nodes.filter((node) => {
     const parsed = parseSymbolName(node.name);
-    return node.kind === 'data' && parsed.baseSymbol.endsWith('_id') && node.plate !== group?.id;
+    const targetPlate = parsed.baseSymbol.replace(/_id$/, '');
+    return node.kind === 'data' && parsed.baseSymbol.endsWith('_id') && node.plate !== targetPlate;
   });
 
   return mappingNodes.map((node) => {
     const parsed = parseSymbolName(node.name);
     const targetPlate = parsed.baseSymbol.replace(/_id$/, '');
-    const toPlate = plates.find((plate) => plate.id === targetPlate) ?? group ?? plates[0];
-    const fromPlate = node.plate ? plates.find((plate) => plate.id === node.plate) : obs ?? plates[0];
+    const toPlate = plates.find((plate) => plate.id === targetPlate) ?? plates.find((plate) => plate.id.includes(targetPlate)) ?? plates[0];
+    const fromPlate = node.plate ? plates.find((plate) => plate.id === node.plate) : plates[0];
 
     return {
       id: `${parsed.baseSymbol}_mapping`,
       symbol: parsed.baseSymbol,
-      fromPlateId: fromPlate?.id ?? 'obs',
-      toPlateId: toPlate?.id ?? 'group',
+      fromPlateId: fromPlate?.id ?? 'unassigned',
+      toPlateId: toPlate?.id ?? targetPlate,
       inputIndex: parsed.index ?? fromPlate?.index ?? 'i',
       outputIndex: toPlate?.index,
     };
@@ -674,6 +680,32 @@ function buildPriorRecipes(nodes: ModelIr['nodes']): PriorRecipe[] {
         notes: node.notes,
       } satisfies PriorRecipe;
     });
+}
+
+function buildPlatesFromNodes(nodes: CanvasNodeLike[]): ModelIr['plates'] {
+  const plateIds = [...new Set(nodes.map((node) => node.data.plate).filter((plate): plate is string => Boolean(plate)))];
+  return plateIds.map((plateId) => {
+    const node = nodes.find((candidate) => candidate.data.plate === plateId);
+    const size = node?.data.shape?.[0] ?? plateId.toUpperCase();
+    return {
+      id: plateId,
+      label: plateId,
+      index: inferPlateIndex(plateId),
+      size,
+    };
+  });
+}
+
+function inferPlateIndex(plateId: string): string {
+  if (plateId === 'obs' || plateId === 'observation') return 'i';
+  if (plateId === 'group') return 'j';
+  if (plateId === 'time') return 't';
+  return plateId.slice(0, 1).toLowerCase() || 'i';
+}
+
+function inferModelName(nodes: ModelIr['nodes']): string {
+  const observed = nodes.find((node) => node.kind === 'likelihood' || node.observed);
+  return observed ? `${parseSymbolName(observed.name).baseSymbol}_model` : 'bayes_canvas_model';
 }
 
 function buildRegressionTerms(nodes: ModelIr['nodes']): RegressionTerm[] {
@@ -809,6 +841,46 @@ function lintDistribution(
         });
       }
     }
+
+    const allowedParams = new Set(definition.params.map((param) => param.name));
+    for (const paramName of Object.keys(node.distribution?.args ?? {})) {
+      if (!allowedParams.has(paramName)) {
+        diagnostics.push({
+          id: `${node.id}-${paramName}-unknown-param`,
+          severity: 'warning',
+          message: `${definition.name}.${paramName} is not a known parameter.`,
+          target: { nodeId: node.id, distributionParam: paramName },
+          suggestion: `Use one of: ${definition.params.map((param) => param.name).join(', ')}.`,
+        });
+      }
+    }
+
+    if (definition.id === 'multivariate_normal') {
+      const hasCov = Boolean(node.distribution?.args.cov?.trim());
+      const hasChol = Boolean(node.distribution?.args.chol?.trim());
+      if (hasCov === hasChol) {
+        diagnostics.push({
+          id: `${node.id}-mvn-parameterization`,
+          severity: 'error',
+          message: 'MultivariateNormal requires exactly one of cov or chol.',
+          target: { nodeId: node.id },
+          suggestion: 'Choose covariance or Cholesky parameterization, not both.',
+        });
+      }
+    }
+
+    if (definition.deprecated) {
+      diagnostics.push({
+        id: `${node.id}-discouraged-distribution`,
+        severity: 'warning',
+        message: `${definition.name} is discouraged for this workflow.`,
+        target: { nodeId: node.id },
+        suggestion: definition.notes ?? 'Choose a better-supported distribution before handoff.',
+      });
+    }
+
+    const supportDiagnostic = lintSupportCompatibility(node, definition);
+    if (supportDiagnostic) diagnostics.push(supportDiagnostic);
   }
 
   for (const [paramName, paramValue] of Object.entries(node.distribution?.args ?? {})) {
@@ -824,6 +896,34 @@ function lintDistribution(
   }
 
   return diagnostics;
+}
+
+function lintSupportCompatibility(
+  node: ModelIr['nodes'][number],
+  definition: (typeof DISTRIBUTIONS)[number],
+): ModelDiagnostic | undefined {
+  const declared = supportFromConstraints(node.constraints);
+  if (!declared) return undefined;
+  if (declared === definition.support) return undefined;
+  if (declared === 'positive' && definition.support === 'real') return undefined;
+  if (declared === 'unit_interval' && definition.support === 'real') return undefined;
+
+  return {
+    id: `${node.id}-support-mismatch`,
+    severity: 'warning',
+    message: `${node.name} declares ${declared} support, but ${definition.name} has ${definition.support} support.`,
+    target: { nodeId: node.id },
+    suggestion: 'Check the constraint, transform, or distribution before handoff.',
+  };
+}
+
+function supportFromConstraints(constraints?: Constraint[]): string | undefined {
+  if (constraints?.some((constraint) => constraint.kind === 'positive')) return 'positive';
+  if (constraints?.some((constraint) => constraint.kind === 'unit_interval')) return 'unit_interval';
+  if (constraints?.some((constraint) => constraint.kind === 'simplex')) return 'simplex';
+  if (constraints?.some((constraint) => constraint.kind === 'ordered')) return 'ordered';
+  if (constraints?.some((constraint) => constraint.kind === 'correlation_matrix')) return 'correlation_matrix';
+  return undefined;
 }
 
 function lintEdgeConsistency(
