@@ -25,7 +25,7 @@ import {
   getDistributionSupport,
   normalizeDistribution,
 } from './lib/distributionRegistry';
-import { exportModelIr, generateAiPrompt } from './lib/modelIr';
+import { exportModelIr, generateAiPrompt, getPromptTargetLabel, type PromptTarget } from './lib/modelIr';
 import { initialEdges, initialNodes } from './samples/hierarchicalRegression';
 import type { BayesNodeData } from './lib/modelIr';
 
@@ -48,6 +48,7 @@ const PALETTE_ITEMS = [
 ] as const;
 
 const STORAGE_KEY = 'bayes-canvas:model';
+const PROMPT_TARGETS: PromptTarget[] = ['generic', 'pymc', 'numpyro', 'stan', 'review'];
 
 type BayesCanvasNode = Node<BayesNodeData>;
 
@@ -185,8 +186,9 @@ export function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialCanvas.edges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [promptTarget, setPromptTarget] = useState<PromptTarget>('generic');
   const modelIr = useMemo(() => exportModelIr(nodes, edges), [nodes, edges]);
-  const prompt = useMemo(() => generateAiPrompt(modelIr), [modelIr]);
+  const prompt = useMemo(() => generateAiPrompt(modelIr, promptTarget), [modelIr, promptTarget]);
   const [activeOutput, setActiveOutput] = useState<'ir' | 'prompt'>('ir');
   const outputText = activeOutput === 'ir' ? JSON.stringify(modelIr, null, 2) : prompt;
   const selectedNode = useMemo(
@@ -556,6 +558,21 @@ export function App() {
               Copy
             </button>
           </div>
+          {activeOutput === 'prompt' ? (
+            <label className="prompt-target">
+              Prompt target
+              <select
+                value={promptTarget}
+                onChange={(event) => setPromptTarget(event.target.value as PromptTarget)}
+              >
+                {PROMPT_TARGETS.map((target) => (
+                  <option key={target} value={target}>
+                    {getPromptTargetLabel(target)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <pre>{outputText}</pre>
         </aside>
       </section>
