@@ -18,16 +18,15 @@ import {
 } from '@xyflow/react';
 import {
   createDefaultDistribution,
-  DISTRIBUTIONS,
-  findDistribution,
   formatDistributionTex,
   formatDistributionText,
-  getDistributionSupport,
-  normalizeDistribution,
 } from './lib/distributionRegistry';
-import { exportModelIr, generateAiPrompt, getPromptTargetLabel, type PromptTarget } from './lib/modelIr';
+import { exportModelIr, generateAiPrompt, generateModelTex, getPromptTargetLabel, type PromptTarget } from './lib/modelIr';
 import { initialEdges, initialNodes } from './samples/hierarchicalRegression';
 import type { BayesNodeData } from './lib/modelIr';
+import { TexMath } from './components/TexMath';
+import { DistributionEditor } from './components/DistributionEditor';
+import { MathView } from './components/MathView';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   data: 'Data',
@@ -129,27 +128,6 @@ function parseList(value: string): string[] | undefined {
   return items.length ? items : undefined;
 }
 
-function formatArgs(args?: Record<string, string>): string {
-  return Object.entries(args ?? {})
-    .map(([key, value]) => `${key}=${value}`)
-    .join(', ');
-}
-
-function parseArgs(value: string): Record<string, string> {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .reduce<Record<string, string>>((acc, item) => {
-      const [key, ...rest] = item.split('=');
-      const trimmedKey = key?.trim();
-      const trimmedValue = rest.join('=').trim();
-      if (trimmedKey && trimmedValue) {
-        acc[trimmedKey] = trimmedValue;
-      }
-      return acc;
-    }, {});
-}
 
 const nodeTypes = {
   bayesNode: memo(function BayesNode({ data }: NodeProps<Node<BayesNodeData>>) {
@@ -165,7 +143,11 @@ const nodeTypes = {
         </div>
         <div className="node-name">{data.name}</div>
         {distributionText ? <div className="node-formula">{distributionText}</div> : null}
-        {distributionTex ? <div className="node-tex">{distributionTex}</div> : null}
+        {distributionTex ? (
+          <div className="node-tex">
+            <TexMath tex={distributionTex} />
+          </div>
+        ) : null}
         <div className="node-meta">
           {data.shape?.length ? <span>{data.shape.join(' x ')}</span> : <span>scalar</span>}
           {data.plate ? <span>plate: {data.plate}</span> : null}
@@ -189,8 +171,9 @@ export function App() {
   const [promptTarget, setPromptTarget] = useState<PromptTarget>('generic');
   const modelIr = useMemo(() => exportModelIr(nodes, edges), [nodes, edges]);
   const prompt = useMemo(() => generateAiPrompt(modelIr, promptTarget), [modelIr, promptTarget]);
-  const [activeOutput, setActiveOutput] = useState<'ir' | 'prompt'>('ir');
-  const outputText = activeOutput === 'ir' ? JSON.stringify(modelIr, null, 2) : prompt;
+  const [activeOutput, setActiveOutput] = useState<'ir' | 'prompt' | 'math'>('math');
+  const fullTex = useMemo(() => generateModelTex(modelIr), [modelIr]);
+  const outputText = activeOutput === 'ir' ? JSON.stringify(modelIr, null, 2) : activeOutput === 'prompt' ? prompt : fullTex;
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) ?? null,
     [nodes, selectedNodeId],
@@ -201,10 +184,6 @@ export function App() {
   );
   const selectedData = selectedNode?.data;
   const selectedLabel = selectedNode?.id ?? selectedEdge?.id ?? 'none';
-  const selectedDistribution = selectedData?.distribution ? normalizeDistribution(selectedData.distribution) : undefined;
-  const selectedDistributionDefinition = selectedDistribution
-    ? findDistribution(selectedDistribution.id ?? selectedDistribution.name)
-    : undefined;
   const plateCount = useMemo(() => new Set(nodes.map((node) => node.data.plate).filter(Boolean)).size, [nodes]);
 
   useEffect(() => {
@@ -411,54 +390,10 @@ export function App() {
                   />
                   Observed
                 </label>
-                <label>
-                  Distribution
-                  <select
-                    value={selectedDistribution?.id ?? ''}
-                    onChange={(event) =>
-                      updateSelectedNodeData({
-                        distribution: event.target.value
-                          ? mergeDistributionSelection(event.target.value, selectedData.distribution?.args)
-                          : undefined,
-                      })
-                    }
-                  >
-                    <option value="">None</option>
-                    {DISTRIBUTIONS.map((distribution) => (
-                      <option key={distribution.id} value={distribution.id}>
-                        {distribution.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Args
-                  <input
-                    placeholder="mu=0, sigma=1"
-                    value={formatArgs(selectedData.distribution?.args)}
-                    onChange={(event) =>
-                      updateSelectedNodeData({
-                        distribution: selectedData.distribution
-                          ? { ...selectedData.distribution, args: parseArgs(event.target.value) }
-                          : { ...createDefaultDistribution('normal'), args: parseArgs(event.target.value) },
-                      })
-                    }
-                  />
-                </label>
-                {selectedDistribution ? (
-                  <div className="distribution-preview">
-                    <span>{formatDistributionText(selectedDistribution)}</span>
-                    <code>{formatDistributionTex(selectedDistribution)}</code>
-                    {selectedDistributionDefinition ? (
-                      <small>
-                        support: {getDistributionSupport(selectedDistribution)} / params:{' '}
-                        {selectedDistributionDefinition.params.map((param) => param.name).join(', ')}
-                      </small>
-                    ) : (
-                      <small>Custom distribution</small>
-                    )}
-                  </div>
-                ) : null}
+                <DistributionEditor
+                  distribution={selectedData.distribution}
+                  onChange={(distribution) => updateSelectedNodeData({ distribution })}
+                />
                 <label>
                   Expression
                   <textarea
@@ -551,47 +486,59 @@ export function App() {
             >
               AI Prompt
             </button>
-          </div>
-          <div className="output-actions">
-            <span>{activeOutput === 'ir' ? 'JSON contract' : 'Implementation brief'}</span>
-            <button type="button" onClick={() => copyText(outputText)}>
-              Copy
+            <button
+              aria-selected={activeOutput === 'math'}
+              className={activeOutput === 'math' ? 'is-active' : ''}
+              onClick={() => setActiveOutput('math')}
+              role="tab"
+              type="button"
+            >
+              Math
             </button>
           </div>
-          {activeOutput === 'prompt' ? (
-            <label className="prompt-target">
-              Prompt target
-              <select
-                value={promptTarget}
-                onChange={(event) => setPromptTarget(event.target.value as PromptTarget)}
-              >
-                {PROMPT_TARGETS.map((target) => (
-                  <option key={target} value={target}>
-                    {getPromptTargetLabel(target)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <pre>{outputText}</pre>
+          {activeOutput === 'math' ? (
+            <MathView
+              model={modelIr}
+              onSelectNode={(nodeId) => {
+                setNodes((currentNodes) =>
+                  currentNodes.map((node) => ({ ...node, selected: node.id === nodeId })),
+                );
+                setEdges((currentEdges) =>
+                  currentEdges.map((edge) => ({ ...edge, selected: false })),
+                );
+                setSelectedNodeId(nodeId);
+                setSelectedEdgeId(null);
+              }}
+            />
+          ) : (
+            <>
+              <div className="output-actions">
+                <span>{activeOutput === 'ir' ? 'JSON contract' : 'Implementation brief'}</span>
+                <button type="button" onClick={() => copyText(outputText)}>
+                  Copy
+                </button>
+              </div>
+              {activeOutput === 'prompt' ? (
+                <label className="prompt-target">
+                  Prompt target
+                  <select
+                    value={promptTarget}
+                    onChange={(event) => setPromptTarget(event.target.value as PromptTarget)}
+                  >
+                    {PROMPT_TARGETS.map((target) => (
+                      <option key={target} value={target}>
+                        {getPromptTargetLabel(target)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <pre>{outputText}</pre>
+            </>
+          )}
         </aside>
       </section>
     </main>
   );
 }
 
-function mergeDistributionSelection(id: string, currentArgs?: Record<string, string>) {
-  const next = createDefaultDistribution(id);
-
-  return {
-    ...next,
-    args: {
-      ...next.args,
-      ...Object.fromEntries(
-        Object.entries(currentArgs ?? {}).filter(([key]) =>
-          Boolean(findDistribution(id)?.params.some((param) => param.name === key)),
-        ),
-      ),
-    },
-  };
-}

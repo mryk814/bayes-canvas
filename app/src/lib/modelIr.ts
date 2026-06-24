@@ -176,6 +176,67 @@ export function generateAiPrompt(model: ModelIr, target: PromptTarget = 'generic
   ].join('\n');
 }
 
+export interface MathViewSection {
+  title: string;
+  lines: Array<{ nodeId?: string; tex: string }>;
+}
+
+export function generateModelTexSections(model: ModelIr): MathViewSection[] {
+  const sections: MathViewSection[] = [];
+  const { data, priors, deterministic, likelihood } = summarizeModel(model);
+
+  if (model.plates.length) {
+    sections.push({
+      title: 'Indices / Plates',
+      lines: model.plates.map((plate) => ({
+        tex: `${plate.index} \\in \\{1, \\dots, ${plate.size}\\}`,
+      })),
+    });
+  }
+
+  if (data.length) {
+    sections.push({
+      title: 'Data',
+      lines: data.map((node) => ({
+        nodeId: node.id,
+        tex: `${formatTexExpression(node.name)} \\;\\text{(observed, ${node.shape?.length ? `shape ${node.shape.join(' \\times ')}` : 'scalar'})}`,
+      })),
+    });
+  }
+
+  if (priors.length) {
+    sections.push({
+      title: 'Priors',
+      lines: priors.map((node) => ({
+        nodeId: node.id,
+        tex: `${formatTexExpression(node.name)} \\sim ${formatDistributionTex(node.distribution as DistributionSpec)}`,
+      })),
+    });
+  }
+
+  if (deterministic.length) {
+    sections.push({
+      title: 'Deterministic',
+      lines: deterministic.map((node) => ({
+        nodeId: node.id,
+        tex: `${formatTexExpression(node.name)} = ${formatTexExpression(node.expression ?? '')}`,
+      })),
+    });
+  }
+
+  if (likelihood.length) {
+    sections.push({
+      title: 'Likelihood',
+      lines: likelihood.map((node) => ({
+        nodeId: node.id,
+        tex: `${formatTexExpression(node.name)} \\sim ${formatDistributionTex(node.distribution as DistributionSpec)}`,
+      })),
+    });
+  }
+
+  return sections;
+}
+
 export function generateModelTex(model: ModelIr): string {
   const lines = [
     ...model.plates.map((plate) => `${plate.index} &\\in \\{1, \\dots, ${plate.size}\\}`),
@@ -188,6 +249,30 @@ export function generateModelTex(model: ModelIr): string {
   ];
 
   return ['\\begin{aligned}', ...lines.map((line, index) => `  ${line}${index === lines.length - 1 ? '' : ' \\\\'}`), '\\end{aligned}'].join('\n');
+}
+
+export function generateModelTexSectioned(model: ModelIr): string {
+  const sections = generateModelTexSections(model);
+
+  return sections
+    .map((section) => {
+      const header = `% ${section.title}`;
+      const lines = section.lines.map((line) => line.tex);
+      return [header, ...lines].join('\n');
+    })
+    .join('\n\n');
+}
+
+export function generateModelMarkdown(model: ModelIr): string {
+  const sections = generateModelTexSections(model);
+
+  return sections
+    .map((section) => {
+      const header = `### ${section.title}`;
+      const equations = section.lines.map((line) => `$$${line.tex}$$`);
+      return [header, '', ...equations].join('\n');
+    })
+    .join('\n\n');
 }
 
 function summarizeModel(model: ModelIr) {

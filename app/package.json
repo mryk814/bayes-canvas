@@ -11,6 +11,7 @@
   "dependencies": {
     "@vitejs/plugin-react": "latest",
     "@xyflow/react": "latest",
+    "katex": "^0.17.0",
     "react": "latest",
     "react-dom": "latest",
     "typescript": "latest",
@@ -19,6 +20,7 @@
     "zod": "latest"
   },
   "devDependencies": {
+    "@types/katex": "^0.16.8",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3"
   }

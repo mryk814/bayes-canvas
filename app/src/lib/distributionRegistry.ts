@@ -263,16 +263,49 @@ function applyTemplate(
   args: Record<string, string>,
   formatValue: (value: string) => string = (value) => value,
 ): string {
-  return template.replace(/\{([^}]+)\}/g, (_, key: string) => formatValue(args[key] ?? key));
+  return template.replace(/\{([^}]+)\}/g, (match, key: string) => {
+    if (key in args) return formatValue(args[key]);
+    if (/^[a-z][a-z0-9_]*$/.test(key)) return formatValue(key);
+    return match;
+  });
 }
 
+const GREEK_LETTERS: Record<string, string> = {
+  alpha: '\\alpha', beta: '\\beta', gamma: '\\gamma', delta: '\\delta',
+  epsilon: '\\epsilon', lambda: '\\lambda', mu: '\\mu', nu: '\\nu',
+  sigma: '\\sigma', tau: '\\tau', theta: '\\theta', phi: '\\phi',
+  psi: '\\psi', omega: '\\omega',
+};
+
 export function formatTexExpression(value: string): string {
-  return value
-    .replace(/\[([^\]]+)\]/g, '_{$1}')
-    .replace(/\*/g, ' ')
-    .replace(/\bmu\b/g, '\\mu')
-    .replace(/\bsigma\b/g, '\\sigma')
-    .replace(/\balpha\b/g, '\\alpha')
-    .replace(/\bbeta\b/g, '\\beta')
-    .replace(/\blambda\b/g, '\\lambda');
+  let result = value;
+
+  // Iteratively replace innermost bracket subscripts: alpha[group_id[i]] → alpha_{group_id_{i}}
+  let prev = '';
+  while (result !== prev) {
+    prev = result;
+    result = result.replace(/\[([^\[\]]+)\]/g, '_{$1}');
+  }
+
+  result = result.replace(/\*/g, ' ');
+
+  // Replace identifiers: Greek letters and underscore-separated names
+  result = result.replace(/[a-zA-Z][a-zA-Z0-9]*(?:_(?!\{)[a-zA-Z][a-zA-Z0-9]*)*/g, (match) => {
+    if (GREEK_LETTERS[match]) return GREEK_LETTERS[match];
+
+    const parts = match.split('_');
+    if (parts.length > 1 && GREEK_LETTERS[parts[0]]) {
+      const base = GREEK_LETTERS[parts[0]];
+      const sub = parts.slice(1).map((p) => GREEK_LETTERS[p] ?? p).join(',');
+      return `${base}_{${sub}}`;
+    }
+
+    if (parts.length > 1) {
+      return match.replace(/_/g, '\\_');
+    }
+
+    return match;
+  });
+
+  return result;
 }
