@@ -18,6 +18,11 @@ export interface BayesNodeData extends Record<string, unknown> {
   plate?: string;
   distribution?: DistributionSpec;
   expression?: string;
+  constraints?: Constraint[];
+  hints?: ModelHint[];
+  observationProcess?: ObservationProcess;
+  validationLevel?: ValidationLevel;
+  notes?: string;
 }
 
 export interface ModelIr {
@@ -38,6 +43,12 @@ export interface ModelIr {
     to: string;
     role: string;
   }>;
+  indexMappings: IndexMapping[];
+  priorRecipes: PriorRecipe[];
+  regressionTerms: RegressionTerm[];
+  modelBlocks: ModelBlock[];
+  quantitiesOfInterest: QuantityOfInterest[];
+  diagnostics: ModelDiagnostic[];
   symbolTable: SymbolTable;
 }
 
@@ -78,6 +89,112 @@ export interface SymbolTable {
   indices: Record<string, IndexSymbol>;
   functions: Record<string, FunctionSymbol>;
   distributions: Record<string, DistributionSymbol>;
+}
+
+export type Constraint =
+  | { kind: 'positive' }
+  | { kind: 'unit_interval' }
+  | { kind: 'simplex' }
+  | { kind: 'ordered' }
+  | { kind: 'sum_to_zero'; overPlateId?: string }
+  | { kind: 'correlation_matrix' }
+  | { kind: 'custom'; description: string };
+
+export type ModelHint =
+  | { kind: 'parameterization'; value: 'centered' | 'non_centered' | 'unspecified' }
+  | { kind: 'implementation'; value: string }
+  | { kind: 'warning'; value: string };
+
+export type ObservationProcess =
+  | { kind: 'exact' }
+  | { kind: 'missing'; strategy: 'ignore' | 'latent_imputation' | 'note_only' }
+  | { kind: 'measurement_error'; latentTrueSymbol: string; errorScaleSymbol?: string }
+  | { kind: 'censored'; direction: 'left' | 'right' | 'interval'; boundSymbol?: string }
+  | { kind: 'truncated'; lower?: string; upper?: string }
+  | { kind: 'rounded'; unit?: string }
+  | { kind: 'custom'; description: string };
+
+export type ValidationLevel = 'opaque' | 'structured' | 'expanded' | 'linted';
+
+export interface IndexMapping {
+  id: string;
+  symbol: string;
+  fromPlateId: string;
+  toPlateId: string;
+  inputIndex: string;
+  outputIndex?: string;
+}
+
+export interface PriorRecipe {
+  id: string;
+  name: string;
+  targetSymbol: string;
+  collapsed: string;
+  expanded: string[];
+  validationLevel: ValidationLevel;
+  notes?: string;
+}
+
+export interface RegressionTerm {
+  id: string;
+  kind: 'intercept' | 'linear' | 'interaction' | 'group_effect' | 'smooth' | 'gp' | 'bnn' | 'offset' | 'custom';
+  label: string;
+  inputSymbols: string[];
+  outputSymbol: string;
+  outputPlateId?: string;
+  formulaShort: string;
+  formulaExpanded?: string[];
+  validationLevel: ValidationLevel;
+  config?: Record<string, string | number | boolean>;
+}
+
+export interface ModelBlock {
+  id: string;
+  kind: string;
+  label: string;
+  inputs: string[];
+  outputs: string[];
+  formulas?: string[];
+  config?: Record<string, string | number | boolean>;
+  expansion?: string[];
+  validationLevel: ValidationLevel;
+  notes?: string;
+}
+
+export interface QuantityOfInterest {
+  id: string;
+  name: string;
+  expression: string;
+  description?: string;
+  scale?: 'linear' | 'log' | 'logit' | 'probability' | 'custom';
+  targetPlateId?: string;
+}
+
+export interface ExpressionReference {
+  symbol: string;
+  raw: string;
+  indices: string[];
+}
+
+export interface ExpressionAnalysis {
+  expression: string;
+  references: ExpressionReference[];
+  functions: string[];
+  indices: string[];
+}
+
+export interface ModelDiagnostic {
+  id: string;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  target: {
+    nodeId?: string;
+    expressionId?: string;
+    distributionParam?: string;
+    blockId?: string;
+    quantityId?: string;
+  };
+  suggestion?: string;
 }
 
 const PROMPT_TARGETS: Record<PromptTarget, { label: string; instruction: string; preferences: string[] }> = {
@@ -129,6 +246,34 @@ export function exportModelIr(nodes: Node[], edges: Edge[]): ModelIr {
     { id: 'group', label: 'groups', index: 'j', size: 'J' },
   ];
   const normalizedNodes = nodes.map((node) => normalizeNodeForExport(node.id, node.data as BayesNodeData));
+  const normalizedEdges = edges.map((edge) => ({
+    from: edge.source,
+    to: edge.target,
+    role: String(edge.data?.role ?? 'dependency'),
+  }));
+  const symbolTable = buildSymbolTable(normalizedNodes, plates);
+  const indexMappings = buildIndexMappings(normalizedNodes, plates);
+  const priorRecipes = buildPriorRecipes(normalizedNodes);
+  const regressionTerms = buildRegressionTerms(normalizedNodes);
+  const modelBlocks = buildModelBlocks(normalizedNodes);
+  const quantitiesOfInterest = buildQuantitiesOfInterest(normalizedNodes);
+  const diagnostics = lintModel({
+    version: '0.1.0',
+    model: {
+      name: 'hierarchical_regression',
+      description: 'Random-intercept Bayesian regression example.',
+    },
+    plates,
+    nodes: normalizedNodes,
+    edges: normalizedEdges,
+    indexMappings,
+    priorRecipes,
+    regressionTerms,
+    modelBlocks,
+    quantitiesOfInterest,
+    diagnostics: [],
+    symbolTable,
+  });
 
   return {
     version: '0.1.0',
@@ -138,12 +283,14 @@ export function exportModelIr(nodes: Node[], edges: Edge[]): ModelIr {
     },
     plates,
     nodes: normalizedNodes,
-    edges: edges.map((edge) => ({
-      from: edge.source,
-      to: edge.target,
-      role: String(edge.data?.role ?? 'dependency'),
-    })),
-    symbolTable: buildSymbolTable(normalizedNodes, plates),
+    edges: normalizedEdges,
+    indexMappings,
+    priorRecipes,
+    regressionTerms,
+    modelBlocks,
+    quantitiesOfInterest,
+    diagnostics,
+    symbolTable,
   };
 }
 
@@ -193,6 +340,12 @@ export function generateAiPrompt(model: ModelIr, target: PromptTarget = 'generic
     'Indices / plates / shapes:',
     formatPlateList(model),
     '',
+    'Index mapping:',
+    formatIndexMappings(model.indexMappings),
+    '',
+    'Model diagnostics:',
+    formatDiagnostics(model.diagnostics),
+    '',
     'Symbol table:',
     formatSymbolTable(model.symbolTable),
     '',
@@ -205,7 +358,31 @@ export function generateAiPrompt(model: ModelIr, target: PromptTarget = 'generic
     'Likelihood:',
     formatNodeList(sections.likelihood),
     '',
+    'Observation process:',
+    formatObservationProcesses(model.nodes),
+    '',
+    'Constraints and implementation hints:',
+    formatConstraintsAndHints(model.nodes),
+    '',
+    'Prior recipes:',
+    formatPriorRecipes(model.priorRecipes),
+    '',
+    'Regression terms:',
+    formatRegressionTerms(model.regressionTerms),
+    '',
+    'Opaque / structured model blocks:',
+    formatModelBlocks(model.modelBlocks),
+    '',
+    'Quantities of interest:',
+    formatQuantitiesOfInterest(model.quantitiesOfInterest),
+    '',
     'Notes and assumptions:',
+    model.diagnostics.some((diagnostic) => diagnostic.severity !== 'info')
+      ? '- This model has unresolved diagnostics. Review them before implementation.'
+      : '- No unresolved error or warning diagnostics were detected.',
+    model.modelBlocks.some((block) => block.validationLevel === 'opaque' || block.validationLevel === 'structured')
+      ? '- One or more blocks are not fully validated by Bayes Canvas. Respect their inputs, outputs, formulas, and notes.'
+      : '- Structured blocks are expanded or linted where possible.',
     '- Distribution names are backend-neutral Model IR names.',
     '- Edges describe declared dependencies and should be used to preserve graph structure.',
     '- Shapes and plates are part of the contract; do not silently broadcast without checking them.',
@@ -236,6 +413,15 @@ export function generateModelTexSections(model: ModelIr): MathViewSection[] {
       title: 'Indices / Plates',
       lines: model.plates.map((plate) => ({
         tex: `${plate.index} \\in \\{1, \\dots, ${plate.size}\\}`,
+      })),
+    });
+  }
+
+  if (model.indexMappings.length) {
+    sections.push({
+      title: 'Index Mappings',
+      lines: model.indexMappings.map((mapping) => ({
+        tex: `${formatTexExpression(`${mapping.symbol}[${mapping.inputIndex}]`)}: ${mapping.fromPlateId} \\rightarrow ${mapping.toPlateId}`,
       })),
     });
   }
@@ -280,6 +466,57 @@ export function generateModelTexSections(model: ModelIr): MathViewSection[] {
     });
   }
 
+  const observationLines = model.nodes
+    .filter((node) => node.observationProcess)
+    .map((node) => ({
+      nodeId: node.id,
+      tex: `${formatTexExpression(node.name)} \\;\\text{ observed as ${formatObservationProcess(node.observationProcess!)}}`,
+    }));
+
+  if (observationLines.length) {
+    sections.push({
+      title: 'Observation Process',
+      lines: observationLines,
+    });
+  }
+
+  if (model.priorRecipes.length) {
+    sections.push({
+      title: 'Prior Recipes',
+      lines: model.priorRecipes.flatMap((recipe) => [
+        { tex: formatTexExpression(recipe.collapsed) },
+        ...recipe.expanded.map((line) => ({ tex: formatTexExpression(line) })),
+      ]),
+    });
+  }
+
+  if (model.regressionTerms.length) {
+    sections.push({
+      title: 'Regression Terms',
+      lines: model.regressionTerms.map((term) => ({
+        tex: formatTexExpression(term.formulaShort),
+      })),
+    });
+  }
+
+  if (model.modelBlocks.length) {
+    sections.push({
+      title: 'Model Blocks',
+      lines: model.modelBlocks.map((block) => ({
+        tex: `${formatTexExpression(block.outputs.join(', '))} \\;\\text{${block.validationLevel} ${block.kind}}`,
+      })),
+    });
+  }
+
+  if (model.quantitiesOfInterest.length) {
+    sections.push({
+      title: 'Derived Quantities',
+      lines: model.quantitiesOfInterest.map((quantity) => ({
+        tex: `${formatTexExpression(quantity.name)} = ${formatTexExpression(quantity.expression)}`,
+      })),
+    });
+  }
+
   return sections;
 }
 
@@ -292,6 +529,7 @@ export function generateModelTex(model: ModelIr): string {
     ...model.nodes
       .filter((node) => node.expression)
       .map((node) => `${formatTexExpression(node.name)} &= ${formatTexExpression(node.expression ?? '')}`),
+    ...model.quantitiesOfInterest.map((quantity) => `${formatTexExpression(quantity.name)} &= ${formatTexExpression(quantity.expression)}`),
   ];
 
   return ['\\begin{aligned}', ...lines.map((line, index) => `  ${line}${index === lines.length - 1 ? '' : ' \\\\'}`), '\\end{aligned}'].join('\n');
@@ -319,6 +557,419 @@ export function generateModelMarkdown(model: ModelIr): string {
       return [header, '', ...equations].join('\n');
     })
     .join('\n\n');
+}
+
+export function analyzeExpression(expression: string, symbolTable: SymbolTable): ExpressionAnalysis {
+  const references = new Map<string, ExpressionReference>();
+  const functions = new Set<string>();
+  const indices = new Set<string>();
+  const identifierPattern = /[a-zA-Z][a-zA-Z0-9_]*/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = identifierPattern.exec(expression))) {
+    const symbol = match[0];
+    const nextChar = expression[match.index + symbol.length];
+    const bracket = nextChar === '[' ? readBalancedBracket(expression, match.index + symbol.length) : undefined;
+    const isFunction = nextChar === '(' && symbol in symbolTable.functions;
+
+    if (isFunction) {
+      functions.add(symbol);
+      continue;
+    }
+
+    if (symbol in symbolTable.indices) {
+      indices.add(symbol);
+      continue;
+    }
+
+    const raw = bracket ? `${symbol}${bracket.raw}` : symbol;
+    const current = references.get(symbol);
+    const nextReference: ExpressionReference = {
+      symbol,
+      raw,
+      indices: bracket ? [bracket.content] : [],
+    };
+
+    if (current) {
+      references.set(symbol, {
+        symbol,
+        raw: current.raw === raw ? current.raw : `${current.raw}, ${raw}`,
+        indices: [...new Set([...current.indices, ...nextReference.indices])],
+      });
+    } else {
+      references.set(symbol, nextReference);
+    }
+  }
+
+  return {
+    expression,
+    references: [...references.values()],
+    functions: [...functions],
+    indices: [...indices],
+  };
+}
+
+function readBalancedBracket(value: string, startIndex: number): { raw: string; content: string } | undefined {
+  let depth = 0;
+
+  for (let index = startIndex; index < value.length; index += 1) {
+    if (value[index] === '[') depth += 1;
+    if (value[index] === ']') depth -= 1;
+    if (depth === 0) {
+      const raw = value.slice(startIndex, index + 1);
+      return { raw, content: raw.slice(1, -1) };
+    }
+  }
+
+  return undefined;
+}
+
+function buildIndexMappings(nodes: ModelIr['nodes'], plates: ModelIr['plates']): IndexMapping[] {
+  const obs = plates.find((plate) => plate.id === 'obs');
+  const group = plates.find((plate) => plate.id === 'group');
+  const mappingNodes = nodes.filter((node) => {
+    const parsed = parseSymbolName(node.name);
+    return node.kind === 'data' && parsed.baseSymbol.endsWith('_id') && node.plate !== group?.id;
+  });
+
+  return mappingNodes.map((node) => {
+    const parsed = parseSymbolName(node.name);
+    const targetPlate = parsed.baseSymbol.replace(/_id$/, '');
+    const toPlate = plates.find((plate) => plate.id === targetPlate) ?? group ?? plates[0];
+    const fromPlate = node.plate ? plates.find((plate) => plate.id === node.plate) : obs ?? plates[0];
+
+    return {
+      id: `${parsed.baseSymbol}_mapping`,
+      symbol: parsed.baseSymbol,
+      fromPlateId: fromPlate?.id ?? 'obs',
+      toPlateId: toPlate?.id ?? 'group',
+      inputIndex: parsed.index ?? fromPlate?.index ?? 'i',
+      outputIndex: toPlate?.index,
+    };
+  });
+}
+
+function buildPriorRecipes(nodes: ModelIr['nodes']): PriorRecipe[] {
+  const recipes: PriorRecipe[] = [];
+  const hasBeta = nodes.some((node) => parseSymbolName(node.name).baseSymbol === 'beta');
+
+  if (hasBeta) {
+    recipes.push({
+      id: 'horseshoe_beta',
+      name: 'Horseshoe shrinkage prior',
+      targetSymbol: 'beta',
+      collapsed: 'beta[k] ~ Horseshoe(scale = tau0)',
+      expanded: [
+        'beta[k] ~ Normal(0, tau * lambda[k])',
+        'lambda[k] ~ HalfCauchy(1)',
+        'tau ~ HalfCauchy(tau0)',
+      ],
+      validationLevel: 'expanded',
+      notes: 'Horseshoe is represented as an expandable recipe; the distribution registry keeps the collapsed label.',
+    });
+  }
+
+  return recipes;
+}
+
+function buildRegressionTerms(nodes: ModelIr['nodes']): RegressionTerm[] {
+  const deterministicNodes = nodes.filter((node) => node.kind === 'deterministic' && node.expression);
+
+  return deterministicNodes.map((node) => {
+    const parsed = parseSymbolName(node.name);
+    const expression = node.expression ?? '';
+    const inputSymbols = [...new Set(expression.match(/[a-zA-Z][a-zA-Z0-9_]*/g) ?? [])]
+      .filter((symbol) => symbol !== parsed.baseSymbol && !['exp', 'log', 'logit', 'inv_logit', 'softmax', 'dot'].includes(symbol))
+      .filter((symbol) => !['i', 'j', 'k', 't'].includes(symbol));
+
+    return {
+      id: `${parsed.baseSymbol}_additive_terms`,
+      kind: 'linear',
+      label: `${parsed.baseSymbol} additive predictor`,
+      inputSymbols,
+      outputSymbol: parsed.baseSymbol,
+      outputPlateId: node.plate,
+      formulaShort: `${node.name} = ${expression}`,
+      formulaExpanded: [expression],
+      validationLevel: 'expanded',
+    };
+  });
+}
+
+function buildModelBlocks(nodes: ModelIr['nodes']): ModelBlock[] {
+  const blocks: ModelBlock[] = nodes
+    .filter((node) => node.validationLevel && node.validationLevel !== 'linted')
+    .map((node) => {
+      const parsed = parseSymbolName(node.name);
+
+      return {
+        id: `${parsed.baseSymbol}_block`,
+        kind: node.kind,
+        label: node.name,
+        inputs: node.expression ? analyzeLooseSymbols(node.expression) : [],
+        outputs: [parsed.baseSymbol],
+        formulas: node.expression ? [node.expression] : undefined,
+        validationLevel: node.validationLevel ?? 'structured',
+        notes: node.notes,
+      } satisfies ModelBlock;
+    });
+
+  if (!blocks.some((block) => block.kind === 'gp')) {
+    blocks.push({
+      id: 'gp_term_template',
+      kind: 'gp',
+      label: 'Gaussian process regression term template',
+      inputs: ['time'],
+      outputs: ['f_gp'],
+      formulas: ['f_gp[i] = GP(time[i]; kernel=RBF, lengthscale=ell, amplitude=rho)'],
+      config: { kernel: 'RBF', implementation: 'unspecified' },
+      validationLevel: 'structured',
+      notes: 'Template block for GP/GAM/BNN-style regression terms; keep inputs, outputs, and implementation hint in AI handoff.',
+    });
+  }
+
+  return blocks;
+}
+
+function buildQuantitiesOfInterest(nodes: ModelIr['nodes']): QuantityOfInterest[] {
+  const hasBeta = nodes.some((node) => parseSymbolName(node.name).baseSymbol === 'beta');
+  const hasMu = nodes.some((node) => parseSymbolName(node.name).baseSymbol === 'mu');
+  const quantities: QuantityOfInterest[] = [];
+
+  if (hasBeta) {
+    quantities.push({
+      id: 'treatment_effect',
+      name: 'treatment_effect',
+      expression: 'beta',
+      description: 'Primary coefficient-scale effect.',
+      scale: 'linear',
+    });
+  }
+
+  if (hasMu) {
+    quantities.push({
+      id: 'posterior_prediction_target',
+      name: 'posterior_prediction_target',
+      expression: 'mu[i]',
+      description: 'Mean-scale target for posterior predictive checks or implementation review.',
+      scale: 'linear',
+      targetPlateId: 'obs',
+    });
+  }
+
+  return quantities;
+}
+
+function lintModel(model: ModelIr): ModelDiagnostic[] {
+  const diagnostics: ModelDiagnostic[] = [];
+  const nodeById = new Map(model.nodes.map((node) => [node.id, node]));
+  const nodeIdBySymbol = new Map(model.nodes.map((node) => [parseSymbolName(node.name).baseSymbol, node.id]));
+
+  for (const node of model.nodes) {
+    if (node.expression) {
+      diagnostics.push(...lintExpression(node.expression, node.id, model, nodeById, nodeIdBySymbol));
+      diagnostics.push(...lintEdgeConsistency(node, model, nodeIdBySymbol));
+    }
+
+    if (node.distribution) {
+      diagnostics.push(...lintDistribution(node, model, nodeById, nodeIdBySymbol));
+    }
+
+    if (node.validationLevel && node.validationLevel !== 'linted') {
+      diagnostics.push({
+        id: `${node.id}-validation-level`,
+        severity: node.validationLevel === 'opaque' ? 'warning' : 'info',
+        message: `This block is ${node.validationLevel}; Bayes Canvas does not fully validate its internals.`,
+        target: { nodeId: node.id },
+        suggestion: 'Respect the declared inputs, outputs, notes, and formulas during AI handoff.',
+      });
+    }
+  }
+
+  for (const quantity of model.quantitiesOfInterest) {
+    diagnostics.push(...lintExpression(quantity.expression, quantity.id, model, nodeById, nodeIdBySymbol, { quantityId: quantity.id }));
+  }
+
+  return diagnostics;
+}
+
+function lintExpression(
+  expression: string,
+  expressionId: string,
+  model: ModelIr,
+  nodeById: Map<string, ModelIr['nodes'][number]>,
+  nodeIdBySymbol: Map<string, string>,
+  targetOverride?: Pick<ModelDiagnostic['target'], 'quantityId'>,
+): ModelDiagnostic[] {
+  const analysis = analyzeExpression(expression, model.symbolTable);
+  const diagnostics: ModelDiagnostic[] = [];
+
+  for (const reference of analysis.references) {
+    const nodeId = nodeIdBySymbol.get(reference.symbol);
+    const symbol = nodeId ? nodeById.get(nodeId) : undefined;
+
+    if (!symbol) {
+      const suggestion = suggestSymbol(reference.symbol, Object.keys(model.symbolTable.variables));
+      diagnostics.push({
+        id: `${expressionId}-unknown-${reference.symbol}`,
+        severity: 'error',
+        message: `Unknown symbol: ${reference.symbol}.`,
+        target: { expressionId, ...targetOverride },
+        suggestion: suggestion ? `Did you mean ${suggestion}?` : 'Define the symbol or remove the reference.',
+      });
+      continue;
+    }
+
+    diagnostics.push(...lintPlateReference(reference, symbol, expressionId, model, targetOverride));
+  }
+
+  return diagnostics;
+}
+
+function lintDistribution(
+  node: ModelIr['nodes'][number],
+  model: ModelIr,
+  nodeById: Map<string, ModelIr['nodes'][number]>,
+  nodeIdBySymbol: Map<string, string>,
+): ModelDiagnostic[] {
+  const diagnostics: ModelDiagnostic[] = [];
+  const definition = DISTRIBUTIONS.find((dist) => dist.id === node.distribution?.id || dist.name === node.distribution?.name);
+
+  if (definition) {
+    for (const param of definition.params.filter((candidate) => candidate.required)) {
+      if (!node.distribution?.args[param.name]) {
+        diagnostics.push({
+          id: `${node.id}-${param.name}-missing`,
+          severity: 'error',
+          message: `${definition.name}.${param.name} is required.`,
+          target: { nodeId: node.id, distributionParam: param.name },
+          suggestion: `Provide ${param.name} for ${definition.name}.`,
+        });
+      }
+    }
+  }
+
+  for (const [paramName, paramValue] of Object.entries(node.distribution?.args ?? {})) {
+    diagnostics.push(
+      ...lintExpression(paramValue, `${node.id}-${paramName}`, model, nodeById, nodeIdBySymbol)
+        .map((diagnostic) => ({
+          ...diagnostic,
+          id: `${node.id}-${paramName}-${diagnostic.id}`,
+          target: { nodeId: node.id, distributionParam: paramName },
+          message: diagnostic.message.replace('Unknown symbol', `Unknown symbol in ${node.distribution?.name}.${paramName}`),
+        })),
+    );
+  }
+
+  return diagnostics;
+}
+
+function lintEdgeConsistency(
+  node: ModelIr['nodes'][number],
+  model: ModelIr,
+  nodeIdBySymbol: Map<string, string>,
+): ModelDiagnostic[] {
+  const expressionRefs = new Set(
+    analyzeExpression(node.expression ?? '', model.symbolTable)
+      .references
+      .map((reference) => nodeIdBySymbol.get(reference.symbol))
+      .filter(Boolean),
+  );
+  const incoming = new Set(model.edges.filter((edge) => edge.to === node.id).map((edge) => edge.from));
+  const diagnostics: ModelDiagnostic[] = [];
+
+  for (const refNodeId of expressionRefs) {
+    if (refNodeId && !incoming.has(refNodeId)) {
+      diagnostics.push({
+        id: `${node.id}-missing-edge-${refNodeId}`,
+        severity: 'warning',
+        message: `Expression uses ${nodeBySymbolName(model, refNodeId)}, but the canvas has no incoming edge.`,
+        target: { nodeId: node.id, expressionId: node.id },
+        suggestion: 'Add the missing dependency edge or update the expression.',
+      });
+    }
+  }
+
+  for (const edgeNodeId of incoming) {
+    if (!expressionRefs.has(edgeNodeId)) {
+      const role = model.edges.find((edge) => edge.from === edgeNodeId && edge.to === node.id)?.role;
+      if (role === 'index' || role === 'observed-value') continue;
+      diagnostics.push({
+        id: `${node.id}-unused-edge-${edgeNodeId}`,
+        severity: 'info',
+        message: `Canvas has an edge from ${nodeBySymbolName(model, edgeNodeId)}, but the expression does not reference it.`,
+        target: { nodeId: node.id, expressionId: node.id },
+        suggestion: 'Remove the edge or include the symbol in the expression.',
+      });
+    }
+  }
+
+  return diagnostics;
+}
+
+function lintPlateReference(
+  reference: ExpressionReference,
+  symbol: ModelIr['nodes'][number],
+  expressionId: string,
+  model: ModelIr,
+  targetOverride?: Pick<ModelDiagnostic['target'], 'quantityId'>,
+): ModelDiagnostic[] {
+  const parsed = parseSymbolName(symbol.name);
+  const expectedIndex = parsed.index;
+  const index = reference.indices[0];
+
+  if (!symbol.plate || !expectedIndex || !index) return [];
+  if (index === expectedIndex) return [];
+
+  const mapping = model.indexMappings.find((candidate) => index.startsWith(`${candidate.symbol}[`));
+  if (mapping && mapping.toPlateId === symbol.plate) return [];
+
+  return [{
+    id: `${expressionId}-${reference.symbol}-index-mismatch`,
+    severity: 'warning',
+    message: `${reference.symbol} is defined over index ${expectedIndex}, but it is referenced as ${reference.raw}.`,
+    target: { expressionId, ...targetOverride },
+    suggestion: mapping
+      ? `Use ${reference.symbol}[${mapping.symbol}[${mapping.inputIndex}]] for ${mapping.fromPlateId} to ${mapping.toPlateId} mapping.`
+      : `Check whether ${reference.symbol}[${expectedIndex}] or an index mapping is intended.`,
+  }];
+}
+
+function nodeBySymbolName(model: ModelIr, nodeId: string): string {
+  return model.nodes.find((node) => node.id === nodeId)?.name ?? nodeId;
+}
+
+function analyzeLooseSymbols(expression: string): string[] {
+  return [...new Set(expression.match(/[a-zA-Z][a-zA-Z0-9_]*/g) ?? [])]
+    .filter((symbol) => !['exp', 'log', 'logit', 'inv_logit', 'softmax', 'dot', 'i', 'j', 'k', 't'].includes(symbol));
+}
+
+function suggestSymbol(value: string, candidates: string[]): string | undefined {
+  const scored = candidates
+    .map((candidate) => ({ candidate, score: levenshtein(value, candidate) }))
+    .filter((entry) => entry.score <= 2)
+    .sort((a, b) => a.score - b.score);
+
+  return scored[0]?.candidate;
+}
+
+function levenshtein(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, () => Array<number>(b.length + 1).fill(0));
+
+  for (let i = 0; i <= a.length; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j += 1) dp[0][j] = j;
+
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+
+  return dp[a.length][b.length];
 }
 
 function summarizeModel(model: ModelIr) {
@@ -428,6 +1079,122 @@ function formatPlateList(model: ModelIr): string {
     .map((node) => `- ${node.name}: ${node.shape?.join(' x ')}`);
 
   return [...plateLines, ...(shapeLines.length ? ['- Variable shapes:', ...shapeLines] : [])].join('\n');
+}
+
+function formatIndexMappings(mappings: IndexMapping[]): string {
+  if (!mappings.length) return '- No index mappings declared';
+
+  return mappings
+    .map((mapping) =>
+      `- ${mapping.symbol}[${mapping.inputIndex}]: ${mapping.fromPlateId} -> ${mapping.toPlateId}${mapping.outputIndex ? ` (${mapping.outputIndex})` : ''}`,
+    )
+    .join('\n');
+}
+
+function formatDiagnostics(diagnostics: ModelDiagnostic[]): string {
+  if (!diagnostics.length) return '- No diagnostics';
+
+  return diagnostics
+    .map((diagnostic) => {
+      const target = [
+        diagnostic.target.nodeId ? `node ${diagnostic.target.nodeId}` : undefined,
+        diagnostic.target.expressionId ? `expression ${diagnostic.target.expressionId}` : undefined,
+        diagnostic.target.distributionParam ? `param ${diagnostic.target.distributionParam}` : undefined,
+        diagnostic.target.quantityId ? `quantity ${diagnostic.target.quantityId}` : undefined,
+      ].filter(Boolean).join('; ');
+
+      return `- ${diagnostic.severity.toUpperCase()}: ${diagnostic.message}${target ? ` (${target})` : ''}${diagnostic.suggestion ? ` ${diagnostic.suggestion}` : ''}`;
+    })
+    .join('\n');
+}
+
+function formatObservationProcesses(nodes: ModelIr['nodes']): string {
+  const lines = nodes
+    .filter((node) => node.observationProcess)
+    .map((node) => `- ${node.name}: ${formatObservationProcess(node.observationProcess!)}`);
+
+  return lines.length ? lines.join('\n') : '- Exact observation assumed unless otherwise declared';
+}
+
+function formatObservationProcess(process: ObservationProcess): string {
+  if (process.kind === 'missing') return `missing (${process.strategy})`;
+  if (process.kind === 'measurement_error') {
+    return `measurement error; latent true ${process.latentTrueSymbol}${process.errorScaleSymbol ? `; scale ${process.errorScaleSymbol}` : ''}`;
+  }
+  if (process.kind === 'censored') return `${process.direction} censored${process.boundSymbol ? ` at ${process.boundSymbol}` : ''}`;
+  if (process.kind === 'truncated') return `truncated${process.lower ? ` lower ${process.lower}` : ''}${process.upper ? ` upper ${process.upper}` : ''}`;
+  if (process.kind === 'rounded') return `rounded${process.unit ? ` to ${process.unit}` : ''}`;
+  if (process.kind === 'custom') return process.description;
+  return 'exact';
+}
+
+function formatConstraintsAndHints(nodes: ModelIr['nodes']): string {
+  const lines = nodes.flatMap((node) => {
+    const constraints = (node.constraints ?? []).map((constraint) => `${node.name}: constraint ${formatConstraint(constraint)}`);
+    const hints = (node.hints ?? []).map((hint) => `${node.name}: hint ${formatHint(hint)}`);
+    return [...constraints, ...hints].map((line) => `- ${line}`);
+  });
+
+  return lines.length ? lines.join('\n') : '- No constraints or implementation hints declared';
+}
+
+function formatConstraint(constraint: Constraint): string {
+  if (constraint.kind === 'sum_to_zero') return `sum_to_zero${constraint.overPlateId ? ` over ${constraint.overPlateId}` : ''}`;
+  if (constraint.kind === 'custom') return `custom (${constraint.description})`;
+  return constraint.kind;
+}
+
+function formatHint(hint: ModelHint): string {
+  return `${hint.kind}: ${hint.value}`;
+}
+
+function formatPriorRecipes(recipes: PriorRecipe[]): string {
+  if (!recipes.length) return '- No prior recipes declared';
+
+  return recipes
+    .map((recipe) => [
+      `- ${recipe.name} -> ${recipe.targetSymbol}; validation ${recipe.validationLevel}`,
+      `  collapsed: ${recipe.collapsed}`,
+      ...recipe.expanded.map((line) => `  expanded: ${line}`),
+      recipe.notes ? `  notes: ${recipe.notes}` : undefined,
+    ].filter(Boolean).join('\n'))
+    .join('\n');
+}
+
+function formatRegressionTerms(terms: RegressionTerm[]): string {
+  if (!terms.length) return '- No regression terms declared';
+
+  return terms
+    .map((term) => `- ${term.label}: ${term.formulaShort}; inputs ${term.inputSymbols.join(', ') || 'none'}; validation ${term.validationLevel}`)
+    .join('\n');
+}
+
+function formatModelBlocks(blocks: ModelBlock[]): string {
+  if (!blocks.length) return '- No opaque or structured blocks declared';
+
+  return blocks
+    .map((block) => {
+      const formulas = block.formulas?.length ? `; formulas ${block.formulas.join(' | ')}` : '';
+      const notes = block.notes ? `; notes ${block.notes}` : '';
+      return `- ${block.label} (${block.kind}, ${block.validationLevel}): inputs ${block.inputs.join(', ') || 'none'}; outputs ${block.outputs.join(', ') || 'none'}${formulas}${notes}`;
+    })
+    .join('\n');
+}
+
+function formatQuantitiesOfInterest(quantities: QuantityOfInterest[]): string {
+  if (!quantities.length) return '- No quantities of interest declared';
+
+  return quantities
+    .map((quantity) => {
+      const parts = [
+        `${quantity.name} = ${quantity.expression}`,
+        quantity.scale ? `scale ${quantity.scale}` : undefined,
+        quantity.targetPlateId ? `target plate ${quantity.targetPlateId}` : undefined,
+        quantity.description,
+      ].filter(Boolean);
+      return `- ${parts.join('; ')}`;
+    })
+    .join('\n');
 }
 
 function formatSymbolTable(symbolTable: SymbolTable): string {

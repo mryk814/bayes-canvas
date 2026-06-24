@@ -25,9 +25,19 @@ import {
   formatDistributionTex,
   formatDistributionText,
 } from './lib/distributionRegistry';
-import { exportModelIr, generateAiPrompt, generateModelTex, getPromptTargetLabel, type PromptTarget } from './lib/modelIr';
+import {
+  exportModelIr,
+  generateAiPrompt,
+  generateModelTex,
+  getPromptTargetLabel,
+  type BayesNodeData,
+  type Constraint,
+  type ModelHint,
+  type ObservationProcess,
+  type PromptTarget,
+  type ValidationLevel,
+} from './lib/modelIr';
 import { initialEdges, initialNodes } from './samples/hierarchicalRegression';
-import type { BayesNodeData } from './lib/modelIr';
 import { TexMath } from './components/TexMath';
 import { DistributionEditor } from './components/DistributionEditor';
 import { MathView } from './components/MathView';
@@ -52,6 +62,7 @@ const PALETTE_ITEMS = [
 
 const STORAGE_KEY = 'bayes-canvas:model';
 const PROMPT_TARGETS: PromptTarget[] = ['generic', 'pymc', 'numpyro', 'stan', 'review'];
+const VALIDATION_LEVELS: ValidationLevel[] = ['linted', 'expanded', 'structured', 'opaque'];
 
 const GREEK_UNICODE: Record<string, string> = {
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ',
@@ -300,11 +311,67 @@ function parseList(value: string): string[] | undefined {
   return items.length ? items : undefined;
 }
 
+function parseConstraints(value: string): Constraint[] | undefined {
+  const constraints = parseList(value)?.map((item) => {
+    if (item === 'positive') return { kind: 'positive' } satisfies Constraint;
+    if (item === 'unit_interval') return { kind: 'unit_interval' } satisfies Constraint;
+    if (item === 'simplex') return { kind: 'simplex' } satisfies Constraint;
+    if (item === 'ordered') return { kind: 'ordered' } satisfies Constraint;
+    if (item === 'correlation_matrix') return { kind: 'correlation_matrix' } satisfies Constraint;
+    if (item.startsWith('sum_to_zero:')) {
+      return { kind: 'sum_to_zero', overPlateId: item.slice('sum_to_zero:'.length) } satisfies Constraint;
+    }
+    return { kind: 'custom', description: item } satisfies Constraint;
+  });
+
+  return constraints?.length ? constraints : undefined;
+}
+
+function formatConstraintsForInput(constraints?: Constraint[]): string {
+  return (constraints ?? []).map((constraint) => {
+    if (constraint.kind === 'sum_to_zero') return constraint.overPlateId ? `sum_to_zero:${constraint.overPlateId}` : 'sum_to_zero';
+    if (constraint.kind === 'custom') return constraint.description;
+    return constraint.kind;
+  }).join(', ');
+}
+
+function parseHints(value: string): ModelHint[] | undefined {
+  const hints = parseList(value)?.map((item) => {
+    if (['centered', 'non_centered', 'unspecified'].includes(item)) {
+      return { kind: 'parameterization', value: item as 'centered' | 'non_centered' | 'unspecified' } satisfies ModelHint;
+    }
+    if (item.startsWith('warning:')) return { kind: 'warning', value: item.slice('warning:'.length) } satisfies ModelHint;
+    return { kind: 'implementation', value: item } satisfies ModelHint;
+  });
+
+  return hints?.length ? hints : undefined;
+}
+
+function formatHintsForInput(hints?: ModelHint[]): string {
+  return (hints ?? []).map((hint) => {
+    if (hint.kind === 'parameterization') return hint.value;
+    if (hint.kind === 'warning') return `warning:${hint.value}`;
+    return hint.value;
+  }).join(', ');
+}
+
+function createObservationProcess(kind: string): ObservationProcess | undefined {
+  if (!kind) return undefined;
+  if (kind === 'exact') return { kind: 'exact' };
+  if (kind === 'missing') return { kind: 'missing', strategy: 'latent_imputation' };
+  if (kind === 'measurement_error') return { kind: 'measurement_error', latentTrueSymbol: 'x_true', errorScaleSymbol: 'sigma_x' };
+  if (kind === 'censored') return { kind: 'censored', direction: 'right', boundSymbol: 'limit' };
+  if (kind === 'truncated') return { kind: 'truncated', lower: 'lower', upper: 'upper' };
+  if (kind === 'rounded') return { kind: 'rounded', unit: 'unit' };
+  return { kind: 'custom', description: kind };
+}
+
 
 const nodeTypes = {
   bayesNode: memo(function BayesNode({ data }: NodeProps<Node<BayesNodeData>>) {
     const distributionText = data.distribution ? formatDistributionText(data.distribution) : data.expression;
     const distributionTex = data.distribution ? formatDistributionTex(data.distribution) : undefined;
+    const diagnosticCount = Number(data.diagnosticCount ?? 0);
 
     return (
       <div className={`bayes-node bayes-node-${data.kind}`}>
@@ -312,6 +379,7 @@ const nodeTypes = {
         <div className="node-heading">
           <span className="node-kind">{NODE_KIND_LABELS[data.kind]}</span>
           {data.observed ? <span className="node-chip">Observed</span> : null}
+          {diagnosticCount ? <span className="node-chip node-chip-warning">{diagnosticCount} issue</span> : null}
         </div>
         <div className="node-name">{data.name}</div>
         {distributionText ? <div className="node-formula">{distributionText}</div> : null}
@@ -323,6 +391,7 @@ const nodeTypes = {
         <div className="node-meta">
           {data.shape?.length ? <span>{data.shape.join(' x ')}</span> : <span>scalar</span>}
           {data.plate ? <span>plate: {data.plate}</span> : null}
+          {data.validationLevel ? <span>{data.validationLevel}</span> : null}
         </div>
         <Handle className="node-handle" type="source" position={Position.Bottom} />
       </div>
@@ -358,6 +427,29 @@ export function App() {
   const selectedLabel = selectedNode?.id ?? selectedEdge?.id ?? 'none';
   const plateCount = useMemo(() => new Set(nodes.map((node) => node.data.plate).filter(Boolean)).size, [nodes]);
   const [savedModels, setSavedModels] = useState<SavedModelEntry[]>(loadSavedModelsList);
+  const diagnosticCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const diagnostic of modelIr.diagnostics) {
+      const nodeId = diagnostic.target.nodeId;
+      if (!nodeId) continue;
+      counts.set(nodeId, (counts.get(nodeId) ?? 0) + 1);
+    }
+    return counts;
+  }, [modelIr.diagnostics]);
+  const flowNodes = useMemo(
+    () => nodes.map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        diagnosticCount: diagnosticCounts.get(node.id) ?? 0,
+      },
+    })),
+    [diagnosticCounts, nodes],
+  );
+  const selectedDiagnostics = useMemo(
+    () => modelIr.diagnostics.filter((diagnostic) => diagnostic.target.nodeId === selectedNodeId || diagnostic.target.expressionId === selectedNodeId),
+    [modelIr.diagnostics, selectedNodeId],
+  );
 
   const labeledEdges = useMemo(() => {
     const nodeMap = new Map(nodes.map((n) => [n.id, n.data]));
@@ -556,6 +648,10 @@ export function App() {
             <span className="summary-value">{plateCount}</span>
             <span className="summary-label">plates</span>
           </div>
+          <div>
+            <span className="summary-value">{modelIr.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length}</span>
+            <span className="summary-label">checks</span>
+          </div>
         </div>
       </header>
 
@@ -639,6 +735,50 @@ export function App() {
                     onChange={(event) => updateSelectedNodeData({ plate: event.target.value || undefined })}
                   />
                 </label>
+                <label>
+                  Constraints
+                  <input
+                    placeholder="positive, ordered, sum_to_zero:group"
+                    value={formatConstraintsForInput(selectedData.constraints)}
+                    onChange={(event) => updateSelectedNodeData({ constraints: parseConstraints(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  Hints
+                  <input
+                    placeholder="non_centered, sparse GP, warning:check identifiability"
+                    value={formatHintsForInput(selectedData.hints)}
+                    onChange={(event) => updateSelectedNodeData({ hints: parseHints(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  Observation
+                  <select
+                    value={selectedData.observationProcess?.kind ?? ''}
+                    onChange={(event) => updateSelectedNodeData({ observationProcess: createObservationProcess(event.target.value) })}
+                  >
+                    <option value="">Default</option>
+                    <option value="exact">Exact</option>
+                    <option value="missing">Missing / latent imputation</option>
+                    <option value="measurement_error">Measurement error</option>
+                    <option value="censored">Censored</option>
+                    <option value="truncated">Truncated</option>
+                    <option value="rounded">Rounded</option>
+                  </select>
+                </label>
+                <label>
+                  Validation
+                  <select
+                    value={selectedData.validationLevel ?? 'linted'}
+                    onChange={(event) => updateSelectedNodeData({ validationLevel: event.target.value as ValidationLevel })}
+                  >
+                    {VALIDATION_LEVELS.map((level) => (
+                      <option key={level} value={level}>
+                        {level}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="checkbox-row">
                   <input
                     checked={Boolean(selectedData.observed)}
@@ -659,6 +799,25 @@ export function App() {
                     onChange={(event) => updateSelectedNodeData({ expression: event.target.value || undefined })}
                   />
                 </label>
+                <label>
+                  Notes
+                  <textarea
+                    placeholder="Modeling assumption, opaque block contract, or handoff note"
+                    value={selectedData.notes ?? ''}
+                    onChange={(event) => updateSelectedNodeData({ notes: event.target.value || undefined })}
+                  />
+                </label>
+                {selectedDiagnostics.length ? (
+                  <div className="diagnostic-list">
+                    {selectedDiagnostics.map((diagnostic) => (
+                      <div className={`diagnostic-item diagnostic-${diagnostic.severity}`} key={diagnostic.id}>
+                        <strong>{diagnostic.severity}</strong>
+                        <span>{diagnostic.message}</span>
+                        {diagnostic.suggestion ? <small>{diagnostic.suggestion}</small> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : selectedEdge ? (
               <div className="node-editor">
@@ -711,7 +870,7 @@ export function App() {
             </div>
           </div>
           <ReactFlow
-            nodes={nodes}
+            nodes={flowNodes}
             edges={labeledEdges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}

@@ -9,16 +9,16 @@
     { "id": "group", "label": "groups", "index": "j", "size": "J" }
   ],
   "nodes": [
-    { "id": "x", "kind": "data", "name": "x", "shape": ["N"], "observed": true },
-    { "id": "y", "kind": "data", "name": "y", "shape": ["N"], "observed": true },
-    { "id": "group_id", "kind": "data", "name": "group_id", "shape": ["N"], "observed": true },
+    { "id": "x", "kind": "data", "name": "x[i]", "shape": ["N"], "observed": true, "plate": "obs", "observationProcess": { "kind": "measurement_error", "latentTrueSymbol": "x_true[i]", "errorScaleSymbol": "sigma_x" } },
+    { "id": "y", "kind": "data", "name": "y[i]", "shape": ["N"], "observed": true, "plate": "obs", "observationProcess": { "kind": "censored", "direction": "right", "boundSymbol": "y_limit" } },
+    { "id": "group_id", "kind": "data", "name": "group_id[i]", "shape": ["N"], "observed": true, "plate": "obs" },
     { "id": "alpha_bar", "kind": "hyperparameter", "name": "alpha_bar", "distribution": { "id": "normal", "name": "Normal", "args": { "mu": "0", "sigma": "2" } } },
     { "id": "tau_alpha", "kind": "hyperparameter", "name": "tau_alpha", "distribution": { "id": "halfnormal", "name": "HalfNormal", "args": { "sigma": "1" } } },
-    { "id": "alpha", "kind": "parameter", "name": "alpha", "shape": ["J"], "plate": "group", "distribution": { "id": "normal", "name": "Normal", "args": { "mu": "alpha_bar", "sigma": "tau_alpha" } } },
+    { "id": "alpha", "kind": "parameter", "name": "alpha[j]", "shape": ["J"], "plate": "group", "distribution": { "id": "normal", "name": "Normal", "args": { "mu": "alpha_bar", "sigma": "tau_alpha" } }, "hints": [{ "kind": "parameterization", "value": "non_centered" }] },
     { "id": "beta", "kind": "parameter", "name": "beta", "distribution": { "id": "normal", "name": "Normal", "args": { "mu": "0", "sigma": "1" } } },
-    { "id": "sigma", "kind": "parameter", "name": "sigma", "distribution": { "id": "halfnormal", "name": "HalfNormal", "args": { "sigma": "1" } } },
-    { "id": "mu", "kind": "deterministic", "name": "mu", "shape": ["N"], "plate": "obs", "expression": "alpha[group_id[i]] + beta * x[i]" },
-    { "id": "likelihood_y", "kind": "likelihood", "name": "y_likelihood", "plate": "obs", "distribution": { "id": "normal", "name": "Normal", "args": { "mu": "mu[i]", "sigma": "sigma" } } }
+    { "id": "sigma", "kind": "parameter", "name": "sigma", "distribution": { "id": "halfnormal", "name": "HalfNormal", "args": { "sigma": "1" } }, "constraints": [{ "kind": "positive" }] },
+    { "id": "mu", "kind": "deterministic", "name": "mu[i]", "shape": ["N"], "plate": "obs", "expression": "alpha[group_id[i]] + beta * x[i]", "validationLevel": "expanded" },
+    { "id": "likelihood_y", "kind": "likelihood", "name": "y[i]", "plate": "obs", "distribution": { "id": "normal", "name": "Normal", "args": { "mu": "mu[i]", "sigma": "sigma" } }, "observed": true, "observationProcess": { "kind": "censored", "direction": "right", "boundSymbol": "y_limit" } }
   ],
   "edges": [
     { "from": "alpha_bar", "to": "alpha", "role": "prior-parameter" },
@@ -30,5 +30,59 @@
     { "from": "mu", "to": "likelihood_y", "role": "likelihood-parameter" },
     { "from": "sigma", "to": "likelihood_y", "role": "likelihood-parameter" },
     { "from": "y", "to": "likelihood_y", "role": "observed-value" }
-  ]
+  ],
+  "indexMappings": [
+    { "id": "group_id_mapping", "symbol": "group_id", "fromPlateId": "obs", "toPlateId": "group", "inputIndex": "i", "outputIndex": "j" }
+  ],
+  "priorRecipes": [
+    {
+      "id": "horseshoe_beta",
+      "name": "Horseshoe shrinkage prior",
+      "targetSymbol": "beta",
+      "collapsed": "beta[k] ~ Horseshoe(scale = tau0)",
+      "expanded": [
+        "beta[k] ~ Normal(0, tau * lambda[k])",
+        "lambda[k] ~ HalfCauchy(1)",
+        "tau ~ HalfCauchy(tau0)"
+      ],
+      "validationLevel": "expanded"
+    }
+  ],
+  "regressionTerms": [
+    {
+      "id": "mu_additive_terms",
+      "kind": "linear",
+      "label": "mu additive predictor",
+      "inputSymbols": ["alpha", "group_id", "beta", "x"],
+      "outputSymbol": "mu",
+      "outputPlateId": "obs",
+      "formulaShort": "mu[i] = alpha[group_id[i]] + beta * x[i]",
+      "formulaExpanded": ["alpha[group_id[i]] + beta * x[i]"],
+      "validationLevel": "expanded"
+    }
+  ],
+  "modelBlocks": [
+    {
+      "id": "gp_term_template",
+      "kind": "gp",
+      "label": "Gaussian process regression term template",
+      "inputs": ["time"],
+      "outputs": ["f_gp"],
+      "formulas": ["f_gp[i] = GP(time[i]; kernel=RBF, lengthscale=ell, amplitude=rho)"],
+      "config": { "kernel": "RBF", "implementation": "unspecified" },
+      "validationLevel": "structured",
+      "notes": "Template block for GP/GAM/BNN-style regression terms."
+    }
+  ],
+  "quantitiesOfInterest": [
+    { "id": "treatment_effect", "name": "treatment_effect", "expression": "beta", "description": "Primary coefficient-scale effect.", "scale": "linear" },
+    { "id": "posterior_prediction_target", "name": "posterior_prediction_target", "expression": "mu[i]", "description": "Mean-scale posterior prediction target.", "scale": "linear", "targetPlateId": "obs" }
+  ],
+  "diagnostics": [],
+  "symbolTable": {
+    "variables": {},
+    "indices": {},
+    "functions": {},
+    "distributions": {}
+  }
 }

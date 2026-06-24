@@ -42,6 +42,11 @@
           "shape": { "type": "array", "items": { "type": "string" } },
           "observed": { "type": "boolean" },
           "plate": { "type": "string" },
+          "constraints": { "type": "array", "items": { "$ref": "#/$defs/constraint" } },
+          "hints": { "type": "array", "items": { "$ref": "#/$defs/modelHint" } },
+          "observationProcess": { "$ref": "#/$defs/observationProcess" },
+          "validationLevel": { "$ref": "#/$defs/validationLevel" },
+          "notes": { "type": "string" },
           "distribution": {
             "type": "object",
             "required": ["id", "name", "args"],
@@ -55,6 +60,104 @@
             }
           },
           "expression": { "type": "string" }
+        }
+      }
+    },
+    "indexMappings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "symbol", "fromPlateId", "toPlateId", "inputIndex"],
+        "properties": {
+          "id": { "type": "string" },
+          "symbol": { "type": "string" },
+          "fromPlateId": { "type": "string" },
+          "toPlateId": { "type": "string" },
+          "inputIndex": { "type": "string" },
+          "outputIndex": { "type": "string" }
+        }
+      }
+    },
+    "priorRecipes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "targetSymbol", "collapsed", "expanded", "validationLevel"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "targetSymbol": { "type": "string" },
+          "collapsed": { "type": "string" },
+          "expanded": { "type": "array", "items": { "type": "string" } },
+          "validationLevel": { "$ref": "#/$defs/validationLevel" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "regressionTerms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "label", "inputSymbols", "outputSymbol", "formulaShort", "validationLevel"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string" },
+          "label": { "type": "string" },
+          "inputSymbols": { "type": "array", "items": { "type": "string" } },
+          "outputSymbol": { "type": "string" },
+          "outputPlateId": { "type": "string" },
+          "formulaShort": { "type": "string" },
+          "formulaExpanded": { "type": "array", "items": { "type": "string" } },
+          "validationLevel": { "$ref": "#/$defs/validationLevel" },
+          "config": { "type": "object" }
+        }
+      }
+    },
+    "modelBlocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "label", "inputs", "outputs", "validationLevel"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string" },
+          "label": { "type": "string" },
+          "inputs": { "type": "array", "items": { "type": "string" } },
+          "outputs": { "type": "array", "items": { "type": "string" } },
+          "formulas": { "type": "array", "items": { "type": "string" } },
+          "config": { "type": "object" },
+          "expansion": { "type": "array", "items": { "type": "string" } },
+          "validationLevel": { "$ref": "#/$defs/validationLevel" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "quantitiesOfInterest": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "expression"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "expression": { "type": "string" },
+          "description": { "type": "string" },
+          "scale": { "type": "string", "enum": ["linear", "log", "logit", "probability", "custom"] },
+          "targetPlateId": { "type": "string" }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "message", "target"],
+        "properties": {
+          "id": { "type": "string" },
+          "severity": { "type": "string", "enum": ["error", "warning", "info"] },
+          "message": { "type": "string" },
+          "target": { "type": "object" },
+          "suggestion": { "type": "string" }
         }
       }
     },
@@ -131,6 +234,42 @@
             }
           }
         }
+      }
+    }
+  },
+  "$defs": {
+    "validationLevel": { "type": "string", "enum": ["opaque", "structured", "expanded", "linted"] },
+    "constraint": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string" },
+        "overPlateId": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "modelHint": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    },
+    "observationProcess": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string" },
+        "strategy": { "type": "string" },
+        "latentTrueSymbol": { "type": "string" },
+        "errorScaleSymbol": { "type": "string" },
+        "direction": { "type": "string" },
+        "boundSymbol": { "type": "string" },
+        "lower": { "type": "string" },
+        "upper": { "type": "string" },
+        "unit": { "type": "string" },
+        "description": { "type": "string" }
       }
     }
   }
