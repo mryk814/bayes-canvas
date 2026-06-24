@@ -40,6 +40,19 @@ import { initialEdges, initialNodes } from './samples/hierarchicalRegression';
 import { TexMath } from './components/TexMath';
 import { DistributionEditor } from './components/DistributionEditor';
 import { MathView } from './components/MathView';
+import {
+  buildCanvasHandoff,
+  buildCanvasPortablePackage,
+  compileCanvas,
+  projectToReactFlow,
+  previewCanvasPatch,
+} from './lib/documentAdapter';
+import { assertJsonComplexity } from './lib/core/migrations.js';
+import type { HandoffTarget } from './lib/core/handoff.js';
+import type { PatchPreview } from './lib/core/patch-proposal.js';
+import { diffModelDocuments } from './lib/core/semantic-diff.js';
+import { validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
+import { saveAutosave } from './lib/storage';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   data: 'Data',
@@ -90,6 +103,8 @@ const PALETTE_GROUPS: Array<{
 ];
 
 const STORAGE_KEY = 'bayes-canvas:model';
+const MAX_IMPORT_BYTES = 1024 * 1024;
+const MAX_IMPORT_DEPTH = 32;
 const PROMPT_TARGETS: PromptTarget[] = ['generic', 'pymc', 'numpyro', 'stan', 'review'];
 const CONSTRAINT_OPTIONS: Array<{ kind: Exclude<Constraint['kind'], 'sum_to_zero' | 'custom'>; label: string; note: string }> = [
   { kind: 'positive', label: '正の値', note: '> 0' },
@@ -108,6 +123,13 @@ const OBSERVATION_OPTIONS = [
   { value: 'truncated', label: '切断あり' },
   { value: 'rounded', label: '丸められた値' },
 ] as const;
+
+interface PlateRow {
+  id: string;
+  index: string;
+  size: string;
+  nodeCount: number;
+}
 
 const GREEK_UNICODE: Record<string, string> = {
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ',
@@ -184,6 +206,24 @@ type BayesCanvasNode = Node<BayesNodeData>;
 interface CanvasState {
   nodes: BayesCanvasNode[];
   edges: Edge[];
+}
+
+interface ImportErrorState {
+  title: string;
+  detail: string;
+}
+
+interface UndoState {
+  message: string;
+  nodes: BayesCanvasNode[];
+  edges: Edge[];
+}
+
+interface PendingPatchState {
+  preview: PatchPreview;
+  nodes: BayesCanvasNode[];
+  edges: Edge[];
+  summary: string;
 }
 
 const initialCanvasNodes: BayesCanvasNode[] = initialNodes.map((node) => ({
@@ -328,29 +368,71 @@ function exportCanvasToFile(nodes: BayesCanvasNode[], edges: Edge[]) {
   URL.revokeObjectURL(url);
 }
 
+function exportPortablePackageToFile(packageData: ReturnType<typeof buildCanvasPortablePackage>) {
+  const data = JSON.stringify(packageData, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bayes-canvas-${new Date().toISOString().slice(0, 10)}.bayescanvas.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function parseCanvasFile(file: File): Promise<CanvasState> {
   return new Promise((resolve, reject) => {
+    if (file.size > MAX_IMPORT_BYTES) {
+      reject(new Error(`ファイルが大きすぎます。上限は ${Math.round(MAX_IMPORT_BYTES / 1024)}KB です。`));
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const parsed = JSON.parse(reader.result as string);
-        if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
-          reject(new Error('Invalid model file'));
+        const parsed = assertJsonComplexity(String(reader.result), {
+          maxBytes: MAX_IMPORT_BYTES,
+          maxDepth: MAX_IMPORT_DEPTH,
+        });
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          reject(new Error('Bayes CanvasのJSONオブジェクトではありません。'));
+          return;
+        }
+        const modelFile = parsed as Partial<CanvasState>;
+        const portableFile = parsed as {
+          files?: Record<string, string>;
+        };
+        if (portableFile.files?.['model.json'] && portableFile.files?.['layout.json']) {
+          const projected = projectToReactFlow({
+            document: JSON.parse(portableFile.files['model.json']),
+            layout: JSON.parse(portableFile.files['layout.json']),
+          });
+          resolve({
+            nodes: projected.nodes.map(prepareCanvasNode),
+            edges: projected.edges.map((edge: Edge) => ({
+              ...edge,
+              type: 'smoothstep',
+              markerEnd: { type: MarkerType.ArrowClosed },
+            })),
+          });
+          return;
+        }
+        if (!Array.isArray(modelFile.nodes) || !Array.isArray(modelFile.edges)) {
+          reject(new Error('必須field `nodes` / `edges` または portable package の `files.model.json` / `files.layout.json` がありません。'));
           return;
         }
         resolve({
-          nodes: (parsed.nodes as BayesCanvasNode[]).map(prepareCanvasNode),
-          edges: parsed.edges.map((edge: Edge) => ({
+          nodes: modelFile.nodes.map(prepareCanvasNode),
+          edges: modelFile.edges.map((edge: Edge) => ({
             ...edge,
             type: 'smoothstep',
             markerEnd: { type: MarkerType.ArrowClosed },
           })),
         });
-      } catch {
-        reject(new Error('Invalid JSON'));
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error('JSON形式が正しくありません。'));
       }
     };
-    reader.onerror = () => reject(reader.error);
+    reader.onerror = () => reject(reader.error ?? new Error('ファイルを読み込めませんでした。'));
     reader.readAsText(file);
   });
 }
@@ -525,6 +607,55 @@ function copyText(value: string) {
   void navigator.clipboard?.writeText(value);
 }
 
+function inferPlateIndexForUi(plateId: string): string {
+  if (plateId === 'obs' || plateId === 'observation') return 'i';
+  if (plateId === 'group') return 'j';
+  if (plateId === 'time') return 't';
+  return plateId.slice(0, 1).toLowerCase() || 'i';
+}
+
+function renameIndexedSymbol(name: string, nextIndex: string): string {
+  const trimmed = name.trim();
+  if (!nextIndex.trim()) return trimmed;
+  if (/\[[^\]]+\]/.test(trimmed)) return trimmed.replace(/\[[^\]]+\]/, `[${nextIndex.trim()}]`);
+  return `${trimmed}[${nextIndex.trim()}]`;
+}
+
+function formatReviewPanel(diagnostics: ReturnType<typeof compileCanvas>['semantic']['diagnostics']): string {
+  if (!diagnostics.length) {
+    return 'No compiler diagnostics. Handoff is ready.';
+  }
+
+  return diagnostics
+    .map((diagnostic) => {
+      const fixText = diagnostic.fixes?.length
+        ? `\n  fixes: ${diagnostic.fixes.map((fix) => fix.title).join(', ')}`
+        : '';
+      const relatedText = diagnostic.related?.length
+        ? `\n  related: ${diagnostic.related.map((related) => `${related.path} ${related.message}`).join(' / ')}`
+        : '';
+      return [
+        `${diagnostic.severity.toUpperCase()} ${diagnostic.code} [${diagnostic.stage}]`,
+        `  path: ${diagnostic.path}`,
+        `  blocks handoff: ${diagnostic.blocksHandoff ? 'yes' : 'no'}`,
+        `  ${diagnostic.message}${fixText}${relatedText}`,
+      ].join('\n');
+    })
+    .join('\n\n');
+}
+
+function formatSemanticDiff(items: ReturnType<typeof diffModelDocuments>): string {
+  if (!items.length) return 'No semantic changes from the initial sample.';
+  return items
+    .map((item) => [
+      `${item.kind}: ${item.label}`,
+      `  path: ${item.path}`,
+      item.before !== undefined ? `  before: ${JSON.stringify(item.before)}` : undefined,
+      item.after !== undefined ? `  after: ${JSON.stringify(item.after)}` : undefined,
+    ].filter(Boolean).join('\n'))
+    .join('\n\n');
+}
+
 export function App() {
   const initialCanvas = useMemo(() => loadInitialCanvas(), []);
   const [nodes, setNodes, onNodesChange] = useNodesState<BayesCanvasNode>(initialCanvas.nodes);
@@ -533,10 +664,42 @@ export function App() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [promptTarget, setPromptTarget] = useState<PromptTarget>('generic');
   const modelIr = useMemo(() => exportModelIr(nodes, edges), [nodes, edges]);
+  const compiledCanvas = useMemo(() => compileCanvas(nodes, edges), [nodes, edges]);
+  const handoffBundle = useMemo(
+    () => buildCanvasHandoff(nodes, edges, promptTarget as HandoffTarget),
+    [edges, nodes, promptTarget],
+  );
   const prompt = useMemo(() => generateAiPrompt(modelIr, promptTarget), [modelIr, promptTarget]);
-  const [activeOutput, setActiveOutput] = useState<'ir' | 'prompt' | 'math'>('math');
+  const [activeOutput, setActiveOutput] = useState<'ir' | 'prompt' | 'math' | 'review' | 'handoff' | 'package' | 'diff'>('math');
+  const [importError, setImportError] = useState<ImportErrorState | null>(null);
+  const [undoState, setUndoState] = useState<UndoState | null>(null);
+  const [patchInput, setPatchInput] = useState('');
+  const [pendingPatch, setPendingPatch] = useState<PendingPatchState | null>(null);
+  const [receipt, setReceipt] = useState<ImplementationReceipt | null>(null);
   const fullTex = useMemo(() => generateModelTex(modelIr), [modelIr]);
-  const outputText = activeOutput === 'ir' ? JSON.stringify(modelIr, null, 2) : activeOutput === 'prompt' ? prompt : fullTex;
+  const reviewText = useMemo(() => formatReviewPanel(compiledCanvas.semantic.diagnostics), [compiledCanvas.semantic.diagnostics]);
+  const initialCompiledCanvas = useMemo(() => compileCanvas(initialCanvasNodes, initialCanvasEdges), []);
+  const semanticDiff = useMemo(
+    () => diffModelDocuments(initialCompiledCanvas.document, compiledCanvas.document),
+    [compiledCanvas.document, initialCompiledCanvas.document],
+  );
+  const portablePackage = useMemo(
+    () => buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget),
+    [edges, nodes, promptTarget],
+  );
+  const outputText = activeOutput === 'ir'
+    ? JSON.stringify({ modelIr, modelDocument: compiledCanvas.document, layout: compiledCanvas.layout }, null, 2)
+    : activeOutput === 'prompt'
+      ? prompt
+      : activeOutput === 'handoff'
+        ? JSON.stringify(handoffBundle, null, 2)
+        : activeOutput === 'package'
+          ? JSON.stringify(portablePackage, null, 2)
+          : activeOutput === 'diff'
+            ? formatSemanticDiff(semanticDiff)
+            : activeOutput === 'review'
+              ? reviewText
+              : fullTex;
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) ?? null,
     [nodes, selectedNodeId],
@@ -568,6 +731,19 @@ export function App() {
     selectedData && ['parameter', 'hyperparameter', 'latent'].includes(selectedData.kind),
   );
   const plateCount = useMemo(() => new Set(nodes.map((node) => node.data.plate).filter(Boolean)).size, [nodes]);
+  const plateRows = useMemo<PlateRow[]>(() => {
+    const byPlate = new Map<string, BayesCanvasNode[]>();
+    for (const node of nodes) {
+      if (!node.data.plate) continue;
+      byPlate.set(node.data.plate, [...(byPlate.get(node.data.plate) ?? []), node]);
+    }
+    return [...byPlate.entries()].map(([id, plateNodes]) => ({
+      id,
+      index: inferPlateIndexForUi(id),
+      size: plateNodes.find((node) => node.data.shape?.length)?.data.shape?.[0] ?? id.toUpperCase(),
+      nodeCount: plateNodes.length,
+    }));
+  }, [nodes]);
   const [savedModels, setSavedModels] = useState<SavedModelEntry[]>(loadSavedModelsList);
   const diagnosticCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -576,8 +752,14 @@ export function App() {
       if (!nodeId) continue;
       counts.set(nodeId, (counts.get(nodeId) ?? 0) + 1);
     }
+    for (const diagnostic of compiledCanvas.semantic.diagnostics) {
+      const match = /^\/entities\/([^/]+)/.exec(diagnostic.path);
+      if (!match) continue;
+      const nodeId = match[1].replaceAll('~1', '/').replaceAll('~0', '~');
+      counts.set(nodeId, (counts.get(nodeId) ?? 0) + 1);
+    }
     return counts;
-  }, [modelIr.diagnostics]);
+  }, [compiledCanvas.semantic.diagnostics, modelIr.diagnostics]);
   const flowNodes = useMemo(
     () => nodes.map((node) => ({
       ...node,
@@ -591,6 +773,10 @@ export function App() {
   const selectedDiagnostics = useMemo(
     () => modelIr.diagnostics.filter((diagnostic) => diagnostic.target.nodeId === selectedNodeId || diagnostic.target.expressionId === selectedNodeId),
     [modelIr.diagnostics, selectedNodeId],
+  );
+  const selectedCompilerDiagnostics = useMemo(
+    () => compiledCanvas.semantic.diagnostics.filter((diagnostic) => selectedNodeId && diagnostic.path.startsWith(`/entities/${selectedNodeId}`)),
+    [compiledCanvas.semantic.diagnostics, selectedNodeId],
   );
 
   const labeledEdges = useMemo(() => {
@@ -606,6 +792,23 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ nodes, edges }));
   }, [nodes, edges]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      void saveAutosave(compiledCanvas.document, compiledCanvas.layout).catch((error) => {
+        if (cancelled) return;
+        setImportError({
+          title: '自動保存に失敗しました',
+          detail: error instanceof Error ? error.message : 'IndexedDBへ保存できませんでした。',
+        });
+      });
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [compiledCanvas.document, compiledCanvas.layout]);
 
   const addNodeFromPalette = useCallback(
     (kind: BayesNodeData['kind']) => {
@@ -699,6 +902,57 @@ export function App() {
     },
     [selectedEdgeId, setEdges],
   );
+
+  const renamePlate = useCallback((plateId: string, nextId: string) => {
+    const trimmed = nextId.trim();
+    if (!trimmed || trimmed === plateId) return;
+    setNodes((currentNodes) =>
+      currentNodes.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          plate: node.data.plate === plateId ? trimmed : node.data.plate,
+        },
+      })),
+    );
+  }, [setNodes]);
+
+  const updatePlateSize = useCallback((plateId: string, nextSize: string) => {
+    const trimmed = nextSize.trim();
+    setNodes((currentNodes) =>
+      currentNodes.map((node) => {
+        if (node.data.plate !== plateId) return node;
+        const currentShape = node.data.shape ?? [];
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            shape: trimmed ? [trimmed, ...currentShape.slice(1)] : currentShape.slice(1),
+          },
+        };
+      }),
+    );
+  }, [setNodes]);
+
+  const updatePlateIndex = useCallback((plateId: string, nextIndex: string) => {
+    setNodes((currentNodes) =>
+      currentNodes.map((node) => {
+        if (node.data.plate !== plateId) return node;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            name: renameIndexedSymbol(node.data.name, nextIndex),
+          },
+        };
+      }),
+    );
+  }, [setNodes]);
+
+  const addPlateToSelection = useCallback(() => {
+    if (!selectedNodeId) return;
+    updateSelectedNodeData({ plate: 'time', shape: ['T'] });
+  }, [selectedNodeId, updateSelectedNodeData]);
 
   const applyHorseshoePrior = useCallback(() => {
     const horseshoeDistribution = {
@@ -804,6 +1058,12 @@ export function App() {
 
   const deleteSelectedItem = useCallback(() => {
     if (selectedNodeId) {
+      const targetName = nodes.find((node) => node.id === selectedNodeId)?.data.name ?? selectedNodeId;
+      setUndoState({
+        message: `${targetName} を削除しました。`,
+        nodes,
+        edges,
+      });
       setNodes((currentNodes) => currentNodes.filter((node) => node.id !== selectedNodeId));
       setEdges((currentEdges) =>
         currentEdges.filter((edge) => edge.source !== selectedNodeId && edge.target !== selectedNodeId),
@@ -814,10 +1074,93 @@ export function App() {
     }
 
     if (selectedEdgeId) {
+      setUndoState({
+        message: `${selectedEdgeId} を削除しました。`,
+        nodes,
+        edges,
+      });
       setEdges((currentEdges) => currentEdges.filter((edge) => edge.id !== selectedEdgeId));
       setSelectedEdgeId(null);
     }
-  }, [selectedEdgeId, selectedNodeId, setEdges, setNodes]);
+  }, [edges, nodes, selectedEdgeId, selectedNodeId, setEdges, setNodes]);
+
+  const restoreUndo = useCallback(() => {
+    if (!undoState) return;
+    setNodes(undoState.nodes);
+    setEdges(undoState.edges);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setUndoState(null);
+  }, [setEdges, setNodes, undoState]);
+
+  const insertPatchTemplate = useCallback(() => {
+    setPatchInput(JSON.stringify({
+      proposalVersion: '1.0.0',
+      baseDocumentId: compiledCanvas.document.documentId,
+      baseRevision: compiledCanvas.document.revision,
+      intent: 'Rename beta to slope as a reviewed semantic rename.',
+      author: 'ai',
+      operations: [
+        { op: 'replace', path: '/entities/beta/symbol', value: 'slope' },
+        { op: 'replace', path: '/entities/beta/label', value: 'slope' },
+      ],
+      reviewNotes: ['Preview diagnostics and semantic diff before applying.'],
+    }, null, 2));
+  }, [compiledCanvas.document.documentId, compiledCanvas.document.revision]);
+
+  const previewPatch = useCallback(() => {
+    try {
+      const preview = previewCanvasPatch(nodes, edges, JSON.parse(patchInput));
+      setPendingPatch({
+        preview,
+        nodes: preview.projected.nodes,
+        edges: preview.projected.edges,
+        summary: [
+          `${preview.semanticDiff.length} semantic changes`,
+          `${preview.before.diagnostics.length} diagnostics before`,
+          `${preview.after.diagnostics.length} diagnostics after`,
+        ].join(' / '),
+      });
+      setImportError(null);
+    } catch (error) {
+      setPendingPatch(null);
+      setImportError({
+        title: 'パッチをプレビューできません',
+        detail: error instanceof Error ? error.message : 'JSON Patch proposalを確認してください。',
+      });
+    }
+  }, [edges, nodes, patchInput]);
+
+  const applyPendingPatch = useCallback(() => {
+    if (!pendingPatch) return;
+    setUndoState({ message: 'パッチを適用しました。', nodes, edges });
+    setNodes(pendingPatch.nodes);
+    setEdges(pendingPatch.edges);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setPendingPatch(null);
+  }, [edges, nodes, pendingPatch, setEdges, setNodes]);
+
+  const handleReceiptImport = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const raw = assertJsonComplexity(await file.text(), { maxBytes: MAX_IMPORT_BYTES, maxDepth: MAX_IMPORT_DEPTH });
+        setReceipt(validateImplementationReceipt(raw));
+        setImportError(null);
+      } catch (error) {
+        setImportError({
+          title: 'Receiptを読み込めません',
+          detail: error instanceof Error ? error.message : 'Implementation Receiptの形式を確認してください。',
+        });
+      }
+    };
+    input.click();
+  }, []);
 
   const resetSample = useCallback(() => {
     setNodes(initialCanvasNodes);
@@ -865,8 +1208,12 @@ export function App() {
         setEdges(state.edges);
         setSelectedNodeId(null);
         setSelectedEdgeId(null);
-      } catch {
-        window.alert('モデルJSONを読み込めませんでした。ファイル形式を確認してください。');
+        setImportError(null);
+      } catch (error) {
+        setImportError({
+          title: '読み込みに失敗しました',
+          detail: error instanceof Error ? error.message : 'JSON形式とBayes Canvas形式を確認してください。',
+        });
       }
     };
     input.click();
@@ -893,11 +1240,37 @@ export function App() {
             <span className="summary-label">プレート</span>
           </div>
           <div>
-            <span className="summary-value">{modelIr.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length}</span>
+            <span className="summary-value">{compiledCanvas.semantic.readiness.summary.errors}</span>
+            <span className="summary-label">エラー</span>
+          </div>
+          <div>
+            <span className="summary-value">{modelIr.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length + compiledCanvas.semantic.readiness.summary.warnings}</span>
             <span className="summary-label">確認</span>
           </div>
         </div>
       </header>
+
+      {importError ? (
+        <div className="status-banner status-error" role="alert">
+          <strong>{importError.title}</strong>
+          <span>{importError.detail}</span>
+          <button type="button" onClick={() => setImportError(null)}>
+            閉じる
+          </button>
+        </div>
+      ) : null}
+
+      {undoState ? (
+        <div className="status-banner status-undo" role="status">
+          <span>{undoState.message}</span>
+          <button type="button" onClick={restoreUndo}>
+            元に戻す
+          </button>
+          <button type="button" onClick={() => setUndoState(null)}>
+            確定
+          </button>
+        </div>
+      ) : null}
 
       <section className="workspace">
         <aside className="panel left-panel">
@@ -924,6 +1297,54 @@ export function App() {
                 </div>
               </div>
             ))}
+          </div>
+          <div className="plate-panel">
+            <div className="panel-title compact">
+              <h2>Plates</h2>
+              <span>{plateRows.length}</span>
+            </div>
+            <div className="plate-list">
+              {plateRows.map((plate) => (
+                <div className="plate-row" key={plate.id}>
+                  <label>
+                    id
+                    <input
+                      defaultValue={plate.id}
+                      onBlur={(event) => renamePlate(plate.id, event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    index
+                    <input
+                      defaultValue={plate.index}
+                      onBlur={(event) => updatePlateIndex(plate.id, event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    size
+                    <input
+                      defaultValue={plate.size}
+                      onBlur={(event) => updatePlateSize(plate.id, event.target.value)}
+                    />
+                  </label>
+                  <span>{plate.nodeCount} nodes</span>
+                </div>
+              ))}
+              {!plateRows.length ? <p className="empty-note">plateを持つノードはまだありません。</p> : null}
+            </div>
+            <button disabled={!selectedNodeId} type="button" onClick={addPlateToSelection}>
+              選択ノードにtime plate
+            </button>
+            {modelIr.indexMappings.length ? (
+              <div className="mapping-list">
+                {modelIr.indexMappings.map((mapping) => (
+                  <div className="mapping-row" key={mapping.id}>
+                    <span>{mapping.symbol}[{mapping.inputIndex}]</span>
+                    <small>{mapping.fromPlateId} → {mapping.toPlateId}</small>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
           {savedModels.length > 0 ? (
             <div className="snapshots-panel">
@@ -1097,6 +1518,17 @@ export function App() {
                     ))}
                   </div>
                 ) : null}
+                {selectedCompilerDiagnostics.length ? (
+                  <div className="diagnostic-list">
+                    {selectedCompilerDiagnostics.map((diagnostic) => (
+                      <div className={`diagnostic-item diagnostic-${diagnostic.severity}`} key={`${diagnostic.code}-${diagnostic.path}`}>
+                        <strong>{diagnostic.code}</strong>
+                        <span>{diagnostic.message}</span>
+                        <small>{diagnostic.path}</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : selectedEdge ? (
               <div className="node-editor">
@@ -1133,6 +1565,9 @@ export function App() {
               </button>
               <button type="button" onClick={handleExport}>
                 書き出し
+              </button>
+              <button type="button" onClick={() => exportPortablePackageToFile(portablePackage)}>
+                Package
               </button>
               <button type="button" onClick={handleImport}>
                 読み込み
@@ -1172,6 +1607,80 @@ export function App() {
             <h2>受け渡し</h2>
             <span>生成される内容</span>
           </div>
+          <div className="outline-panel">
+            <div className="panel-title compact">
+              <h2>Outline</h2>
+              <span>{compiledCanvas.document.entityOrder.length}</span>
+            </div>
+            <div className="outline-list">
+              {compiledCanvas.document.entityOrder
+                .filter((entityId) => nodes.some((node) => node.id === entityId))
+                .map((entityId) => {
+                  const entity = compiledCanvas.document.entities[entityId];
+                  const references = compiledCanvas.semantic.dependencyEdges.filter((edge) => edge.from === entityId || edge.to === entityId);
+                  return (
+                    <button
+                      className={selectedNodeId === entityId ? 'outline-row is-active' : 'outline-row'}
+                      key={entityId}
+                      onClick={() => {
+                        setNodes((currentNodes) =>
+                          currentNodes.map((node) => ({ ...node, selected: node.id === entityId })),
+                        );
+                        setEdges((currentEdges) =>
+                          currentEdges.map((edge) => ({ ...edge, selected: false })),
+                        );
+                        setSelectedNodeId(entityId);
+                        setSelectedEdgeId(null);
+                      }}
+                      type="button"
+                    >
+                      <strong>{entity.symbol}</strong>
+                      <span>{entity.kind}</span>
+                      <small>{references.length} refs</small>
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+          <div className="issues-panel">
+            <div className="panel-title compact">
+              <h2>Review</h2>
+              <span>{compiledCanvas.semantic.readiness.handoff === 'ready' ? 'ready' : 'blocked'}</span>
+            </div>
+            <div className="issue-summary">
+              <span>{compiledCanvas.semantic.readiness.summary.errors} errors</span>
+              <span>{compiledCanvas.semantic.readiness.summary.warnings} warnings</span>
+              <span>{compiledCanvas.semantic.readiness.summary.infos} info</span>
+            </div>
+            <div className="issue-list">
+              {compiledCanvas.semantic.diagnostics.length ? compiledCanvas.semantic.diagnostics.map((diagnostic) => {
+                const nodeId = /^\/entities\/([^/]+)/.exec(diagnostic.path)?.[1];
+                return (
+                  <button
+                    className={`issue-row diagnostic-${diagnostic.severity}`}
+                    key={`${diagnostic.code}-${diagnostic.path}-${diagnostic.message}`}
+                    onClick={() => {
+                      if (!nodeId || !nodes.some((node) => node.id === nodeId)) return;
+                      setNodes((currentNodes) =>
+                        currentNodes.map((node) => ({ ...node, selected: node.id === nodeId })),
+                      );
+                      setEdges((currentEdges) =>
+                        currentEdges.map((edge) => ({ ...edge, selected: false })),
+                      );
+                      setSelectedNodeId(nodeId);
+                      setSelectedEdgeId(null);
+                    }}
+                    type="button"
+                  >
+                    <strong>{diagnostic.code}</strong>
+                    <span>{diagnostic.message}</span>
+                  </button>
+                );
+              }) : (
+                <div className="empty-note">handoffを止める診断はありません。</div>
+              )}
+            </div>
+          </div>
           <div className="output-tabs" role="tablist" aria-label="出力">
             <button
               aria-selected={activeOutput === 'ir'}
@@ -1200,6 +1709,42 @@ export function App() {
             >
               数式
             </button>
+            <button
+              aria-selected={activeOutput === 'review'}
+              className={activeOutput === 'review' ? 'is-active' : ''}
+              onClick={() => setActiveOutput('review')}
+              role="tab"
+              type="button"
+            >
+              Review
+            </button>
+            <button
+              aria-selected={activeOutput === 'handoff'}
+              className={activeOutput === 'handoff' ? 'is-active' : ''}
+              onClick={() => setActiveOutput('handoff')}
+              role="tab"
+              type="button"
+            >
+              Bundle
+            </button>
+            <button
+              aria-selected={activeOutput === 'package'}
+              className={activeOutput === 'package' ? 'is-active' : ''}
+              onClick={() => setActiveOutput('package')}
+              role="tab"
+              type="button"
+            >
+              Package
+            </button>
+            <button
+              aria-selected={activeOutput === 'diff'}
+              className={activeOutput === 'diff' ? 'is-active' : ''}
+              onClick={() => setActiveOutput('diff')}
+              role="tab"
+              type="button"
+            >
+              Diff
+            </button>
           </div>
           {activeOutput === 'math' ? (
             <MathView
@@ -1218,12 +1763,29 @@ export function App() {
           ) : (
             <>
               <div className="output-actions">
-                <span>{activeOutput === 'ir' ? 'JSON契約' : '実装用メモ'}</span>
+                <span>
+                  {activeOutput === 'ir'
+                    ? 'JSON契約'
+                    : activeOutput === 'review'
+                      ? '診断一覧'
+                      : activeOutput === 'handoff'
+                        ? '固定snapshot'
+                        : activeOutput === 'package'
+                          ? 'portable package'
+                          : activeOutput === 'diff'
+                            ? 'semantic diff'
+                            : '実装用メモ'}
+                </span>
                 <button type="button" onClick={() => copyText(outputText)}>
                   コピー
                 </button>
+                {activeOutput === 'package' ? (
+                  <button type="button" onClick={() => copyText(portablePackage.files['model.json'])}>
+                    model.json
+                  </button>
+                ) : null}
               </div>
-              {activeOutput === 'prompt' ? (
+              {activeOutput === 'prompt' || activeOutput === 'handoff' ? (
                 <label className="prompt-target">
                   出力先
                   <select
@@ -1241,6 +1803,47 @@ export function App() {
               <pre>{outputText}</pre>
             </>
           )}
+          <div className="receipt-panel">
+            <div className="panel-title compact">
+              <h2>Receipt</h2>
+              <button type="button" onClick={handleReceiptImport}>読込</button>
+            </div>
+            {receipt ? (
+              <div className="receipt-summary">
+                <strong>{receipt.backend}</strong>
+                <span>{receipt.mappings.length} mappings</span>
+                <span>{receipt.deviations.length + receipt.addedAssumptions.length + receipt.approximations.length} review items</span>
+              </div>
+            ) : (
+              <p className="empty-note">外部実装の対応表を読み込めます。</p>
+            )}
+          </div>
+          <div className="patch-panel">
+            <div className="panel-title compact">
+              <h2>Patch</h2>
+              <button type="button" onClick={insertPatchTemplate}>雛形</button>
+            </div>
+            <textarea
+              aria-label="JSON Patch proposal"
+              placeholder="AI patch proposal JSON"
+              value={patchInput}
+              onChange={(event) => setPatchInput(event.target.value)}
+            />
+            <div className="patch-actions">
+              <button disabled={!patchInput.trim()} type="button" onClick={previewPatch}>
+                プレビュー
+              </button>
+              <button disabled={!pendingPatch} type="button" onClick={applyPendingPatch}>
+                適用
+              </button>
+            </div>
+            {pendingPatch ? (
+              <div className="patch-summary">
+                <strong>{pendingPatch.summary}</strong>
+                <span>{pendingPatch.preview.semanticDiff.map((item) => item.label).join(' / ') || 'semantic diffなし'}</span>
+              </div>
+            ) : null}
+          </div>
         </aside>
       </section>
     </main>

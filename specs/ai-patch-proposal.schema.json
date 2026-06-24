@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bayes-canvas.local/schemas/ai-patch-proposal.schema.json",
+  "title": "Bayes Canvas AI Patch Proposal",
+  "type": "object",
+  "required": ["proposalVersion", "baseDocumentId", "baseRevision", "intent", "operations", "author"],
+  "properties": {
+    "proposalVersion": { "const": "1.0.0" },
+    "baseDocumentId": { "type": "string" },
+    "baseRevision": { "type": "integer", "minimum": 0 },
+    "intent": { "type": "string", "minLength": 1 },
+    "author": { "enum": ["ai", "user", "import"] },
+    "operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/jsonPatchOperation" },
+      "minItems": 1
+    },
+    "expectedDiagnostics": {
+      "type": "object",
+      "properties": {
+        "before": { "type": "array", "items": { "type": "string" } },
+        "after": { "type": "array", "items": { "type": "string" } }
+      },
+      "unevaluatedProperties": false
+    },
+    "reviewNotes": { "type": "array", "items": { "type": "string" } }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "jsonPatchOperation": {
+      "oneOf": [
+        { "required": ["op", "path", "value"], "properties": { "op": { "enum": ["add", "replace", "test"] }, "path": { "type": "string" }, "value": true }, "unevaluatedProperties": false },
+        { "required": ["op", "path"], "properties": { "op": { "const": "remove" }, "path": { "type": "string" } }, "unevaluatedProperties": false },
+        { "required": ["op", "from", "path"], "properties": { "op": { "enum": ["move", "copy"] }, "from": { "type": "string" }, "path": { "type": "string" } }, "unevaluatedProperties": false }
+      ]
+    }
+  }
+}
