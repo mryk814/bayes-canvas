@@ -266,7 +266,7 @@ function applyTemplate(
   return template.replace(/\{([^}]+)\}/g, (_, key: string) => formatValue(args[key] ?? key));
 }
 
-function formatTexExpression(value: string): string {
+export function formatTexExpression(value: string): string {
   return value
     .replace(/\[([^\]]+)\]/g, '_{$1}')
     .replace(/\*/g, ' ')
