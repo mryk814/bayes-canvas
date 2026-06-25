@@ -152,6 +152,14 @@ export function compileModel(
     }
   }
 
+  const dimensionSymbols = new Set(
+    Object.values(document.axes).flatMap((axis) => [
+      axis.id,
+      axis.symbol,
+      axis.size.source,
+    ]).filter(isIdentifier),
+  );
+
   for (const functionName of functions) {
     if (symbols[functionName] || indexSymbols[functionName]) {
       diagnostics.push(diagnostic({
@@ -207,11 +215,16 @@ export function compileModel(
         continue;
       }
 
-      if (indexSymbols[reference.symbol] || constants.has(reference.symbol)) continue;
+      if (
+        indexSymbols[reference.symbol]
+        || constants.has(reference.symbol)
+        || dimensionSymbols.has(reference.symbol)
+      ) continue;
 
       const suggestion = nearestSymbol(reference.symbol, [
         ...Object.keys(symbols),
         ...Object.keys(indexSymbols),
+        ...dimensionSymbols,
         ...constants,
       ]);
       diagnostics.push(diagnostic({

@@ -47,6 +47,12 @@ export async function loadAutosave(documentId: string): Promise<StoredSnapshot |
   return get(db, 'autosave', documentId);
 }
 
+export async function loadLatestAutosave(): Promise<StoredSnapshot | null> {
+  const db = await openDatabase();
+  const snapshots = await getAll<StoredSnapshot>(db, 'autosave');
+  return snapshots.sort((a, b) => b.savedAt.localeCompare(a.savedAt))[0] ?? null;
+}
+
 export async function listTransactions(limit = 50): Promise<TransactionLogEntry[]> {
   const db = await openDatabase();
   return getAll<TransactionLogEntry>(db, 'transactions').then((rows) =>

@@ -6,10 +6,10 @@ The goal is to make complex Bayesian models easier to design, inspect, export, a
 
 ## Core idea
 
-Bayes Canvas keeps the visual model as the source of truth:
+Bayes Canvas keeps the compiled `ModelDocument` and `LayoutDocument` as the portable source of truth, with the visual graph as the editing projection:
 
 ```text
-Visual graph → Model IR YAML/JSON → PPL code / AI prompt → Inference → Diagnostics back to graph
+Visual graph → ModelDocument + LayoutDocument → Review / Package / Handoff → Implementation receipt
 ```
 
 ## MVP scope
@@ -19,6 +19,8 @@ Visual graph → Model IR YAML/JSON → PPL code / AI prompt → Inference → D
 - Shape/index awareness
 - Model IR export as JSON/YAML
 - AI implementation prompt export
+- Portable package import with validation preview before replacing current work
+- IndexedDB autosave restore prompt for local-first recovery
 - PyMC/NumPyro code generation target later
 
 ## Prototype stack

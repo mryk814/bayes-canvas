@@ -7,6 +7,11 @@ import { createMacroInstance } from './core/macros.js';
 import { previewPatchProposal, type AiPatchProposal } from './core/patch-proposal.js';
 import { buildPortablePackage } from './core/portable.js';
 import { InMemoryDistributionRegistry } from './core/registry.js';
+import {
+  validateLayoutDocumentEnvelope,
+  validateModelDocumentEnvelope,
+  type SchemaValidationIssue,
+} from './core/schema-validation.js';
 import { TARGET_PROFILES } from './core/target-profiles.js';
 import type {
   AxisDefinition,
@@ -33,6 +38,14 @@ export interface CanvasProjectorInput {
   nodes: Node<BayesNodeData>[];
   edges: Edge[];
   modelName?: string;
+}
+
+export interface PortablePackageImportPreview {
+  document: ModelDocument;
+  layout: LayoutDocument;
+  semantic: ReturnType<typeof compileModel>;
+  projected: { nodes: Node<BayesNodeData>[]; edges: Edge[] };
+  summary: string;
 }
 
 const SOURCE_LANGUAGE = 'bayes-expr@1' as const;
@@ -148,6 +161,54 @@ export function previewCanvasPatch(nodes: Node<BayesNodeData>[], edges: Edge[], 
   };
 }
 
+export function previewPortablePackageImport(packageData: unknown): PortablePackageImportPreview {
+  if (!isRecord(packageData)) {
+    throw new Error('Portable package must be a JSON object.');
+  }
+  if (!isRecord(packageData.files)) {
+    throw new Error('Portable package is missing files.');
+  }
+
+  const document = parsePackageJsonFile<ModelDocument>(packageData.files['model.json'], 'model.json');
+  const layout = parsePackageJsonFile<LayoutDocument>(packageData.files['layout.json'], 'layout.json');
+  const validationIssues = [
+    ...validateModelDocumentEnvelope(document).map((issue) => prefixValidationIssue('model.json', issue)),
+    ...validateLayoutDocumentEnvelope(layout).map((issue) => prefixValidationIssue('layout.json', issue)),
+  ];
+
+  if (document.schemaVersion !== '1.0.0') {
+    validationIssues.push('model.json/schemaVersion: Unsupported schemaVersion.');
+  }
+  if (layout.schemaVersion !== '1.0.0') {
+    validationIssues.push('layout.json/schemaVersion: Unsupported schemaVersion.');
+  }
+  if (layout.modelDocumentId !== document.documentId) {
+    validationIssues.push('layout.json/modelDocumentId: Layout does not match model documentId.');
+  }
+  if (!isRecord(document.entities) || !Array.isArray(document.entityOrder)) {
+    validationIssues.push('model.json/entities: ModelDocument must include entities and entityOrder.');
+  }
+  if (!isRecord(layout.nodes) || !isRecord(layout.view)) {
+    validationIssues.push('layout.json/nodes: LayoutDocument must include nodes and view.');
+  }
+
+  if (validationIssues.length) {
+    throw new Error(`Portable package validation failed: ${validationIssues.join(' / ')}`);
+  }
+
+  const semantic = compileModel(document, compilerDistributionRegistry, {
+    compilerVersion: '0.2.0',
+  });
+  const projected = projectToReactFlow({ document, layout });
+  return {
+    document,
+    layout,
+    semantic,
+    projected,
+    summary: `${projected.nodes.length} nodes / ${projected.edges.length} links / ${semantic.diagnostics.length} diagnostics`,
+  };
+}
+
 export function projectToReactFlow(snapshot: AuthoringSnapshot): { nodes: Node<BayesNodeData>[]; edges: Edge[] } {
   const extension = snapshot.document.extensions?.['bayes-canvas'] as { annotationEdges?: Array<{ id: string; from: string; to: string; role: string }> } | undefined;
   return {
@@ -172,6 +233,25 @@ export function projectToReactFlow(snapshot: AuthoringSnapshot): { nodes: Node<B
       data: { role: edge.role },
     })),
   };
+}
+
+function parsePackageJsonFile<T>(value: unknown, fileName: string): T {
+  if (typeof value !== 'string') {
+    throw new Error(`Portable package is missing ${fileName}.`);
+  }
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    throw new Error(`${fileName} is not valid JSON.`);
+  }
+}
+
+function prefixValidationIssue(scope: string, issue: SchemaValidationIssue): string {
+  return `${scope}${issue.path}: ${issue.message}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export function buildCapabilityReport(document: ModelDocument, target: HandoffTarget): BackendCapabilityItem[] {

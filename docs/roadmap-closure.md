@@ -37,10 +37,10 @@ The right pane is organized around Review and Handoff rather than raw debug outp
 
 ## Runtime validation and corpus
 
-Runtime validation now has strict envelope checks for ModelDocument and Implementation Receipt unknown properties. This is intentionally small and dependency-free; it gives the import boundary a durable hook that can later be swapped for full JSON Schema validation.
+Runtime validation now has strict envelope checks for ModelDocument, LayoutDocument, and Implementation Receipt unknown properties. Portable package import parses `model.json` and `layout.json`, validates both envelopes, checks the document/layout ID match, and compiles diagnostics before the UI can apply the import. This is intentionally small and dependency-free; it gives the import boundary a durable hook that can later be swapped for full JSON Schema validation.
 
-The corpus starts from the template library and records an expected diagnostics budget per representative model. This creates a regression surface for expanding compiler syntax, diagnostics, and handoff checks without relying on only the initial hierarchical regression sample.
+The corpus starts from the template library and records clean/draft status plus an expected diagnostics budget per representative model. Clean templates must have zero compiler errors and warnings; draft templates must state their expected diagnostics explicitly.
 
 ## Storage and restore
 
-Portable package generation now has roundtrip coverage for `model.json` and `layout.json`, and the application keeps undo state around template/schema/assistant actions that replace or add model structure. Autosave remains the reload persistence path; portable package remains the explicit transfer path.
+Portable package generation now has roundtrip coverage for `model.json` and `layout.json`, and the application keeps undo state around template/schema/assistant actions that replace or add model structure. IndexedDB autosave is the canonical reload persistence path and is offered as an explicit restore prompt. Legacy localStorage node/edge state remains only as a startup fallback for older sessions and must not silently override a newer autosave.

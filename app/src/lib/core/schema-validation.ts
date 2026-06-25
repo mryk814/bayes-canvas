@@ -28,15 +28,28 @@ export function validateModelDocumentEnvelope(value: unknown): SchemaValidationI
     'entities',
     'entityOrder',
     'macros',
+    'loweringSourceMap',
     'notes',
     'noteOrder',
     'extensions',
   ]);
 }
 
+export function validateLayoutDocumentEnvelope(value: unknown): SchemaValidationIssue[] {
+  return validateKnownKeys(value, '', [
+    'schemaVersion',
+    'modelDocumentId',
+    'revision',
+    'nodes',
+    'view',
+    'hiddenEntityIds',
+  ]);
+}
+
 export function validateImplementationReceiptEnvelope(value: unknown): SchemaValidationIssue[] {
   return validateKnownKeys(value, '', [
     'receiptVersion',
+    'inputSpecificationFingerprintAlgorithm',
     'inputSpecificationFingerprint',
     'backend',
     'mappings',

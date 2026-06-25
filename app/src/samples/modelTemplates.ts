@@ -7,6 +7,11 @@ export interface ModelTemplate {
   name: string;
   family: string;
   description: string;
+  status: 'clean' | 'draft';
+  expectedDiagnostics: {
+    errors: number;
+    warnings: number;
+  };
   reviewQuestions: string[];
   nodes: Node<BayesNodeData>[];
   edges: Edge[];
@@ -18,6 +23,8 @@ export const modelTemplates: ModelTemplate[] = [
     name: 'Hierarchical regression',
     family: 'Regression',
     description: 'Group-level intercepts with an observed outcome and QoI-ready slope.',
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
       'Are groups exchangeable for the current study design?',
       'Is the observation process censored, rounded, or exact?',
@@ -30,6 +37,8 @@ export const modelTemplates: ModelTemplate[] = [
     name: 'Logistic regression',
     family: 'Binary outcome',
     description: 'Binary likelihood with linear predictor and treatment-effect coefficient.',
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
       'Should the coefficient be reported on log-odds or probability scale?',
       'Are class imbalance or separation risks expected?',
@@ -78,7 +87,7 @@ export const modelTemplates: ModelTemplate[] = [
           name: 'y[i]',
           plate: 'obs',
           observed: true,
-          distribution: { id: 'bernoulli', name: 'Bernoulli', args: { logit_p: 'logit_p[i]' } },
+          distribution: { id: 'bernoulli', name: 'Bernoulli', args: { p: 'inv_logit(logit_p[i])' } },
         },
       },
       {
@@ -105,6 +114,8 @@ export const modelTemplates: ModelTemplate[] = [
     name: 'Poisson count model',
     family: 'Count outcome',
     description: 'Log-rate model for count data with exposure offset.',
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
       'Does the data show overdispersion that needs Negative Binomial?',
       'Is exposure measured reliably for every observation?',
@@ -149,7 +160,7 @@ export const modelTemplates: ModelTemplate[] = [
           name: 'y[i]',
           plate: 'obs',
           observed: true,
-          distribution: { id: 'poisson', name: 'Poisson', args: { log_rate: 'log_rate[i]' } },
+          distribution: { id: 'poisson', name: 'Poisson', args: { lambda: 'exp(log_rate[i])' } },
         },
       },
     ],
