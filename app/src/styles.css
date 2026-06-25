@@ -1576,10 +1576,148 @@ pre {
 
 .outline-panel,
 .receipt-panel,
-.patch-panel {
+.patch-panel,
+.assistant-panel {
   display: grid;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+
+.assistant-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.assistant-grid button,
+.decision-list button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2);
+  color: var(--color-text);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+}
+
+.assistant-grid button:hover,
+.decision-list button:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+}
+
+.assistant-grid button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.assistant-grid strong,
+.decision-list span {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.assistant-grid span,
+.decision-list small {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+.schema-assistant {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.schema-assistant label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.schema-assistant textarea {
+  width: 100%;
+  min-height: 54px;
+  padding: var(--space-2);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  resize: vertical;
+}
+
+.schema-assistant button,
+.mini-actions button,
+.patch-inbox button {
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.checklist-list,
+.decision-list,
+.patch-inbox {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.checklist-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  padding: 6px 8px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+}
+
+.checklist-item strong {
+  color: var(--color-status-review-fg);
+  text-transform: uppercase;
+}
+
+.checklist-item.is-done strong {
+  color: var(--color-status-done-fg);
+}
+
+.checklist-item small {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.assistant-subtitle,
+.mini-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.assistant-subtitle {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.mini-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .outline-list {
