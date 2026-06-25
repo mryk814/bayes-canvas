@@ -55,15 +55,27 @@ export function MathView({ model, onSelectNode }: MathViewProps) {
         <div className="math-section" key={section.title}>
           <h3 className="math-section-title">{section.title}</h3>
           <div className="math-section-lines">
-            {section.lines.map((line, index) => (
-              <div
-                className={`math-line ${line.nodeId && onSelectNode ? 'math-line-clickable' : ''}`}
-                key={`${section.title}-${index}`}
-                onClick={line.nodeId && onSelectNode ? () => onSelectNode(line.nodeId!) : undefined}
-              >
-                <TexMath tex={line.tex} block />
-              </div>
-            ))}
+            {section.lines.map((line, index) => {
+              const key = `${section.title}-${index}`;
+              if (line.nodeId && onSelectNode) {
+                return (
+                  <button
+                    aria-label={`${line.tex} のノードを選択`}
+                    className="math-line math-line-clickable"
+                    key={key}
+                    type="button"
+                    onClick={() => onSelectNode(line.nodeId!)}
+                  >
+                    <TexMath tex={line.tex} />
+                  </button>
+                );
+              }
+              return (
+                <div className="math-line" key={key}>
+                  <TexMath tex={line.tex} block />
+                </div>
+              );
+            })}
           </div>
         </div>
       ))}

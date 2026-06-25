@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addEdge,
   Background,
@@ -715,6 +715,7 @@ export function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialCanvas.edges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const editorHeadingRef = useRef<HTMLHeadingElement>(null);
   const [promptTarget, setPromptTarget] = useState<PromptTarget>('generic');
   const modelIr = useMemo(() => exportModelIr(nodes, edges), [nodes, edges]);
   const compiledCanvas = useMemo(() => compileCanvas(nodes, edges), [nodes, edges]);
@@ -916,6 +917,26 @@ export function App() {
     setSelectedNodeId(params.nodes[0]?.id ?? null);
     setSelectedEdgeId(params.nodes.length ? null : (params.edges[0]?.id ?? null));
   }, []);
+
+  const focusEditorHeading = useCallback(() => {
+    window.setTimeout(() => editorHeadingRef.current?.focus(), 0);
+  }, []);
+
+  const selectNodeForEditing = useCallback(
+    (nodeId: string, options: { focusEditor?: boolean } = {}) => {
+      if (!nodes.some((node) => node.id === nodeId)) return;
+      setNodes((currentNodes) =>
+        currentNodes.map((node) => ({ ...node, selected: node.id === nodeId })),
+      );
+      setEdges((currentEdges) =>
+        currentEdges.map((edge) => ({ ...edge, selected: false })),
+      );
+      setSelectedNodeId(nodeId);
+      setSelectedEdgeId(null);
+      if (options.focusEditor) focusEditorHeading();
+    },
+    [focusEditorHeading, nodes, setEdges, setNodes],
+  );
 
   const updateSelectedNodeData = useCallback(
     (changes: Partial<BayesNodeData>) => {
@@ -1436,7 +1457,7 @@ export function App() {
           ) : null}
           <div className="editor-panel">
             <div className="panel-title compact">
-              <h2>編集</h2>
+              <h2 ref={editorHeadingRef} tabIndex={-1}>編集</h2>
               <span>{selectedKindLabel}</span>
             </div>
             {selectedData ? (
@@ -1683,14 +1704,7 @@ export function App() {
                       className={selectedNodeId === entityId ? 'outline-row is-active' : 'outline-row'}
                       key={entityId}
                       onClick={() => {
-                        setNodes((currentNodes) =>
-                          currentNodes.map((node) => ({ ...node, selected: node.id === entityId })),
-                        );
-                        setEdges((currentEdges) =>
-                          currentEdges.map((edge) => ({ ...edge, selected: false })),
-                        );
-                        setSelectedNodeId(entityId);
-                        setSelectedEdgeId(null);
+                        selectNodeForEditing(entityId);
                       }}
                       type="button"
                     >
@@ -1720,15 +1734,8 @@ export function App() {
                     className={`issue-row diagnostic-${diagnostic.severity}`}
                     key={`${diagnostic.code}-${diagnostic.path}-${diagnostic.message}`}
                     onClick={() => {
-                      if (!nodeId || !nodes.some((node) => node.id === nodeId)) return;
-                      setNodes((currentNodes) =>
-                        currentNodes.map((node) => ({ ...node, selected: node.id === nodeId })),
-                      );
-                      setEdges((currentEdges) =>
-                        currentEdges.map((edge) => ({ ...edge, selected: false })),
-                      );
-                      setSelectedNodeId(nodeId);
-                      setSelectedEdgeId(null);
+                      if (!nodeId) return;
+                      selectNodeForEditing(nodeId, { focusEditor: true });
                     }}
                     type="button"
                   >
@@ -1743,85 +1750,103 @@ export function App() {
           </div>
           <div className="output-tabs" role="tablist" aria-label="出力">
             <button
+              aria-controls="output-panel"
               aria-selected={activeOutput === 'ir'}
               className={activeOutput === 'ir' ? 'is-active' : ''}
+              id="output-tab-ir"
               onClick={() => setActiveOutput('ir')}
               role="tab"
+              tabIndex={activeOutput === 'ir' ? 0 : -1}
               type="button"
             >
               IR
             </button>
             <button
+              aria-controls="output-panel"
               aria-selected={activeOutput === 'prompt'}
               className={activeOutput === 'prompt' ? 'is-active' : ''}
+              id="output-tab-prompt"
               onClick={() => setActiveOutput('prompt')}
               role="tab"
+              tabIndex={activeOutput === 'prompt' ? 0 : -1}
               type="button"
             >
               AIメモ
             </button>
             <button
+              aria-controls="output-panel"
               aria-selected={activeOutput === 'math'}
               className={activeOutput === 'math' ? 'is-active' : ''}
+              id="output-tab-math"
               onClick={() => setActiveOutput('math')}
               role="tab"
+              tabIndex={activeOutput === 'math' ? 0 : -1}
               type="button"
             >
               数式
             </button>
             <button
+              aria-controls="output-panel"
               aria-selected={activeOutput === 'review'}
               className={activeOutput === 'review' ? 'is-active' : ''}
+              id="output-tab-review"
               onClick={() => setActiveOutput('review')}
               role="tab"
+              tabIndex={activeOutput === 'review' ? 0 : -1}
               type="button"
             >
               Review
             </button>
             <button
+              aria-controls="output-panel"
               aria-selected={activeOutput === 'handoff'}
               className={activeOutput === 'handoff' ? 'is-active' : ''}
+              id="output-tab-handoff"
               onClick={() => setActiveOutput('handoff')}
               role="tab"
+              tabIndex={activeOutput === 'handoff' ? 0 : -1}
               type="button"
             >
               Bundle
             </button>
             <button
+              aria-controls="output-panel"
               aria-selected={activeOutput === 'package'}
               className={activeOutput === 'package' ? 'is-active' : ''}
+              id="output-tab-package"
               onClick={() => setActiveOutput('package')}
               role="tab"
+              tabIndex={activeOutput === 'package' ? 0 : -1}
               type="button"
             >
               Package
             </button>
             <button
+              aria-controls="output-panel"
               aria-selected={activeOutput === 'diff'}
               className={activeOutput === 'diff' ? 'is-active' : ''}
+              id="output-tab-diff"
               onClick={() => setActiveOutput('diff')}
               role="tab"
+              tabIndex={activeOutput === 'diff' ? 0 : -1}
               type="button"
             >
               Diff
             </button>
           </div>
-          {activeOutput === 'math' ? (
-            <MathView
-              model={modelIr}
-              onSelectNode={(nodeId) => {
-                setNodes((currentNodes) =>
-                  currentNodes.map((node) => ({ ...node, selected: node.id === nodeId })),
-                );
-                setEdges((currentEdges) =>
-                  currentEdges.map((edge) => ({ ...edge, selected: false })),
-                );
-                setSelectedNodeId(nodeId);
-                setSelectedEdgeId(null);
-              }}
-            />
-          ) : (
-            <>
+          <div
+            aria-labelledby={`output-tab-${activeOutput}`}
+            className="output-panel"
+            id="output-panel"
+            role="tabpanel"
+          >
+            {activeOutput === 'math' ? (
+              <MathView
+                model={modelIr}
+                onSelectNode={(nodeId) => selectNodeForEditing(nodeId, { focusEditor: true })}
+              />
+            ) : (
+              <>
               <div className="output-actions">
                 <span>
                   {activeOutput === 'ir'
@@ -1879,8 +1904,9 @@ export function App() {
                 </label>
               ) : null}
               <pre>{outputText}</pre>
-            </>
-          )}
+              </>
+            )}
+          </div>
           <div className="receipt-panel">
             <div className="panel-title compact">
               <h2>Receipt</h2>

@@ -1335,6 +1335,14 @@ pre {
   transition: background var(--duration-fast) var(--ease);
 }
 
+.math-section-lines button.math-line {
+  width: 100%;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
 .math-line-clickable {
   cursor: pointer;
 }
