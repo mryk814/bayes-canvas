@@ -69,6 +69,21 @@ type PaletteItem =
   | { type: 'node'; kind: BayesNodeData['kind']; label: string; note: string }
   | { type: 'preset'; preset: 'horseshoe_prior' | 'linear_term' | 'group_effect' | 'interaction_term'; label: string; note: string };
 
+type LeftPanelTab = 'add' | 'structure' | 'inspector' | 'library';
+type CommandAction = {
+  id: string;
+  label: string;
+  group: string;
+  run: () => void;
+};
+
+const LEFT_PANEL_TABS: Array<{ id: LeftPanelTab; label: string }> = [
+  { id: 'add', label: 'Add' },
+  { id: 'structure', label: 'Structure' },
+  { id: 'inspector', label: 'Inspector' },
+  { id: 'library', label: 'Library' },
+];
+
 const PALETTE_GROUPS: Array<{
   title: string;
   items: PaletteItem[];
@@ -715,6 +730,7 @@ export function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialCanvas.edges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [activeLeftPanel, setActiveLeftPanel] = useState<LeftPanelTab>('add');
   const editorHeadingRef = useRef<HTMLHeadingElement>(null);
   const [promptTarget, setPromptTarget] = useState<PromptTarget>('generic');
   const modelIr = useMemo(() => exportModelIr(nodes, edges), [nodes, edges]);
@@ -727,6 +743,8 @@ export function App() {
   const [activeOutput, setActiveOutput] = useState<'math' | 'review' | 'handoff' | 'advanced'>('math');
   const [advancedOutput, setAdvancedOutput] = useState<'ir' | 'prompt' | 'package' | 'diff'>('ir');
   const [handoffPreviewFormat, setHandoffPreviewFormat] = useState<'markdown' | 'json'>('markdown');
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState('');
   const [importError, setImportError] = useState<ImportErrorState | null>(null);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [patchInput, setPatchInput] = useState('');
@@ -866,6 +884,31 @@ export function App() {
     () => compiledCanvas.semantic.diagnostics.filter((diagnostic) => selectedNodeId && diagnostic.path.startsWith(`/entities/${selectedNodeId}`)),
     [compiledCanvas.semantic.diagnostics, selectedNodeId],
   );
+  const reviewDiagnosticGroups = useMemo(() => {
+    const diagnostics = compiledCanvas.semantic.diagnostics;
+    return [
+      {
+        id: 'blocking',
+        label: 'Blocking',
+        diagnostics: diagnostics.filter((diagnostic) => diagnostic.blocksHandoff),
+      },
+      {
+        id: 'error',
+        label: 'Errors',
+        diagnostics: diagnostics.filter((diagnostic) => diagnostic.severity === 'error' && !diagnostic.blocksHandoff),
+      },
+      {
+        id: 'warning',
+        label: 'Warnings',
+        diagnostics: diagnostics.filter((diagnostic) => diagnostic.severity === 'warning' && !diagnostic.blocksHandoff),
+      },
+      {
+        id: 'info',
+        label: 'Info',
+        diagnostics: diagnostics.filter((diagnostic) => diagnostic.severity === 'info' && !diagnostic.blocksHandoff),
+      },
+    ];
+  }, [compiledCanvas.semantic.diagnostics]);
 
   const labeledEdges = useMemo(() => {
     const nodeMap = new Map(nodes.map((n) => [n.id, n.data]));
@@ -918,6 +961,7 @@ export function App() {
       setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
       setSelectedNodeId(id);
       setSelectedEdgeId(null);
+      setActiveLeftPanel('inspector');
     },
     [nodes, setEdges, setNodes],
   );
@@ -943,6 +987,9 @@ export function App() {
   const onSelectionChange = useCallback((params: OnSelectionChangeParams) => {
     setSelectedNodeId(params.nodes[0]?.id ?? null);
     setSelectedEdgeId(params.nodes.length ? null : (params.edges[0]?.id ?? null));
+    if (params.nodes.length || params.edges.length) {
+      setActiveLeftPanel('inspector');
+    }
   }, []);
 
   const focusEditorHeading = useCallback(() => {
@@ -960,7 +1007,10 @@ export function App() {
       );
       setSelectedNodeId(nodeId);
       setSelectedEdgeId(null);
-      if (options.focusEditor) focusEditorHeading();
+      if (options.focusEditor) {
+        setActiveLeftPanel('inspector');
+        focusEditorHeading();
+      }
     },
     [focusEditorHeading, nodes, setEdges, setNodes],
   );
@@ -1100,6 +1150,7 @@ export function App() {
     setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
     setSelectedNodeId(id);
     setSelectedEdgeId(null);
+    setActiveLeftPanel('inspector');
   }, [nodes, selectedData, selectedNodeId, setEdges, setNodes, updateSelectedNodeData]);
 
   const applyRegressionTermPreset = useCallback(
@@ -1133,6 +1184,7 @@ export function App() {
       setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
       setSelectedNodeId(id);
       setSelectedEdgeId(null);
+      setActiveLeftPanel('inspector');
     },
     [nodes, selectedData, selectedNodeId, setEdges, setNodes, updateSelectedNodeData],
   );
@@ -1329,6 +1381,99 @@ export function App() {
     input.click();
   }, [setNodes, setEdges]);
 
+  const commands = useMemo<CommandAction[]>(() => [
+    {
+      id: 'add-data',
+      label: 'Add data',
+      group: 'Add',
+      run: () => addNodeFromPalette('data'),
+    },
+    {
+      id: 'add-parameter',
+      label: 'Add parameter',
+      group: 'Add',
+      run: () => addNodeFromPalette('parameter'),
+    },
+    {
+      id: 'add-likelihood',
+      label: 'Add likelihood',
+      group: 'Add',
+      run: () => addNodeFromPalette('likelihood'),
+    },
+    {
+      id: 'add-deterministic',
+      label: 'Add deterministic',
+      group: 'Add',
+      run: () => addNodeFromPalette('deterministic'),
+    },
+    {
+      id: 'open-add',
+      label: 'Open Add panel',
+      group: 'Navigate',
+      run: () => setActiveLeftPanel('add'),
+    },
+    {
+      id: 'open-structure',
+      label: 'Open Structure panel',
+      group: 'Navigate',
+      run: () => setActiveLeftPanel('structure'),
+    },
+    {
+      id: 'go-review',
+      label: 'Go to Review',
+      group: 'Navigate',
+      run: () => setActiveOutput('review'),
+    },
+    {
+      id: 'prepare-handoff',
+      label: 'Prepare Handoff',
+      group: 'Navigate',
+      run: () => setActiveOutput('handoff'),
+    },
+    {
+      id: 'export-package',
+      label: 'Export package',
+      group: 'File',
+      run: () => exportPortablePackageToFile(portablePackage),
+    },
+    {
+      id: 'import-canvas',
+      label: 'Import canvas',
+      group: 'File',
+      run: handleImport,
+    },
+  ], [addNodeFromPalette, handleImport, portablePackage]);
+
+  const filteredCommands = useMemo(() => {
+    const query = commandQuery.trim().toLowerCase();
+    if (!query) return commands;
+    return commands.filter((command) =>
+      `${command.group} ${command.label}`.toLowerCase().includes(query),
+    );
+  }, [commandQuery, commands]);
+
+  const runCommand = useCallback((command: CommandAction) => {
+    command.run();
+    setCommandPaletteOpen(false);
+    setCommandQuery('');
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT' || target?.isContentEditable;
+      if (event.key === '/' && !isTyping) {
+        event.preventDefault();
+        setCommandPaletteOpen(true);
+      }
+      if (event.key === 'Escape') {
+        setCommandPaletteOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -1382,263 +1527,348 @@ export function App() {
         </div>
       ) : null}
 
+      {commandPaletteOpen ? (
+        <div className="command-backdrop" role="presentation" onMouseDown={() => setCommandPaletteOpen(false)}>
+          <div
+            aria-label="Command Palette"
+            aria-modal="true"
+            className="command-palette"
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <input
+              autoFocus
+              placeholder="Commandを検索"
+              value={commandQuery}
+              onChange={(event) => setCommandQuery(event.target.value)}
+            />
+            <div className="command-list">
+              {filteredCommands.length ? filteredCommands.map((command) => (
+                <button key={command.id} type="button" onClick={() => runCommand(command)}>
+                  <span>{command.label}</span>
+                  <small>{command.group}</small>
+                </button>
+              )) : (
+                <p className="empty-note">一致するcommandはありません。</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <section className="workspace">
         <aside className="panel left-panel">
           <div className="panel-title">
-            <h2>追加</h2>
-            <span>モデル要素</span>
+            <h2>
+              {activeLeftPanel === 'add'
+                ? '追加'
+                : activeLeftPanel === 'structure'
+                  ? '構造'
+                  : activeLeftPanel === 'library'
+                    ? '保存'
+                    : '編集'}
+            </h2>
+            <span>
+              {activeLeftPanel === 'add'
+                ? 'モデル要素'
+                : activeLeftPanel === 'structure'
+                  ? `${plateRows.length} plates`
+                  : activeLeftPanel === 'library'
+                    ? `${savedModels.length} snapshots`
+                    : selectedKindLabel}
+            </span>
           </div>
-          <div className="palette-groups">
-            {PALETTE_GROUPS.map((group) => (
-              <div className="palette-group" key={group.title}>
-                <h3>{group.title}</h3>
-                <div className="palette-list">
-                  {group.items.map((item) => (
-                    <button
-                      className={`palette-item ${item.type === 'node' ? `palette-${item.kind}` : 'palette-preset'}`}
-                      key={item.type === 'node' ? item.kind : item.preset}
-                      onClick={() => applyPaletteItem(item)}
-                      type="button"
-                    >
-                      <span>{item.label}</span>
-                      <small>{item.note}</small>
-                    </button>
-                  ))}
-                </div>
-              </div>
+          <div className="panel-tabs" role="tablist" aria-label="左ペイン">
+            {LEFT_PANEL_TABS.map((tab) => (
+              <button
+                aria-selected={activeLeftPanel === tab.id}
+                className={activeLeftPanel === tab.id ? 'is-active' : undefined}
+                key={tab.id}
+                onClick={() => setActiveLeftPanel(tab.id)}
+                role="tab"
+                type="button"
+              >
+                {tab.label}
+              </button>
             ))}
           </div>
-          <div className="plate-panel">
-            <div className="panel-title compact">
-              <h2>Plates</h2>
-              <span>{plateRows.length}</span>
-            </div>
-            <div className="plate-list">
-              {plateRows.map((plate) => (
-                <div className="plate-row" key={plate.id}>
-                  <label>
-                    id
-                    <input
-                      defaultValue={plate.id}
-                      onBlur={(event) => renamePlate(plate.id, event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    index
-                    <input
-                      defaultValue={plate.index}
-                      onBlur={(event) => updatePlateIndex(plate.id, event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    size
-                    <input
-                      defaultValue={plate.size}
-                      onBlur={(event) => updatePlateSize(plate.id, event.target.value)}
-                    />
-                  </label>
-                  <span>{plate.nodeCount} nodes</span>
+          {activeLeftPanel === 'add' ? (
+            <div className="palette-groups">
+              {PALETTE_GROUPS.map((group) => (
+                <div className="palette-group" key={group.title}>
+                  <h3>{group.title}</h3>
+                  <div className="palette-list">
+                    {group.items.map((item) => (
+                      <button
+                        className={`palette-item ${item.type === 'node' ? `palette-${item.kind}` : 'palette-preset'}`}
+                        key={item.type === 'node' ? item.kind : item.preset}
+                        onClick={() => applyPaletteItem(item)}
+                        type="button"
+                      >
+                        <span>{item.label}</span>
+                        <small>{item.note}</small>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ))}
-              {!plateRows.length ? <p className="empty-note">plateを持つノードはまだありません。</p> : null}
             </div>
-            <button disabled={!selectedNodeId} type="button" onClick={addPlateToSelection}>
-              選択ノードにtime plate
-            </button>
-            {modelIr.indexMappings.length ? (
-              <div className="mapping-list">
-                {modelIr.indexMappings.map((mapping) => (
-                  <div className="mapping-row" key={mapping.id}>
-                    <span>{mapping.symbol}[{mapping.inputIndex}]</span>
-                    <small>{mapping.fromPlateId} → {mapping.toPlateId}</small>
+          ) : null}
+          {activeLeftPanel === 'structure' ? (
+            <div className="plate-panel">
+              <div className="panel-title compact">
+                <h2>Plates</h2>
+                <span>{plateRows.length}</span>
+              </div>
+              <div className="plate-list">
+                {plateRows.map((plate) => (
+                  <div className="plate-row" key={plate.id}>
+                    <label>
+                      id
+                      <input
+                        defaultValue={plate.id}
+                        onBlur={(event) => renamePlate(plate.id, event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      index
+                      <input
+                        defaultValue={plate.index}
+                        onBlur={(event) => updatePlateIndex(plate.id, event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      size
+                      <input
+                        defaultValue={plate.size}
+                        onBlur={(event) => updatePlateSize(plate.id, event.target.value)}
+                      />
+                    </label>
+                    <span>{plate.nodeCount} nodes</span>
                   </div>
                 ))}
+                {!plateRows.length ? <p className="empty-note">plateを持つノードはまだありません。</p> : null}
               </div>
-            ) : null}
-          </div>
-          {savedModels.length > 0 ? (
+              <button disabled={!selectedNodeId} type="button" onClick={addPlateToSelection}>
+                選択ノードにtime plate
+              </button>
+              {modelIr.indexMappings.length ? (
+                <div className="mapping-list">
+                  {modelIr.indexMappings.map((mapping) => (
+                    <div className="mapping-row" key={mapping.id}>
+                      <span>{mapping.symbol}[{mapping.inputIndex}]</span>
+                      <small>{mapping.fromPlateId} → {mapping.toPlateId}</small>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {activeLeftPanel === 'library' ? (
             <div className="snapshots-panel">
               <div className="panel-title compact">
                 <h2>保存済み</h2>
                 <span>{savedModels.length}</span>
               </div>
-              <div className="snapshots-list">
-                {savedModels.map((model) => (
-                  <div className="snapshot-row" key={model.id}>
-                    <div className="snapshot-info">
-                      <span className="snapshot-name">{model.name}</span>
-                      <span className="snapshot-meta">
-                        {model.nodeCount}n {model.edgeCount}e · {new Date(model.savedAt).toLocaleDateString()}
-                      </span>
+              {savedModels.length > 0 ? (
+                <div className="snapshots-list">
+                  {savedModels.map((model) => (
+                    <div className="snapshot-row" key={model.id}>
+                      <div className="snapshot-info">
+                        <span className="snapshot-name">{model.name}</span>
+                        <span className="snapshot-meta">
+                          {model.nodeCount}n {model.edgeCount}e · {new Date(model.savedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div className="snapshot-actions">
+                        <button type="button" onClick={() => handleLoad(model.id)}>
+                          読込
+                        </button>
+                        <button type="button" onClick={() => handleDeleteSnapshot(model.id)}>
+                          削除
+                        </button>
+                      </div>
                     </div>
-                    <div className="snapshot-actions">
-                      <button type="button" onClick={() => handleLoad(model.id)}>
-                        読込
-                      </button>
-                      <button type="button" onClick={() => handleDeleteSnapshot(model.id)}>
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-note">保存済みsnapshotはまだありません。</p>
+              )}
             </div>
           ) : null}
-          <div className="editor-panel">
-            <div className="panel-title compact">
-              <h2 ref={editorHeadingRef} tabIndex={-1}>編集</h2>
-              <span>{selectedKindLabel}</span>
-            </div>
+          {activeLeftPanel === 'inspector' ? (
+            <div className="editor-panel">
+              <div className="panel-title compact">
+                <h2 ref={editorHeadingRef} tabIndex={-1}>Inspector</h2>
+                <span>{selectedKindLabel}</span>
+              </div>
             {selectedData ? (
               <div className="node-editor">
                 <button className="danger-button compact-danger" onClick={deleteSelectedItem} type="button">
                   選択中を削除
                 </button>
-                <label>
-                  名前
-                  <input
-                    value={selectedData.name}
-                    onChange={(event) => updateSelectedNodeData({ name: event.target.value })}
-                  />
-                </label>
-                <label>
-                  形
-                  <input
-                    placeholder="N, J"
-                    value={selectedData.shape?.join(', ') ?? ''}
-                    onChange={(event) => updateSelectedNodeData({ shape: parseList(event.target.value) })}
-                  />
-                </label>
-                <label>
-                  繰り返し
-                  <input
-                    placeholder="obs"
-                    value={selectedData.plate ?? ''}
-                    onChange={(event) => updateSelectedNodeData({ plate: event.target.value || undefined })}
-                  />
-                </label>
-                {showsConstraintsEditor ? (
-                  <div className="field-group">
-                    <div className="field-group-title">制約</div>
-                    <div className="option-grid">
-                      {CONSTRAINT_OPTIONS.map((option) => (
-                        <label className="choice-card" key={option.kind}>
-                          <input
-                            checked={hasConstraint(selectedData.constraints, option.kind)}
-                            onChange={(event) =>
-                              updateSelectedNodeData({
-                                constraints: toggleSimpleConstraint(
-                                  selectedData.constraints,
-                                  option.kind,
-                                  event.target.checked,
-                                ),
-                              })
-                            }
-                            type="checkbox"
-                          />
-                          <span>{option.label}</span>
-                          <small>{option.note}</small>
-                        </label>
-                      ))}
+                <div className="inspector-section">
+                  <div className="inspector-section-title">Definition</div>
+                  <label>
+                    名前
+                    <input
+                      value={selectedData.name}
+                      onChange={(event) => updateSelectedNodeData({ name: event.target.value })}
+                    />
+                  </label>
+                  <span className={`kind-pill palette-${selectedData.kind}`}>{NODE_KIND_LABELS[selectedData.kind]}</span>
+                </div>
+                <div className="inspector-section">
+                  <div className="inspector-section-title">Shape / Plate</div>
+                  <label>
+                    形
+                    <input
+                      placeholder="N, J"
+                      value={selectedData.shape?.join(', ') ?? ''}
+                      onChange={(event) => updateSelectedNodeData({ shape: parseList(event.target.value) })}
+                    />
+                  </label>
+                  <label>
+                    繰り返し
+                    <input
+                      placeholder="obs"
+                      value={selectedData.plate ?? ''}
+                      onChange={(event) => updateSelectedNodeData({ plate: event.target.value || undefined })}
+                    />
+                  </label>
+                  {showsConstraintsEditor ? (
+                    <div className="field-group">
+                      <div className="field-group-title">制約</div>
+                      <div className="option-grid">
+                        {CONSTRAINT_OPTIONS.map((option) => (
+                          <label className="choice-card" key={option.kind}>
+                            <input
+                              checked={hasConstraint(selectedData.constraints, option.kind)}
+                              onChange={(event) =>
+                                updateSelectedNodeData({
+                                  constraints: toggleSimpleConstraint(
+                                    selectedData.constraints,
+                                    option.kind,
+                                    event.target.checked,
+                                  ),
+                                })
+                              }
+                              type="checkbox"
+                            />
+                            <span>{option.label}</span>
+                            <small>{option.note}</small>
+                          </label>
+                        ))}
+                      </div>
+                      <label>
+                        和を0にする単位
+                        <input
+                          placeholder="group"
+                          value={getSumToZeroPlate(selectedData.constraints)}
+                          onChange={(event) =>
+                            updateSelectedNodeData({
+                              constraints: updateSumToZeroConstraint(selectedData.constraints, event.target.value),
+                            })
+                          }
+                        />
+                      </label>
                     </div>
-                    <label>
-                      和を0にする単位
+                  ) : null}
+                </div>
+                <div className="inspector-section">
+                  <div className="inspector-section-title">Model</div>
+                  {showsObservedEditor ? (
+                    <label className="checkbox-row">
                       <input
-                        placeholder="group"
-                        value={getSumToZeroPlate(selectedData.constraints)}
+                        checked={Boolean(selectedData.observed)}
                         onChange={(event) =>
                           updateSelectedNodeData({
-                            constraints: updateSumToZeroConstraint(selectedData.constraints, event.target.value),
+                            observed: event.target.checked || undefined,
+                            observationProcess: event.target.checked ? selectedData.observationProcess : undefined,
                           })
                         }
+                        type="checkbox"
+                      />
+                      観測済み
+                    </label>
+                  ) : null}
+                  {showsObservationEditor ? (
+                    <label>
+                      観測の扱い
+                      <select
+                        value={selectedData.observationProcess?.kind ?? ''}
+                        onChange={(event) => updateSelectedNodeData({ observationProcess: createObservationProcess(event.target.value) })}
+                      >
+                        {OBSERVATION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  {showsDistributionEditor ? (
+                    <DistributionEditor
+                      distribution={selectedData.distribution}
+                      onChange={(distribution) => updateSelectedNodeData({ distribution })}
+                    />
+                  ) : null}
+                  {showsExpressionEditor ? (
+                    <label>
+                      式
+                      <textarea
+                        placeholder="alpha + beta * x"
+                        value={selectedData.expression ?? ''}
+                        onChange={(event) => updateSelectedNodeData({ expression: event.target.value || undefined })}
                       />
                     </label>
-                  </div>
-                ) : null}
-                <label>
-                  実装メモ
-                  <input
-                    placeholder="non_centered, sparse GP, warning:識別性を確認"
-                    value={formatHintsForInput(selectedData.hints)}
-                    onChange={(event) => updateSelectedNodeData({ hints: parseHints(event.target.value) })}
-                  />
-                </label>
-                {showsObservedEditor ? (
-                  <label className="checkbox-row">
+                  ) : null}
+                  {!showsObservedEditor && !showsDistributionEditor && !showsExpressionEditor ? (
+                    <p className="empty-note">この種類に追加のモデル定義はありません。</p>
+                  ) : null}
+                </div>
+                <div className="inspector-section">
+                  <div className="inspector-section-title">Notes</div>
+                  <label>
+                    実装メモ
                     <input
-                      checked={Boolean(selectedData.observed)}
-                      onChange={(event) =>
-                        updateSelectedNodeData({
-                          observed: event.target.checked || undefined,
-                          observationProcess: event.target.checked ? selectedData.observationProcess : undefined,
-                        })
-                      }
-                      type="checkbox"
+                      placeholder="non_centered, sparse GP, warning:識別性を確認"
+                      value={formatHintsForInput(selectedData.hints)}
+                      onChange={(event) => updateSelectedNodeData({ hints: parseHints(event.target.value) })}
                     />
-                    観測済み
                   </label>
-                ) : null}
-                {showsObservationEditor ? (
                   <label>
-                    観測の扱い
-                    <select
-                      value={selectedData.observationProcess?.kind ?? ''}
-                      onChange={(event) => updateSelectedNodeData({ observationProcess: createObservationProcess(event.target.value) })}
-                    >
-                      {OBSERVATION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-                {showsDistributionEditor ? (
-                  <DistributionEditor
-                    distribution={selectedData.distribution}
-                    onChange={(distribution) => updateSelectedNodeData({ distribution })}
-                  />
-                ) : null}
-                {showsExpressionEditor ? (
-                  <label>
-                    式
+                    ノート
                     <textarea
-                      placeholder="alpha + beta * x"
-                      value={selectedData.expression ?? ''}
-                      onChange={(event) => updateSelectedNodeData({ expression: event.target.value || undefined })}
+                      placeholder="仮定、実装へ渡す注意、あとで確認すること"
+                      value={selectedData.notes ?? ''}
+                      onChange={(event) => updateSelectedNodeData({ notes: event.target.value || undefined })}
                     />
                   </label>
-                ) : null}
-                <label>
-                  ノート
-                  <textarea
-                    placeholder="仮定、実装へ渡す注意、あとで確認すること"
-                    value={selectedData.notes ?? ''}
-                    onChange={(event) => updateSelectedNodeData({ notes: event.target.value || undefined })}
-                  />
-                </label>
-                {selectedDiagnostics.length ? (
-                  <div className="diagnostic-list">
-                    {selectedDiagnostics.map((diagnostic) => (
-                      <div className={`diagnostic-item diagnostic-${diagnostic.severity}`} key={diagnostic.id}>
-                        <strong>{diagnostic.severity}</strong>
-                        <span>{diagnostic.message}</span>
-                        {diagnostic.suggestion ? <small>{diagnostic.suggestion}</small> : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {selectedCompilerDiagnostics.length ? (
-                  <div className="diagnostic-list">
-                    {selectedCompilerDiagnostics.map((diagnostic) => (
-                      <div className={`diagnostic-item diagnostic-${diagnostic.severity}`} key={`${diagnostic.code}-${diagnostic.path}`}>
-                        <strong>{diagnostic.code}</strong>
-                        <span>{diagnostic.message}</span>
-                        <small>{diagnostic.path}</small>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
+                </div>
+                <div className="inspector-section">
+                  <div className="inspector-section-title">Diagnostics</div>
+                  {selectedDiagnostics.length || selectedCompilerDiagnostics.length ? (
+                    <div className="diagnostic-list">
+                      {selectedDiagnostics.map((diagnostic) => (
+                        <div className={`diagnostic-item diagnostic-${diagnostic.severity}`} key={diagnostic.id}>
+                          <strong>{diagnostic.severity}</strong>
+                          <span>{diagnostic.message}</span>
+                          {diagnostic.suggestion ? <small>{diagnostic.suggestion}</small> : null}
+                        </div>
+                      ))}
+                      {selectedCompilerDiagnostics.map((diagnostic) => (
+                        <div className={`diagnostic-item diagnostic-${diagnostic.severity}`} key={`${diagnostic.code}-${diagnostic.path}`}>
+                          <strong>{diagnostic.code}</strong>
+                          <span>{diagnostic.message}</span>
+                          <small>{diagnostic.path}</small>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty-note">選択中の問題はありません。</p>
+                  )}
+                </div>
               </div>
             ) : selectedEdge ? (
               <div className="node-editor">
@@ -1660,7 +1890,8 @@ export function App() {
             ) : (
               <p className="empty-note">ノードかリンクを選ぶと編集できます。</p>
             )}
-          </div>
+            </div>
+          ) : null}
         </aside>
 
         <section className="canvas">
@@ -1671,6 +1902,9 @@ export function App() {
             </div>
             <div className="toolbar-actions">
               <div className="toolbar-group toolbar-primary" aria-label="Primary actions">
+                <button type="button" onClick={() => setCommandPaletteOpen(true)}>
+                  Command
+                </button>
                 <button type="button" onClick={() => setActiveOutput('review')}>
                   Review
                 </button>
@@ -1808,28 +2042,44 @@ export function App() {
               <span>{compiledCanvas.semantic.readiness.summary.errors} errors</span>
               <span>{compiledCanvas.semantic.readiness.summary.warnings} warnings</span>
               <span>{compiledCanvas.semantic.readiness.summary.infos} info</span>
+              <span>{blockingDiagnostics.length} blocking</span>
             </div>
-            <div className="issue-list">
-              {compiledCanvas.semantic.diagnostics.length ? compiledCanvas.semantic.diagnostics.map((diagnostic) => {
-                const nodeId = /^\/entities\/([^/]+)/.exec(diagnostic.path)?.[1];
-                return (
-                  <button
-                    className={`issue-row diagnostic-${diagnostic.severity}`}
-                    key={`${diagnostic.code}-${diagnostic.path}-${diagnostic.message}`}
-                    onClick={() => {
-                      if (!nodeId) return;
-                      selectNodeForEditing(nodeId, { focusEditor: true });
-                    }}
-                    type="button"
-                  >
-                    <strong>{diagnostic.code}</strong>
-                    <span>{diagnostic.message}</span>
-                  </button>
-                );
-              }) : (
-                <div className="empty-note">handoffを止める診断はありません。</div>
-              )}
-            </div>
+            {compiledCanvas.semantic.diagnostics.length ? (
+              <div className="issue-list">
+                {reviewDiagnosticGroups.map((group) => (
+                  group.diagnostics.length ? (
+                    <section className="issue-group" key={group.id}>
+                      <div className="issue-group-title">
+                        <span>{group.label}</span>
+                        <strong>{group.diagnostics.length}</strong>
+                      </div>
+                      {group.diagnostics.map((diagnostic) => {
+                        const nodeId = /^\/entities\/([^/]+)/.exec(diagnostic.path)?.[1];
+                        return (
+                          <button
+                            className={`issue-row diagnostic-${diagnostic.severity}`}
+                            key={`${group.id}-${diagnostic.code}-${diagnostic.path}-${diagnostic.message}`}
+                            onClick={() => {
+                              if (!nodeId) return;
+                              selectNodeForEditing(nodeId, { focusEditor: true });
+                            }}
+                            type="button"
+                          >
+                            <div>
+                              <strong>{diagnostic.code}</strong>
+                              <small>{diagnostic.stage}{diagnostic.blocksHandoff ? ' / blocks handoff' : ''}</small>
+                            </div>
+                            <span>{diagnostic.message}</span>
+                          </button>
+                        );
+                      })}
+                    </section>
+                  ) : null
+                ))}
+              </div>
+            ) : (
+              <div className="empty-note">handoffを止める診断はありません。</div>
+            )}
           </div>
           <div className="output-tabs" role="tablist" aria-label="出力">
             <button
