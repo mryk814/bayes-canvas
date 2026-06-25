@@ -45,15 +45,17 @@ import {
   buildCanvasHandoff,
   buildCanvasPortablePackage,
   compileCanvas,
+  previewPortablePackageImport,
   projectToReactFlow,
   previewCanvasPatch,
+  type PortablePackageImportPreview,
 } from './lib/documentAdapter';
 import { assertJsonComplexity } from './lib/core/migrations.js';
 import type { HandoffBundle, HandoffTarget } from './lib/core/handoff.js';
 import type { PatchPreview } from './lib/core/patch-proposal.js';
 import { diffModelDocuments } from './lib/core/semantic-diff.js';
 import { compareReceiptFingerprint, validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
-import { saveAutosave } from './lib/storage';
+import { loadLatestAutosave, saveAutosave, type StoredSnapshot } from './lib/storage';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   data: 'Data',
@@ -118,7 +120,7 @@ const PALETTE_GROUPS: Array<{
   },
 ];
 
-const STORAGE_KEY = 'bayes-canvas:model';
+const LEGACY_STORAGE_KEY = 'bayes-canvas:model';
 const MAX_IMPORT_BYTES = 1024 * 1024;
 const MAX_IMPORT_DEPTH = 32;
 const PROMPT_TARGETS: PromptTarget[] = ['generic', 'pymc', 'numpyro', 'stan', 'review'];
@@ -242,6 +244,49 @@ interface PendingPatchState {
   summary: string;
 }
 
+interface PendingImportState {
+  sourceName: string;
+  sourceKind: 'portable package' | 'legacy canvas';
+  nodes: BayesCanvasNode[];
+  edges: Edge[];
+  summary: string;
+  diagnostics: number;
+  blockingDiagnostics: number;
+  preview?: PortablePackageImportPreview;
+}
+
+interface RestorePromptState {
+  snapshot: StoredSnapshot;
+  nodes: BayesCanvasNode[];
+  edges: Edge[];
+  summary: string;
+}
+
+interface CanvasRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const NODE_LAYOUT_WIDTH: Record<BayesNodeData['kind'], number> = {
+  data: 170,
+  deterministic: 190,
+  derived_quantity: 190,
+  hyperparameter: 198,
+  latent: 198,
+  likelihood: 208,
+  model_block: 220,
+  parameter: 198,
+};
+
+const NODE_LAYOUT_HEIGHT = 156;
+const NODE_LAYOUT_GAP_X = 72;
+const NODE_LAYOUT_GAP_Y = 34;
+const NODE_LAYOUT_ORIGIN_X = 96;
+const NODE_LAYOUT_ORIGIN_Y = 110;
+const NODE_LAYOUT_COLUMN_STEP = Math.max(...Object.values(NODE_LAYOUT_WIDTH)) + NODE_LAYOUT_GAP_X;
+
 const initialCanvasNodes: BayesCanvasNode[] = initialNodes.map((node) => ({
   ...node,
   type: 'bayesNode',
@@ -288,9 +333,85 @@ function prepareCanvasNode(node: BayesCanvasNode): BayesCanvasNode {
   };
 }
 
+function getNodeRect(node: BayesCanvasNode): CanvasRect {
+  return {
+    x: node.position.x,
+    y: node.position.y,
+    width: NODE_LAYOUT_WIDTH[node.data.kind],
+    height: NODE_LAYOUT_HEIGHT,
+  };
+}
+
+function rectsOverlap(a: CanvasRect, b: CanvasRect, padding = 12): boolean {
+  return (
+    a.x < b.x + b.width + padding
+    && a.x + a.width + padding > b.x
+    && a.y < b.y + b.height + padding
+    && a.y + a.height + padding > b.y
+  );
+}
+
+function countNodeOverlaps(nodes: BayesCanvasNode[]): number {
+  let count = 0;
+  for (let i = 0; i < nodes.length; i += 1) {
+    for (let j = i + 1; j < nodes.length; j += 1) {
+      if (rectsOverlap(getNodeRect(nodes[i]), getNodeRect(nodes[j]))) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+}
+
+function getNodeLayoutDepths(nodes: BayesCanvasNode[], edges: Edge[]): Map<string, number> {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const depths = new Map(nodes.map((node) => [node.id, 0]));
+
+  for (let pass = 0; pass < nodes.length; pass += 1) {
+    let changed = false;
+    for (const edge of edges) {
+      if (!edge.source || !edge.target || !nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
+      const sourceDepth = depths.get(edge.source) ?? 0;
+      const targetDepth = depths.get(edge.target) ?? 0;
+      const nextDepth = Math.min(sourceDepth + 1, nodes.length - 1);
+      if (nextDepth > targetDepth) {
+        depths.set(edge.target, nextDepth);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  return depths;
+}
+
+function arrangeCanvasNodes(nodes: BayesCanvasNode[], edges: Edge[]): BayesCanvasNode[] {
+  const depths = getNodeLayoutDepths(nodes, edges);
+  const columns = new Map<number, BayesCanvasNode[]>();
+
+  for (const node of nodes) {
+    const depth = depths.get(node.id) ?? 0;
+    columns.set(depth, [...(columns.get(depth) ?? []), node]);
+  }
+
+  return [...columns.entries()]
+    .sort(([a], [b]) => a - b)
+    .flatMap(([depth, columnNodes]) =>
+      [...columnNodes]
+        .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+        .map((node, index) => ({
+          ...node,
+          position: {
+            x: NODE_LAYOUT_ORIGIN_X + depth * NODE_LAYOUT_COLUMN_STEP,
+            y: NODE_LAYOUT_ORIGIN_Y + index * (NODE_LAYOUT_HEIGHT + NODE_LAYOUT_GAP_Y),
+          },
+        })),
+    );
+}
+
 function loadInitialCanvas(): CanvasState {
   try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
+    const stored = window.localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!stored) {
       return { nodes: initialCanvasNodes, edges: initialCanvasEdges };
     }
@@ -395,7 +516,7 @@ function exportPortablePackageToFile(packageData: ReturnType<typeof buildCanvasP
   URL.revokeObjectURL(url);
 }
 
-function parseCanvasFile(file: File): Promise<CanvasState> {
+function parseCanvasFile(file: File): Promise<PendingImportState> {
   return new Promise((resolve, reject) => {
     if (file.size > MAX_IMPORT_BYTES) {
       reject(new Error(`ファイルが大きすぎます。上限は ${Math.round(MAX_IMPORT_BYTES / 1024)}KB です。`));
@@ -418,17 +539,20 @@ function parseCanvasFile(file: File): Promise<CanvasState> {
           files?: Record<string, string>;
         };
         if (portableFile.files?.['model.json'] && portableFile.files?.['layout.json']) {
-          const projected = projectToReactFlow({
-            document: JSON.parse(portableFile.files['model.json']),
-            layout: JSON.parse(portableFile.files['layout.json']),
-          });
+          const preview = previewPortablePackageImport(portableFile);
           resolve({
-            nodes: projected.nodes.map(prepareCanvasNode),
-            edges: projected.edges.map((edge: Edge) => ({
+            sourceName: file.name,
+            sourceKind: 'portable package',
+            nodes: preview.projected.nodes.map(prepareCanvasNode),
+            edges: preview.projected.edges.map((edge: Edge) => ({
               ...edge,
               type: 'smoothstep',
               markerEnd: { type: MarkerType.ArrowClosed },
             })),
+            summary: preview.summary,
+            diagnostics: preview.semantic.diagnostics.length,
+            blockingDiagnostics: preview.semantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff).length,
+            preview,
           });
           return;
         }
@@ -437,12 +561,17 @@ function parseCanvasFile(file: File): Promise<CanvasState> {
           return;
         }
         resolve({
+          sourceName: file.name,
+          sourceKind: 'legacy canvas',
           nodes: modelFile.nodes.map(prepareCanvasNode),
           edges: modelFile.edges.map((edge: Edge) => ({
             ...edge,
             type: 'smoothstep',
             markerEnd: { type: MarkerType.ArrowClosed },
           })),
+          summary: `${modelFile.nodes.length} nodes / ${modelFile.edges.length} links`,
+          diagnostics: compileCanvas(modelFile.nodes.map(prepareCanvasNode), modelFile.edges).semantic.diagnostics.length,
+          blockingDiagnostics: compileCanvas(modelFile.nodes.map(prepareCanvasNode), modelFile.edges).semantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff).length,
         });
       } catch (error) {
         reject(error instanceof Error ? error : new Error('JSON形式が正しくありません。'));
@@ -452,6 +581,51 @@ function parseCanvasFile(file: File): Promise<CanvasState> {
     reader.readAsText(file);
   });
 }
+
+function addImportProvenance(nodes: BayesCanvasNode[], sourceName: string): BayesCanvasNode[] {
+  if (!nodes.length) return nodes;
+  const provenance = `Imported from ${sourceName} at ${new Date().toISOString()}.`;
+  return nodes.map((node, index) => {
+    if (index > 0) return node;
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        notes: node.data.notes ? `${node.data.notes}\n${provenance}` : provenance,
+      },
+    };
+  });
+}
+
+const EXTERNAL_MODEL_IMPORT_PROMPT = `Convert the following external Bayesian model into a Bayes Canvas portable package.
+
+Return only JSON with this shape:
+{
+  "manifest": {
+    "packageVersion": "1.0.0",
+    "modelDocumentId": "model_imported",
+    "sourceRevision": 1,
+    "schemaVersion": "1.0.0",
+    "createdAt": "ISO-8601 timestamp",
+    "fingerprintAlgorithm": "sha256",
+    "fingerprint": "sha256 of { model, layout } if available",
+    "files": ["manifest.json", "model.json", "layout.json", "diagnostics.json", "handoff.json", "decisions.jsonl"]
+  },
+  "files": {
+    "manifest.json": "stringified manifest JSON",
+    "model.json": "stringified Bayes Canvas ModelDocument JSON",
+    "layout.json": "stringified Bayes Canvas LayoutDocument JSON",
+    "diagnostics.json": "[]",
+    "handoff.json": "{}",
+    "decisions.jsonl": "one JSON object per provenance, assumption, warning, or review question"
+  }
+}
+
+Rules:
+- Preserve source provenance in ModelDocument notes or decisions.jsonl.
+- Use stable entity IDs and put layout.modelDocumentId equal to model.documentId.
+- Keep ambiguous modeling choices as open review_question notes instead of inventing assumptions.
+- Do not omit model.json or layout.json.`;
 
 function createNodeData(kind: BayesNodeData['kind'], count: number): BayesNodeData {
   const baseName = `${kind}_${count}`;
@@ -750,13 +924,25 @@ export function App() {
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [patchInput, setPatchInput] = useState('');
   const [pendingPatch, setPendingPatch] = useState<PendingPatchState | null>(null);
+  const [pendingImport, setPendingImport] = useState<PendingImportState | null>(null);
+  const [restorePrompt, setRestorePrompt] = useState<RestorePromptState | null>(null);
   const [patchInbox, setPatchInbox] = useState<Array<{ id: string; label: string; value: string }>>([]);
   const [schemaInput, setSchemaInput] = useState('x, real, N\ny, real, N');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ImplementationReceipt | null>(null);
   const receiptFingerprintStatus = useMemo(
-    () => receipt ? compareReceiptFingerprint(receipt, handoffBundle.manifest.specificationFingerprint) : null,
-    [handoffBundle.manifest.specificationFingerprint, receipt],
+    () => receipt
+      ? compareReceiptFingerprint(
+        receipt,
+        handoffBundle.manifest.specificationFingerprint,
+        handoffBundle.manifest.fingerprintAlgorithm,
+      )
+      : null,
+    [
+      handoffBundle.manifest.fingerprintAlgorithm,
+      handoffBundle.manifest.specificationFingerprint,
+      receipt,
+    ],
   );
   const fullTex = useMemo(() => generateModelTex(modelIr), [modelIr]);
   const reviewText = useMemo(() => formatReviewPanel(compiledCanvas.semantic.diagnostics), [compiledCanvas.semantic.diagnostics]);
@@ -909,6 +1095,7 @@ export function App() {
       detail: `${handoffBundle.capabilityReport.filter((item) => item.support === 'unsupported').length} unsupported`,
     },
   ], [blockingDiagnostics.length, decisionNotes.length, handoffBundle.capabilityReport, nodes, queryNodes.length]);
+  const overlapCount = useMemo(() => countNodeOverlaps(nodes), [nodes]);
   const focusedNodeIds = useMemo(() => {
     if (!focusNodeId) return null;
     const related = new Set([focusNodeId]);
@@ -975,8 +1162,36 @@ export function App() {
   }, [nodes, edges, focusedNodeIds]);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ nodes, edges }));
-  }, [nodes, edges]);
+    let cancelled = false;
+    void loadLatestAutosave()
+      .then((snapshot) => {
+        if (cancelled || !snapshot) return;
+        const projected = projectToReactFlow({
+          document: snapshot.document,
+          layout: snapshot.layout,
+        });
+        setRestorePrompt({
+          snapshot,
+          nodes: projected.nodes.map(prepareCanvasNode),
+          edges: projected.edges.map((edge: Edge) => ({
+            ...edge,
+            type: 'smoothstep',
+            markerEnd: { type: MarkerType.ArrowClosed },
+          })),
+          summary: `${projected.nodes.length} nodes / ${projected.edges.length} links / ${new Date(snapshot.savedAt).toLocaleString()}`,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setImportError({
+          title: '自動保存を確認できません',
+          detail: error instanceof Error ? error.message : 'IndexedDBの復元候補を読み込めませんでした。',
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1307,6 +1522,24 @@ export function App() {
     setUndoState(null);
   }, [setEdges, setNodes, undoState]);
 
+  const applyRestorePrompt = useCallback(() => {
+    if (!restorePrompt) return;
+    setUndoState({ message: '自動保存を復元しました。', nodes, edges });
+    setNodes(restorePrompt.nodes);
+    setEdges(restorePrompt.edges);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setRestorePrompt(null);
+  }, [edges, nodes, restorePrompt, setEdges, setNodes]);
+
+  const copyExternalImportPrompt = useCallback(() => {
+    copyText(EXTERNAL_MODEL_IMPORT_PROMPT);
+    setImportError({
+      title: '外部モデル変換promptをコピーしました',
+      detail: 'AI toolの出力JSONを読み込み、previewを確認してから適用してください。',
+    });
+  }, []);
+
   const insertPatchTemplate = useCallback(() => {
     setPatchInput(JSON.stringify({
       proposalVersion: '1.0.0',
@@ -1354,6 +1587,18 @@ export function App() {
     setSelectedEdgeId(null);
     setPendingPatch(null);
   }, [edges, nodes, pendingPatch, setEdges, setNodes]);
+
+  const applyPendingImport = useCallback(() => {
+    if (!pendingImport) return;
+    setUndoState({ message: `${pendingImport.sourceName} を読み込みました。`, nodes, edges });
+    setNodes(addImportProvenance(pendingImport.nodes, pendingImport.sourceName));
+    setEdges(pendingImport.edges);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setPendingImport(null);
+    setActiveLeftPanel('inspector');
+    setActiveOutput('review');
+  }, [edges, nodes, pendingImport, setEdges, setNodes]);
 
   const handleReceiptImport = useCallback(() => {
     const input = document.createElement('input');
@@ -1430,12 +1675,10 @@ export function App() {
       if (!file) return;
       try {
         const state = await parseCanvasFile(file);
-        setNodes(state.nodes);
-        setEdges(state.edges);
-        setSelectedNodeId(null);
-        setSelectedEdgeId(null);
+        setPendingImport(state);
         setImportError(null);
       } catch (error) {
+        setPendingImport(null);
         setImportError({
           title: '読み込みに失敗しました',
           detail: error instanceof Error ? error.message : 'JSON形式とBayes Canvas形式を確認してください。',
@@ -1443,7 +1686,7 @@ export function App() {
       }
     };
     input.click();
-  }, [setNodes, setEdges]);
+  }, []);
 
   const addQoIFromSelection = useCallback(() => {
     const sourceNode = selectedNode ?? nodes.find((node) => ['parameter', 'deterministic', 'likelihood'].includes(node.data.kind));
@@ -1538,6 +1781,22 @@ export function App() {
     ]);
   }, [patchInput]);
 
+  const resolveCanvasOverlaps = useCallback(() => {
+    if (nodes.length < 2) return;
+    const previousPositions = new Map(nodes.map((node) => [node.id, node.position]));
+    const arrangedNodes = arrangeCanvasNodes(nodes, edges).map((node) => ({ ...node, selected: false }));
+    const movedCount = arrangedNodes.filter((node) => {
+      const previous = previousPositions.get(node.id);
+      return previous && (previous.x !== node.position.x || previous.y !== node.position.y);
+    }).length;
+    if (!movedCount) return;
+    setUndoState({ message: 'ノード配置を整理しました。', nodes, edges });
+    setNodes(arrangedNodes);
+    setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+  }, [edges, nodes, setEdges, setNodes]);
+
   const commands = useMemo<CommandAction[]>(() => [
     {
       id: 'add-data',
@@ -1582,6 +1841,12 @@ export function App() {
       run: () => setActiveLeftPanel('structure'),
     },
     {
+      id: 'resolve-overlaps',
+      label: '重なり解消',
+      group: 'Canvas',
+      run: resolveCanvasOverlaps,
+    },
+    {
       id: 'go-review',
       label: 'Go to Review',
       group: 'Navigate',
@@ -1617,7 +1882,22 @@ export function App() {
       group: 'File',
       run: handleImport,
     },
-  ], [addModelBlock, addNodeFromPalette, addQoIFromSelection, applyModelTemplate, handleImport, portablePackage]);
+    {
+      id: 'external-model-import-prompt',
+      label: 'Copy external model import prompt',
+      group: 'File',
+      run: copyExternalImportPrompt,
+    },
+  ], [
+    addModelBlock,
+    addNodeFromPalette,
+    addQoIFromSelection,
+    applyModelTemplate,
+    copyExternalImportPrompt,
+    handleImport,
+    portablePackage,
+    resolveCanvasOverlaps,
+  ]);
 
   const filteredCommands = useMemo(() => {
     const query = commandQuery.trim().toLowerCase();
@@ -1702,6 +1982,34 @@ export function App() {
         </div>
       ) : null}
 
+      {restorePrompt ? (
+        <div className="status-banner status-undo" role="status">
+          <strong>自動保存があります</strong>
+          <span>{restorePrompt.summary}</span>
+          <button type="button" onClick={applyRestorePrompt}>
+            復元
+          </button>
+          <button type="button" onClick={() => setRestorePrompt(null)}>
+            閉じる
+          </button>
+        </div>
+      ) : null}
+
+      {pendingImport ? (
+        <div className="status-banner status-undo" role="status">
+          <strong>読み込みpreview: {pendingImport.sourceName}</strong>
+          <span>
+            {pendingImport.sourceKind} / {pendingImport.summary} / blocking {pendingImport.blockingDiagnostics}
+          </span>
+          <button type="button" onClick={applyPendingImport}>
+            適用
+          </button>
+          <button type="button" onClick={() => setPendingImport(null)}>
+            閉じる
+          </button>
+        </div>
+      ) : null}
+
       {commandPaletteOpen ? (
         <div className="command-backdrop" role="presentation" onMouseDown={() => setCommandPaletteOpen(false)}>
           <div
@@ -1778,7 +2086,7 @@ export function App() {
                   {modelTemplates.map((template) => (
                     <button key={template.id} type="button" onClick={() => applyModelTemplate(template)}>
                       <strong>{template.name}</strong>
-                      <span>{template.family}</span>
+                      <span>{template.family} / {template.status}</span>
                       <small>{template.description}</small>
                     </button>
                   ))}
@@ -1867,7 +2175,7 @@ export function App() {
                   {modelTemplates.map((template) => (
                     <button key={template.id} type="button" onClick={() => applyModelTemplate(template)}>
                       <strong>{template.name}</strong>
-                      <span>{template.family}</span>
+                      <span>{template.family} / {template.status}</span>
                       <small>{template.reviewQuestions[0]}</small>
                     </button>
                   ))}
@@ -2108,6 +2416,9 @@ export function App() {
             <div className="toolbar-title">
               <strong>階層回帰</strong>
               <span>編集キャンバス</span>
+              <span className={overlapCount ? 'layout-status layout-status-warning' : 'layout-status'}>
+                重なり {overlapCount}
+              </span>
             </div>
             <div className="toolbar-actions">
               <div className="toolbar-group toolbar-primary" aria-label="Primary actions">
@@ -2128,11 +2439,17 @@ export function App() {
                 <button type="button" onClick={handleImport}>
                   読み込み
                 </button>
+                <button type="button" onClick={copyExternalImportPrompt}>
+                  外部変換
+                </button>
                 <button type="button" onClick={handleExport}>
                   書き出し
                 </button>
               </div>
               <div className="toolbar-group" aria-label="Edit actions">
+                <button disabled={nodes.length < 2} type="button" onClick={resolveCanvasOverlaps}>
+                  重なり解消
+                </button>
                 <button disabled={!selectedNode && !selectedEdge} type="button" onClick={deleteSelectedItem}>
                   削除
                 </button>

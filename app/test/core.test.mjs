@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compileCanvas, buildCanvasHandoff, buildCapabilityReport, projectToReactFlow } from '../dist-test/lib/documentAdapter.js';
+import {
+  compileCanvas,
+  buildCanvasHandoff,
+  buildCapabilityReport,
+  previewPortablePackageImport,
+  projectToReactFlow,
+} from '../dist-test/lib/documentAdapter.js';
 import { parseExpression } from '../dist-test/lib/core/expression.js';
 import { assertJsonComplexity } from '../dist-test/lib/core/migrations.js';
 import { previewPatchProposal } from '../dist-test/lib/core/patch-proposal.js';
 import { buildPortablePackage } from '../dist-test/lib/core/portable.js';
-import { validateImplementationReceipt } from '../dist-test/lib/core/receipt.js';
+import { compareReceiptFingerprint, validateImplementationReceipt } from '../dist-test/lib/core/receipt.js';
 import { initialEdges, initialNodes } from '../dist-test/samples/hierarchicalRegression.js';
 import { modelTemplates } from '../dist-test/samples/modelTemplates.js';
 import { modelCorpus } from '../dist-test/samples/modelCorpus.js';
@@ -14,7 +20,11 @@ import { hierarchicalRegression } from '../dist-test/lib/core/example.js';
 import { compileModel } from '../dist-test/lib/core/compiler.js';
 import { TARGET_PROFILES } from '../dist-test/lib/core/target-profiles.js';
 import { sha256Hex } from '../dist-test/lib/core/fingerprint.js';
-import { validateImplementationReceiptEnvelope, validateModelDocumentEnvelope } from '../dist-test/lib/core/schema-validation.js';
+import {
+  validateImplementationReceiptEnvelope,
+  validateLayoutDocumentEnvelope,
+  validateModelDocumentEnvelope,
+} from '../dist-test/lib/core/schema-validation.js';
 
 test('parses indexed Bayesian expressions', () => {
   const parsed = parseExpression('alpha[group_id[i]] + beta * x[i]');
@@ -49,6 +59,10 @@ test('compiles model templates into canvas documents', () => {
     assert.equal(compiled.layout.modelDocumentId, compiled.document.documentId, template.id);
     assert.ok(compiled.document.entityOrder.length >= 4, template.id);
     assert.ok(Array.isArray(compiled.semantic.diagnostics), template.id);
+    if (template.status === 'clean') {
+      assert.equal(compiled.semantic.readiness.summary.errors, template.expectedDiagnostics.errors, template.id);
+      assert.equal(compiled.semantic.readiness.summary.warnings, template.expectedDiagnostics.warnings, template.id);
+    }
   }
 });
 
@@ -112,9 +126,40 @@ test('builds a portable package with model and layout separated', () => {
   assert.equal(JSON.stringify(restoredLayout), JSON.stringify(compiled.layout));
 });
 
+test('previews portable package imports after strict validation', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  const pkg = buildPortablePackage(compiled.document, compiled.layout, compiled.semantic);
+  const preview = previewPortablePackageImport(pkg);
+  assert.equal(preview.document.documentId, compiled.document.documentId);
+  assert.equal(preview.projected.nodes.length, initialNodes.length);
+  assert.ok(preview.summary.includes('diagnostics'));
+
+  assert.throws(
+    () => previewPortablePackageImport({
+      ...pkg,
+      files: {
+        ...pkg.files,
+        'model.json': JSON.stringify({ ...compiled.document, typo: true }),
+      },
+    }),
+    /model\.json\/typo/u,
+  );
+  assert.throws(
+    () => previewPortablePackageImport({
+      ...pkg,
+      files: {
+        ...pkg.files,
+        'layout.json': JSON.stringify({ ...compiled.layout, typo: true }),
+      },
+    }),
+    /layout\.json\/typo/u,
+  );
+});
+
 test('validates implementation receipts', () => {
   const receipt = validateImplementationReceipt({
     receiptVersion: '1.0.0',
+    inputSpecificationFingerprintAlgorithm: 'sha256',
     inputSpecificationFingerprint: 'abc',
     backend: 'pymc',
     mappings: [{ entityId: 'beta', implementationSymbol: 'beta', file: 'model.py' }],
@@ -124,16 +169,23 @@ test('validates implementation receipts', () => {
     unresolvedQuestions: [],
   });
   assert.equal(receipt.mappings.length, 1);
+  assert.equal(compareReceiptFingerprint(receipt, 'abc', 'sha256').matches, true);
+  assert.equal(compareReceiptFingerprint(receipt, 'def', 'sha256').matches, false);
 });
 
 test('flags unknown schema envelope properties at runtime boundaries', () => {
   const compiled = compileCanvas(initialNodes, initialEdges);
   assert.deepEqual(validateModelDocumentEnvelope(compiled.document), []);
+  assert.deepEqual(validateLayoutDocumentEnvelope(compiled.layout), []);
   assert.deepEqual(validateModelDocumentEnvelope({ ...compiled.document, typo: true }), [
+    { path: '/typo', message: 'Unknown property "typo".' },
+  ]);
+  assert.deepEqual(validateLayoutDocumentEnvelope({ ...compiled.layout, typo: true }), [
     { path: '/typo', message: 'Unknown property "typo".' },
   ]);
   assert.deepEqual(validateImplementationReceiptEnvelope({
     receiptVersion: '1.0.0',
+    inputSpecificationFingerprintAlgorithm: 'sha256',
     inputSpecificationFingerprint: 'abc',
     backend: 'pymc',
     mappings: [],
@@ -152,6 +204,11 @@ test('checks the model corpus against expected diagnostics budgets', () => {
     assert.ok(template, entry.id);
     const compiled = compileCanvas(template.nodes, template.edges);
     assert.ok(compiled.semantic.readiness.summary.errors <= entry.expectedMaxErrors, entry.id);
+    assert.ok(compiled.semantic.readiness.summary.warnings <= entry.expectedMaxWarnings, entry.id);
+    if (entry.status === 'clean') {
+      assert.equal(compiled.semantic.readiness.summary.errors, 0, entry.id);
+      assert.equal(compiled.semantic.readiness.summary.warnings, 0, entry.id);
+    }
   }
 });
 

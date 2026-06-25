@@ -43,6 +43,8 @@ model.bayescanvas/
 
 `model.json` is the strict `ModelDocument`. `layout.json` is the `LayoutDocument`; changing coordinates must not create semantic diff. `decisions.jsonl` stores assumptions, warnings, review questions, and implementation notes as append-friendly records.
 
+Package import is a preview flow. The app validates `model.json` and `layout.json`, checks that `layout.modelDocumentId` matches `model.documentId`, runs compiler diagnostics, and only replaces the current canvas after the user applies the preview. Invalid packages must leave the current canvas unchanged. External AI conversion should output the same portable package shape and preserve source provenance in ModelDocument notes or `decisions.jsonl`.
+
 ## CLI Contract
 
 The CLI should be a thin wrapper over the same core functions used by the app:
