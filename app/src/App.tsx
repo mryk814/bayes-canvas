@@ -142,6 +142,9 @@ const OBSERVATION_OPTIONS = [
   { value: 'rounded', label: '丸められた値' },
 ] as const;
 
+const EDGE_ROUTE_SPACING = 18;
+const HORIZONTAL_EDGE_THRESHOLD = 90;
+
 interface PlateRow {
   id: string;
   index: string;
@@ -185,32 +188,54 @@ function resolveEdgeParam(
   return undefined;
 }
 
+function getEdgeTone(targetKind: BayesNodeData['kind']): string {
+  if (targetKind === 'likelihood') return 'var(--color-success-strong)';
+  if (targetKind === 'deterministic' || targetKind === 'derived_quantity') return 'var(--color-chart-5)';
+  if (targetKind === 'data') return 'var(--color-info-strong)';
+  if (targetKind === 'model_block') return 'var(--color-text-secondary)';
+  return 'var(--color-accent)';
+}
+
+function getEdgeDirectionLabel(paramLabel: string | undefined): string {
+  return paramLabel ? `-> ${paramLabel}` : '->';
+}
+
 const edgeTypes = {
   paramEdge: memo(function ParamEdge({
     sourceX, sourceY, targetX, targetY,
     sourcePosition, targetPosition,
     markerEnd, style, data,
   }: EdgeProps) {
+    const routeOffset = Number(data?.routeOffset ?? 0);
     const [edgePath, labelX, labelY] = getSmoothStepPath({
       sourceX, sourceY, targetX, targetY,
       sourcePosition, targetPosition,
+      offset: 26 + Math.abs(routeOffset),
     });
 
     const paramLabel = data?.paramLabel as string | undefined;
+    const directionLabel = data?.directionLabel as string | undefined;
 
     return (
       <>
-        <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
-        {paramLabel ? (
+        <BaseEdge
+          path={edgePath}
+          markerEnd={markerEnd}
+          style={{
+            ...style,
+            strokeWidth: 2.6,
+          }}
+        />
+        {directionLabel ? (
           <EdgeLabelRenderer>
             <div
-              className="edge-param-label"
+              className="edge-direction-label"
               style={{
                 position: 'absolute',
-                transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+                transform: `translate(-50%, -50%) translate(${labelX + routeOffset}px, ${labelY}px)`,
               }}
             >
-              {paramLabel}
+              {directionLabel}
             </div>
           </EdgeLabelRenderer>
         ) : null}
@@ -269,6 +294,10 @@ interface CanvasRect {
   height: number;
 }
 
+interface FlowViewportControls {
+  fitView: (options?: { padding?: number; duration?: number }) => Promise<boolean>;
+}
+
 const NODE_LAYOUT_WIDTH: Record<BayesNodeData['kind'], number> = {
   data: 170,
   deterministic: 190,
@@ -286,6 +315,8 @@ const NODE_LAYOUT_GAP_Y = 34;
 const NODE_LAYOUT_ORIGIN_X = 96;
 const NODE_LAYOUT_ORIGIN_Y = 110;
 const NODE_LAYOUT_COLUMN_STEP = Math.max(...Object.values(NODE_LAYOUT_WIDTH)) + NODE_LAYOUT_GAP_X;
+const NODE_LAYOUT_ROW_STEP = NODE_LAYOUT_HEIGHT + NODE_LAYOUT_GAP_Y;
+const NODE_LAYOUT_SINK_BASE_ROW = 1;
 
 const initialCanvasNodes: BayesCanvasNode[] = initialNodes.map((node) => ({
   ...node,
@@ -363,23 +394,66 @@ function countNodeOverlaps(nodes: BayesCanvasNode[]): number {
   return count;
 }
 
+function getNodeCenter(node: BayesCanvasNode): { x: number; y: number } {
+  return {
+    x: node.position.x + NODE_LAYOUT_WIDTH[node.data.kind] / 2,
+    y: node.position.y + NODE_LAYOUT_HEIGHT / 2,
+  };
+}
+
+function getPreferredEdgeHandles(
+  sourceNode: BayesCanvasNode,
+  targetNode: BayesCanvasNode,
+): Pick<Edge, 'sourceHandle' | 'targetHandle'> {
+  const sourceCenter = getNodeCenter(sourceNode);
+  const targetCenter = getNodeCenter(targetNode);
+  const dx = targetCenter.x - sourceCenter.x;
+  const dy = targetCenter.y - sourceCenter.y;
+
+  if (Math.abs(dx) > HORIZONTAL_EDGE_THRESHOLD) {
+    return dx > 0
+      ? { sourceHandle: 'source-right', targetHandle: 'target-left' }
+      : { sourceHandle: 'source-left', targetHandle: 'target-right' };
+  }
+
+  return dy >= 0
+    ? { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
+    : { sourceHandle: 'source-top', targetHandle: 'target-bottom' };
+}
+
+function getEdgeRouteOffset(index: number): number {
+  if (index === 0) return 0;
+  const lane = Math.ceil(index / 2) * EDGE_ROUTE_SPACING;
+  return index % 2 === 0 ? lane : -lane;
+}
+
 function getNodeLayoutDepths(nodes: BayesCanvasNode[], edges: Edge[]): Map<string, number> {
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const depths = new Map(nodes.map((node) => [node.id, 0]));
+  const distanceToSink = new Map(nodes.map((node) => [node.id, 0]));
 
   for (let pass = 0; pass < nodes.length; pass += 1) {
     let changed = false;
     for (const edge of edges) {
       if (!edge.source || !edge.target || !nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
-      const sourceDepth = depths.get(edge.source) ?? 0;
-      const targetDepth = depths.get(edge.target) ?? 0;
-      const nextDepth = Math.min(sourceDepth + 1, nodes.length - 1);
-      if (nextDepth > targetDepth) {
-        depths.set(edge.target, nextDepth);
+      const sourceDistance = distanceToSink.get(edge.source) ?? 0;
+      const targetDistance = distanceToSink.get(edge.target) ?? 0;
+      const nextDistance = Math.min(targetDistance + 1, nodes.length - 1);
+      if (nextDistance > sourceDistance) {
+        distanceToSink.set(edge.source, nextDistance);
         changed = true;
       }
     }
     if (!changed) break;
+  }
+
+  const connectedNodeIds = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
+  const maxDistance = Math.max(0, ...[...distanceToSink.entries()]
+    .filter(([nodeId]) => connectedNodeIds.has(nodeId))
+    .map(([, distance]) => distance));
+  const depths = new Map<string, number>();
+  for (const node of nodes) {
+    const hasEdges = connectedNodeIds.has(node.id);
+    depths.set(node.id, hasEdges ? maxDistance - (distanceToSink.get(node.id) ?? 0) : 0);
   }
 
   return depths;
@@ -388,25 +462,97 @@ function getNodeLayoutDepths(nodes: BayesCanvasNode[], edges: Edge[]): Map<strin
 function arrangeCanvasNodes(nodes: BayesCanvasNode[], edges: Edge[]): BayesCanvasNode[] {
   const depths = getNodeLayoutDepths(nodes, edges);
   const columns = new Map<number, BayesCanvasNode[]>();
+  const outgoing = new Map<string, string[]>();
+  const placedYByNode = new Map<string, number>();
 
   for (const node of nodes) {
     const depth = depths.get(node.id) ?? 0;
     columns.set(depth, [...(columns.get(depth) ?? []), node]);
   }
 
-  return [...columns.entries()]
-    .sort(([a], [b]) => a - b)
-    .flatMap(([depth, columnNodes]) =>
-      [...columnNodes]
-        .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
-        .map((node, index) => ({
-          ...node,
-          position: {
-            x: NODE_LAYOUT_ORIGIN_X + depth * NODE_LAYOUT_COLUMN_STEP,
-            y: NODE_LAYOUT_ORIGIN_Y + index * (NODE_LAYOUT_HEIGHT + NODE_LAYOUT_GAP_Y),
-          },
-        })),
-    );
+  for (const edge of edges) {
+    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target]);
+  }
+
+  const arrangedById = new Map<string, BayesCanvasNode>();
+  const sortedColumns = [...columns.entries()].sort(([a], [b]) => b - a);
+  const maxDepth = Math.max(0, ...[...columns.keys()]);
+
+  for (const [depth, columnNodes] of sortedColumns) {
+    const occupiedYs: number[] = [];
+    const sortedNodes = [...columnNodes].sort((a, b) => {
+      const aTargetY = getDesiredNodeY(a.id, outgoing, placedYByNode);
+      const bTargetY = getDesiredNodeY(b.id, outgoing, placedYByNode);
+      return aTargetY - bTargetY || getNodeLayoutPriority(a) - getNodeLayoutPriority(b) || a.position.y - b.position.y;
+    });
+
+    for (const [index, node] of sortedNodes.entries()) {
+      const isSinkColumn = depth === maxDepth;
+      const desiredY = isSinkColumn
+        ? NODE_LAYOUT_ORIGIN_Y + (NODE_LAYOUT_SINK_BASE_ROW + index) * NODE_LAYOUT_ROW_STEP
+        : getDesiredNodeY(node.id, outgoing, placedYByNode);
+      const y = takeNearestFreeY(desiredY, occupiedYs);
+      occupiedYs.push(y);
+      placedYByNode.set(node.id, y);
+      arrangedById.set(node.id, {
+        ...node,
+        position: {
+          x: NODE_LAYOUT_ORIGIN_X + depth * NODE_LAYOUT_COLUMN_STEP,
+          y,
+        },
+      });
+    }
+  }
+
+  return nodes.map((node) => arrangedById.get(node.id) ?? node);
+}
+
+function getDesiredNodeY(
+  nodeId: string,
+  outgoing: Map<string, string[]>,
+  placedYByNode: Map<string, number>,
+): number {
+  const childYs = (outgoing.get(nodeId) ?? [])
+    .map((childId) => placedYByNode.get(childId))
+    .filter((y): y is number => y !== undefined);
+
+  if (!childYs.length) {
+    return NODE_LAYOUT_ORIGIN_Y + NODE_LAYOUT_SINK_BASE_ROW * NODE_LAYOUT_ROW_STEP;
+  }
+
+  return childYs.reduce((total, y) => total + y, 0) / childYs.length;
+}
+
+function getNodeLayoutPriority(node: BayesCanvasNode): number {
+  const priorities: Partial<Record<BayesNodeData['kind'], number>> = {
+    hyperparameter: 0,
+    parameter: 1,
+    latent: 2,
+    data: 3,
+    deterministic: 4,
+    model_block: 5,
+    likelihood: 6,
+    derived_quantity: 7,
+  };
+  return priorities[node.data.kind] ?? 10;
+}
+
+function takeNearestFreeY(desiredY: number, occupiedYs: number[]): number {
+  const minY = NODE_LAYOUT_ORIGIN_Y;
+  const baseY = Math.max(minY, desiredY);
+  const offsets = [0];
+  for (let step = 1; step <= occupiedYs.length + 3; step += 1) {
+    offsets.push(step, -step);
+  }
+
+  for (const offset of offsets) {
+    const candidate = Math.max(minY, baseY + offset * NODE_LAYOUT_ROW_STEP);
+    if (occupiedYs.every((occupiedY) => Math.abs(occupiedY - candidate) >= NODE_LAYOUT_ROW_STEP - 1)) {
+      return candidate;
+    }
+  }
+
+  return minY + occupiedYs.length * NODE_LAYOUT_ROW_STEP;
 }
 
 function loadInitialCanvas(): CanvasState {
@@ -770,7 +916,10 @@ const nodeTypes = {
 
     return (
       <div className={`bayes-node bayes-node-${data.kind}`}>
-        <Handle className="node-handle" type="target" position={Position.Top} />
+        <Handle className="node-handle node-handle-top" id="target-top" type="target" position={Position.Top} />
+        <Handle className="node-handle node-handle-right" id="target-right" type="target" position={Position.Right} />
+        <Handle className="node-handle node-handle-bottom" id="target-bottom" type="target" position={Position.Bottom} />
+        <Handle className="node-handle node-handle-left" id="target-left" type="target" position={Position.Left} />
         <div className="node-heading">
           <span className="node-kind">{NODE_KIND_LABELS[data.kind]}</span>
           {data.observed ? <span className="node-chip">Observed</span> : null}
@@ -785,9 +934,13 @@ const nodeTypes = {
         ) : null}
         <div className="node-meta">
           {data.shape?.length ? <span>{data.shape.join(' x ')}</span> : <span>scalar</span>}
+          {data.eventShape?.length ? <span>event: {data.eventShape.join(' x ')}</span> : null}
           {data.plate ? <span>plate: {data.plate}</span> : null}
         </div>
-        <Handle className="node-handle" type="source" position={Position.Bottom} />
+        <Handle className="node-handle node-handle-top" id="source-top" type="source" position={Position.Top} />
+        <Handle className="node-handle node-handle-right" id="source-right" type="source" position={Position.Right} />
+        <Handle className="node-handle node-handle-bottom" id="source-bottom" type="source" position={Position.Bottom} />
+        <Handle className="node-handle node-handle-left" id="source-left" type="source" position={Position.Left} />
       </div>
     );
   }),
@@ -903,6 +1056,7 @@ export function App() {
   const initialCanvas = useMemo(() => loadInitialCanvas(), []);
   const [nodes, setNodes, onNodesChange] = useNodesState<BayesCanvasNode>(initialCanvas.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialCanvas.edges);
+  const reactFlowRef = useRef<FlowViewportControls | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [activeLeftPanel, setActiveLeftPanel] = useState<LeftPanelTab>('add');
@@ -1152,12 +1306,46 @@ export function App() {
   }, [compiledCanvas.semantic.diagnostics]);
 
   const labeledEdges = useMemo(() => {
-    const nodeMap = new Map(nodes.map((n) => [n.id, n.data]));
-    return edges.filter((edge) => !focusedNodeIds || (focusedNodeIds.has(edge.source) && focusedNodeIds.has(edge.target))).map((edge) => {
-      const targetData = nodeMap.get(edge.target);
-      if (!targetData) return { ...edge, type: 'paramEdge' as const };
-      const paramLabel = resolveEdgeParam(edge.source, targetData);
-      return { ...edge, type: 'paramEdge' as const, data: { ...edge.data, paramLabel } };
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+    const visibleEdges = edges.filter((edge) => !focusedNodeIds || (focusedNodeIds.has(edge.source) && focusedNodeIds.has(edge.target)));
+    const laneCounts = new Map<string, number>();
+
+    return visibleEdges.map((edge) => {
+      const sourceNode = nodeMap.get(edge.source);
+      const targetNode = nodeMap.get(edge.target);
+      if (!sourceNode || !targetNode) return { ...edge, type: 'paramEdge' as const };
+      const handles = getPreferredEdgeHandles(sourceNode, targetNode);
+      const laneKey = [
+        handles.sourceHandle,
+        handles.targetHandle,
+        Math.round(sourceNode.position.x / 40),
+        Math.round(targetNode.position.x / 40),
+      ].join(':');
+      const routeIndex = laneCounts.get(laneKey) ?? 0;
+      laneCounts.set(laneKey, routeIndex + 1);
+      const paramLabel = resolveEdgeParam(edge.source, targetNode.data);
+      const edgeTone = getEdgeTone(targetNode.data.kind);
+      return {
+        ...edge,
+        ...handles,
+        type: 'paramEdge' as const,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 20,
+          height: 20,
+          color: edgeTone,
+        },
+        style: {
+          ...edge.style,
+          stroke: edgeTone,
+        },
+        data: {
+          ...edge.data,
+          paramLabel,
+          directionLabel: getEdgeDirectionLabel(paramLabel),
+          routeOffset: getEdgeRouteOffset(routeIndex),
+        },
+      };
     });
   }, [nodes, edges, focusedNodeIds]);
 
@@ -1795,6 +1983,9 @@ export function App() {
     setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
+    window.setTimeout(() => {
+      reactFlowRef.current?.fitView({ padding: 0.18, duration: 220 });
+    }, 0);
   }, [edges, nodes, setEdges, setNodes]);
 
   const commands = useMemo<CommandAction[]>(() => [
@@ -1960,55 +2151,57 @@ export function App() {
         </div>
       </header>
 
-      {importError ? (
-        <div className="status-banner status-error" role="alert">
-          <strong>{importError.title}</strong>
-          <span>{importError.detail}</span>
-          <button type="button" onClick={() => setImportError(null)}>
-            閉じる
-          </button>
-        </div>
-      ) : null}
+      <div className="status-stack" aria-live="polite">
+        {importError ? (
+          <div className="status-banner status-error" role="alert">
+            <strong>{importError.title}</strong>
+            <span>{importError.detail}</span>
+            <button type="button" onClick={() => setImportError(null)}>
+              閉じる
+            </button>
+          </div>
+        ) : null}
 
-      {undoState ? (
-        <div className="status-banner status-undo" role="status">
-          <span>{undoState.message}</span>
-          <button type="button" onClick={restoreUndo}>
-            元に戻す
-          </button>
-          <button type="button" onClick={() => setUndoState(null)}>
-            確定
-          </button>
-        </div>
-      ) : null}
+        {undoState ? (
+          <div className="status-banner status-undo" role="status">
+            <span>{undoState.message}</span>
+            <button type="button" onClick={restoreUndo}>
+              元に戻す
+            </button>
+            <button type="button" onClick={() => setUndoState(null)}>
+              確定
+            </button>
+          </div>
+        ) : null}
 
-      {restorePrompt ? (
-        <div className="status-banner status-undo" role="status">
-          <strong>自動保存があります</strong>
-          <span>{restorePrompt.summary}</span>
-          <button type="button" onClick={applyRestorePrompt}>
-            復元
-          </button>
-          <button type="button" onClick={() => setRestorePrompt(null)}>
-            閉じる
-          </button>
-        </div>
-      ) : null}
+        {restorePrompt ? (
+          <div className="status-banner status-undo" role="status">
+            <strong>自動保存があります</strong>
+            <span>{restorePrompt.summary}</span>
+            <button type="button" onClick={applyRestorePrompt}>
+              復元
+            </button>
+            <button type="button" onClick={() => setRestorePrompt(null)}>
+              閉じる
+            </button>
+          </div>
+        ) : null}
 
-      {pendingImport ? (
-        <div className="status-banner status-undo" role="status">
-          <strong>読み込みpreview: {pendingImport.sourceName}</strong>
-          <span>
-            {pendingImport.sourceKind} / {pendingImport.summary} / blocking {pendingImport.blockingDiagnostics}
-          </span>
-          <button type="button" onClick={applyPendingImport}>
-            適用
-          </button>
-          <button type="button" onClick={() => setPendingImport(null)}>
-            閉じる
-          </button>
-        </div>
-      ) : null}
+        {pendingImport ? (
+          <div className="status-banner status-undo" role="status">
+            <strong>読み込みpreview: {pendingImport.sourceName}</strong>
+            <span>
+              {pendingImport.sourceKind} / {pendingImport.summary} / blocking {pendingImport.blockingDiagnostics}
+            </span>
+            <button type="button" onClick={applyPendingImport}>
+              適用
+            </button>
+            <button type="button" onClick={() => setPendingImport(null)}>
+              閉じる
+            </button>
+          </div>
+        ) : null}
+      </div>
 
       {commandPaletteOpen ? (
         <div className="command-backdrop" role="presentation" onMouseDown={() => setCommandPaletteOpen(false)}>
@@ -2238,11 +2431,19 @@ export function App() {
                 <div className="inspector-section">
                   <div className="inspector-section-title">Shape / Plate</div>
                   <label>
-                    形
+                    Batch shape
                     <input
                       placeholder="N, J"
                       value={selectedData.shape?.join(', ') ?? ''}
                       onChange={(event) => updateSelectedNodeData({ shape: parseList(event.target.value) })}
+                    />
+                  </label>
+                  <label>
+                    Event shape
+                    <input
+                      placeholder="K"
+                      value={selectedData.eventShape?.join(', ') ?? ''}
+                      onChange={(event) => updateSelectedNodeData({ eventShape: parseList(event.target.value) })}
                     />
                   </label>
                   <label>
@@ -2478,6 +2679,11 @@ export function App() {
             onEdgesChange={onEdgesChange}
             onNodesChange={onNodesChange}
             onSelectionChange={onSelectionChange}
+            onInit={(instance) => {
+              reactFlowRef.current = {
+                fitView: (options) => instance.fitView(options),
+              };
+            }}
             deleteKeyCode={['Backspace', 'Delete']}
             fitView
             fitViewOptions={{ padding: 0.18 }}

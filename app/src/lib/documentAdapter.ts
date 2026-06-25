@@ -425,9 +425,16 @@ function likelihoodObservationData(node: Node<BayesNodeData>): ModelEntity {
 }
 
 function entityToNodeData(entity: ModelEntity): BayesNodeData {
+  const batchShape = entity.valueType.axes
+    .filter((axis) => axis.role === 'batch')
+    .map((axis) => formatAxisForCanvas(axis.axisId));
+  const eventShape = entity.valueType.axes
+    .filter((axis) => axis.role === 'event')
+    .map((axis) => formatAxisForCanvas(axis.axisId));
   const base = {
     name: entity.label ?? entity.symbol,
-    shape: entity.valueType.axes.map((axis) => axis.axisId.toUpperCase()),
+    shape: batchShape.length ? batchShape : undefined,
+    eventShape: eventShape.length ? eventShape : undefined,
     plate: entity.plateIds[0],
     notes: entity.notes,
   };
@@ -463,6 +470,7 @@ function buildAxes(nodes: Node<BayesNodeData>[]): Record<string, AxisDefinition>
 
   for (const node of nodes) {
     for (const shape of node.data.shape ?? []) addAxis(shape.toLowerCase(), shape);
+    for (const shape of node.data.eventShape ?? []) addAxis(shape.toLowerCase(), shape);
     if (node.data.plate) addAxis(node.data.plate, node.data.plate.toUpperCase());
   }
 
@@ -512,15 +520,23 @@ function toValueType(data: BayesNodeData): ValueType {
     axisId: shape.toLowerCase(),
     role: 'batch',
   }));
-  if (data.plate && !axes.some((axis) => axis.axisId === data.plate)) {
+  if (data.plate && !axes.some((axis) => axis.axisId === data.plate && axis.role === 'batch')) {
     axes.push({ axisId: data.plate, role: 'batch' });
   }
+  axes.push(...(data.eventShape ?? []).map((shape) => ({
+    axisId: shape.toLowerCase(),
+    role: 'event' as const,
+  })));
 
   return {
     scalar: data.kind === 'data' && parseNodeSymbol(data.name).endsWith('_id') ? 'integer' : 'real',
     axes,
     domain: constraintsToDomain(data.constraints),
   };
+}
+
+function formatAxisForCanvas(axisId: string): string {
+  return axisId.toUpperCase();
 }
 
 function toDistributionCall(distribution?: DistributionSpec) {

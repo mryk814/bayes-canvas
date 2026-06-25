@@ -37,6 +37,7 @@
           "kind": { "$ref": "#/$defs/nodeKind" },
           "name": { "type": "string" },
           "shape": { "type": "array", "items": { "type": "string" } },
+          "eventShape": { "type": "array", "items": { "type": "string" } },
           "observed": { "type": "boolean" },
           "plate": { "type": "string" },
           "constraints": { "type": "array", "items": { "$ref": "#/$defs/constraint" } },
@@ -178,7 +179,7 @@
           "type": "object",
           "additionalProperties": {
             "type": "object",
-            "required": ["nodeId", "baseSymbol", "displayName", "kind", "shape"],
+            "required": ["nodeId", "baseSymbol", "displayName", "kind", "shape", "eventShape"],
             "properties": {
               "nodeId": { "type": "string" },
               "baseSymbol": { "type": "string" },
@@ -187,7 +188,8 @@
               "observed": { "type": "boolean" },
               "plateId": { "type": "string" },
               "declaredIndex": { "type": "string" },
-              "shape": { "type": "array", "items": { "type": "string" } }
+              "shape": { "type": "array", "items": { "type": "string" } },
+              "eventShape": { "type": "array", "items": { "type": "string" } }
             }
           }
         },

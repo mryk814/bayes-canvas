@@ -32,6 +32,7 @@ export interface BayesNodeData extends Record<string, unknown> {
   kind: BayesNodeKind;
   name: string;
   shape?: string[];
+  eventShape?: string[];
   observed?: boolean;
   plate?: string;
   distribution?: DistributionSpec;
@@ -81,6 +82,7 @@ export interface VariableSymbol {
   plateId?: string;
   declaredIndex?: string;
   shape: string[];
+  eventShape: string[];
 }
 
 export interface IndexSymbol {
@@ -446,7 +448,7 @@ export function generateModelTexSections(model: ModelIr): MathViewSection[] {
       title: 'Data',
       lines: data.map((node) => ({
         nodeId: node.id,
-        tex: `${formatTexExpression(node.name)} \\;\\text{(observed, ${node.shape?.length ? `shape ${node.shape.join(' \\times ')}` : 'scalar'})}`,
+        tex: `${formatTexExpression(node.name)} \\;\\text{(observed, ${formatNodeShape(node)})}`,
       })),
     });
   }
@@ -1084,6 +1086,7 @@ export function buildSymbolTable(
               plateId: node.plate,
               declaredIndex: parsedName.index,
               shape: node.shape ?? [],
+              eventShape: node.eventShape ?? [],
             } satisfies VariableSymbol,
           ];
         }),
@@ -1135,7 +1138,7 @@ function formatNodeList(nodes: ModelIr['nodes']): string {
 function formatNodeSummary(node: ModelIr['nodes'][number]): string {
   const parts = [
     `${node.name} (${node.kind})`,
-    node.shape?.length ? `shape: ${node.shape.join(' x ')}` : 'shape: scalar',
+    `shape: ${formatNodeShape(node)}`,
     node.plate ? `plate: ${node.plate}` : undefined,
     node.observed ? 'observed' : undefined,
     node.distribution ? `distribution: ${formatDistributionText(node.distribution)}` : undefined,
@@ -1150,10 +1153,16 @@ function formatPlateList(model: ModelIr): string {
     ? model.plates.map((plate) => `- ${plate.id}: ${plate.label}; index ${plate.index}; size ${plate.size}`)
     : ['- No plates declared'];
   const shapeLines = model.nodes
-    .filter((node) => node.shape?.length)
-    .map((node) => `- ${node.name}: ${node.shape?.join(' x ')}`);
+    .filter((node) => node.shape?.length || node.eventShape?.length)
+    .map((node) => `- ${node.name}: ${formatNodeShape(node)}`);
 
   return [...plateLines, ...(shapeLines.length ? ['- Variable shapes:', ...shapeLines] : [])].join('\n');
+}
+
+function formatNodeShape(node: Pick<BayesNodeData, 'shape' | 'eventShape'>): string {
+  const batch = node.shape?.length ? `batch ${node.shape.join(' x ')}` : undefined;
+  const event = node.eventShape?.length ? `event ${node.eventShape.join(' x ')}` : undefined;
+  return [batch, event].filter(Boolean).join('; ') || 'scalar';
 }
 
 function formatIndexMappings(mappings: IndexMapping[]): string {
