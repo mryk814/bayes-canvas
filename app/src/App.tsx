@@ -724,7 +724,8 @@ export function App() {
     [edges, nodes, promptTarget],
   );
   const prompt = useMemo(() => generateAiPrompt(modelIr, promptTarget), [modelIr, promptTarget]);
-  const [activeOutput, setActiveOutput] = useState<'ir' | 'prompt' | 'math' | 'review' | 'handoff' | 'package' | 'diff'>('math');
+  const [activeOutput, setActiveOutput] = useState<'math' | 'review' | 'handoff' | 'advanced'>('math');
+  const [advancedOutput, setAdvancedOutput] = useState<'ir' | 'prompt' | 'package' | 'diff'>('ir');
   const [handoffPreviewFormat, setHandoffPreviewFormat] = useState<'markdown' | 'json'>('markdown');
   const [importError, setImportError] = useState<ImportErrorState | null>(null);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
@@ -771,21 +772,22 @@ export function App() {
           label: 'Ready',
           message: 'このtargetへ受け渡しできます。',
         };
-  const outputText = activeOutput === 'ir'
+  const advancedOutputText = advancedOutput === 'ir'
     ? JSON.stringify({ modelIr, modelDocument: compiledCanvas.document, layout: compiledCanvas.layout }, null, 2)
-    : activeOutput === 'prompt'
+    : advancedOutput === 'prompt'
       ? prompt
+      : advancedOutput === 'package'
+        ? JSON.stringify(portablePackage, null, 2)
+        : formatSemanticDiff(semanticDiff);
+  const outputText = activeOutput === 'review'
+    ? reviewText
     : activeOutput === 'handoff'
-        ? handoffPreviewFormat === 'markdown'
-          ? formatHandoffMarkdown(handoffBundle)
-          : JSON.stringify(handoffBundle, null, 2)
-        : activeOutput === 'package'
-          ? JSON.stringify(portablePackage, null, 2)
-          : activeOutput === 'diff'
-            ? formatSemanticDiff(semanticDiff)
-            : activeOutput === 'review'
-              ? reviewText
-              : fullTex;
+      ? handoffPreviewFormat === 'markdown'
+        ? formatHandoffMarkdown(handoffBundle)
+        : JSON.stringify(handoffBundle, null, 2)
+      : activeOutput === 'advanced'
+        ? advancedOutputText
+        : fullTex;
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) ?? null,
     [nodes, selectedNodeId],
@@ -1814,30 +1816,6 @@ export function App() {
           <div className="output-tabs" role="tablist" aria-label="出力">
             <button
               aria-controls="output-panel"
-              aria-selected={activeOutput === 'ir'}
-              className={activeOutput === 'ir' ? 'is-active' : ''}
-              id="output-tab-ir"
-              onClick={() => setActiveOutput('ir')}
-              role="tab"
-              tabIndex={activeOutput === 'ir' ? 0 : -1}
-              type="button"
-            >
-              IR
-            </button>
-            <button
-              aria-controls="output-panel"
-              aria-selected={activeOutput === 'prompt'}
-              className={activeOutput === 'prompt' ? 'is-active' : ''}
-              id="output-tab-prompt"
-              onClick={() => setActiveOutput('prompt')}
-              role="tab"
-              tabIndex={activeOutput === 'prompt' ? 0 : -1}
-              type="button"
-            >
-              AIメモ
-            </button>
-            <button
-              aria-controls="output-panel"
               aria-selected={activeOutput === 'math'}
               className={activeOutput === 'math' ? 'is-active' : ''}
               id="output-tab-math"
@@ -1870,31 +1848,19 @@ export function App() {
               tabIndex={activeOutput === 'handoff' ? 0 : -1}
               type="button"
             >
-              Bundle
+              Handoff
             </button>
             <button
               aria-controls="output-panel"
-              aria-selected={activeOutput === 'package'}
-              className={activeOutput === 'package' ? 'is-active' : ''}
-              id="output-tab-package"
-              onClick={() => setActiveOutput('package')}
+              aria-selected={activeOutput === 'advanced'}
+              className={activeOutput === 'advanced' ? 'is-active' : ''}
+              id="output-tab-advanced"
+              onClick={() => setActiveOutput('advanced')}
               role="tab"
-              tabIndex={activeOutput === 'package' ? 0 : -1}
+              tabIndex={activeOutput === 'advanced' ? 0 : -1}
               type="button"
             >
-              Package
-            </button>
-            <button
-              aria-controls="output-panel"
-              aria-selected={activeOutput === 'diff'}
-              className={activeOutput === 'diff' ? 'is-active' : ''}
-              id="output-tab-diff"
-              onClick={() => setActiveOutput('diff')}
-              role="tab"
-              tabIndex={activeOutput === 'diff' ? 0 : -1}
-              type="button"
-            >
-              Diff
+              Advanced
             </button>
           </div>
           <div
@@ -1912,25 +1878,57 @@ export function App() {
               <>
               <div className="output-actions">
                 <span>
-                  {activeOutput === 'ir'
-                    ? 'JSON契約'
-                    : activeOutput === 'review'
-                      ? '診断一覧'
-                      : activeOutput === 'handoff'
-                        ? '固定snapshot'
-                        : activeOutput === 'package'
-                          ? 'portable package'
-                          : activeOutput === 'diff'
-                            ? 'semantic diff'
-                            : '実装用メモ'}
+                  {activeOutput === 'review'
+                    ? '診断一覧'
+                    : activeOutput === 'handoff'
+                      ? '受け渡しsummary'
+                      : advancedOutput === 'ir'
+                        ? 'JSON契約'
+                        : advancedOutput === 'prompt'
+                          ? '実装用メモ'
+                          : advancedOutput === 'package'
+                            ? 'portable package'
+                            : 'semantic diff'}
                 </span>
                 <button type="button" onClick={() => copyText(outputText)}>
                   コピー
                 </button>
-                {activeOutput === 'package' ? (
+                {activeOutput === 'advanced' && advancedOutput === 'package' ? (
                   <button type="button" onClick={() => copyText(portablePackage.files['model.json'])}>
                     model.json
                   </button>
+                ) : null}
+                {activeOutput === 'advanced' ? (
+                  <div className="segmented-control" aria-label="advanced output">
+                    <button
+                      type="button"
+                      className={advancedOutput === 'ir' ? 'is-active' : ''}
+                      onClick={() => setAdvancedOutput('ir')}
+                    >
+                      IR
+                    </button>
+                    <button
+                      type="button"
+                      className={advancedOutput === 'prompt' ? 'is-active' : ''}
+                      onClick={() => setAdvancedOutput('prompt')}
+                    >
+                      AIメモ
+                    </button>
+                    <button
+                      type="button"
+                      className={advancedOutput === 'package' ? 'is-active' : ''}
+                      onClick={() => setAdvancedOutput('package')}
+                    >
+                      Package
+                    </button>
+                    <button
+                      type="button"
+                      className={advancedOutput === 'diff' ? 'is-active' : ''}
+                      onClick={() => setAdvancedOutput('diff')}
+                    >
+                      Diff
+                    </button>
+                  </div>
                 ) : null}
                 {activeOutput === 'handoff' ? (
                   <div className="segmented-control" aria-label="handoff preview format">
@@ -1951,7 +1949,7 @@ export function App() {
                   </div>
                 ) : null}
               </div>
-              {activeOutput === 'prompt' || activeOutput === 'handoff' ? (
+              {activeOutput === 'handoff' || (activeOutput === 'advanced' && advancedOutput === 'prompt') ? (
                 <label className="prompt-target">
                   出力先
                   <select
