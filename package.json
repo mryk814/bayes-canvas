@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "npm --prefix app run dev --",
+    "typecheck": "npm --prefix app run typecheck --",
+    "test": "npm --prefix app run test --",
+    "cli:lint:sample": "npm --prefix app run cli:lint:sample --",
+    "cli:handoff:sample": "npm --prefix app run cli:handoff:sample --",
     "build": "npm --prefix app run build --",
     "preview": "npm --prefix app run preview --"
   }

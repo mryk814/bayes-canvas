@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addEdge,
   Background,
@@ -48,10 +48,10 @@ import {
   previewCanvasPatch,
 } from './lib/documentAdapter';
 import { assertJsonComplexity } from './lib/core/migrations.js';
-import type { HandoffTarget } from './lib/core/handoff.js';
+import type { HandoffBundle, HandoffTarget } from './lib/core/handoff.js';
 import type { PatchPreview } from './lib/core/patch-proposal.js';
 import { diffModelDocuments } from './lib/core/semantic-diff.js';
-import { validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
+import { compareReceiptFingerprint, validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
 import { saveAutosave } from './lib/storage';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
@@ -68,6 +68,21 @@ const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
 type PaletteItem =
   | { type: 'node'; kind: BayesNodeData['kind']; label: string; note: string }
   | { type: 'preset'; preset: 'horseshoe_prior' | 'linear_term' | 'group_effect' | 'interaction_term'; label: string; note: string };
+
+type LeftPanelTab = 'add' | 'structure' | 'inspector' | 'library';
+type CommandAction = {
+  id: string;
+  label: string;
+  group: string;
+  run: () => void;
+};
+
+const LEFT_PANEL_TABS: Array<{ id: LeftPanelTab; label: string }> = [
+  { id: 'add', label: 'Add' },
+  { id: 'structure', label: 'Structure' },
+  { id: 'inspector', label: 'Inspector' },
+  { id: 'library', label: 'Library' },
+];
 
 const PALETTE_GROUPS: Array<{
   title: string;
@@ -644,6 +659,59 @@ function formatReviewPanel(diagnostics: ReturnType<typeof compileCanvas>['semant
     .join('\n\n');
 }
 
+function formatHandoffMarkdown(bundle: HandoffBundle): string {
+  const blockingDiagnostics = bundle.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff);
+  const unresolvedQuestions = bundle.unresolvedQuestions.filter((question) => question.blocking);
+  const capabilityRows = bundle.capabilityReport.length
+    ? bundle.capabilityReport.map((item) => (
+      `| ${escapeMarkdownCell(item.feature)} | ${item.support} | ${escapeMarkdownCell(item.relatedEntityIds.join(', ') || '-')} | ${escapeMarkdownCell(item.note ?? '-')} |`
+    ))
+    : ['| - | - | - | - |'];
+  const diagnosticRows = blockingDiagnostics.length
+    ? blockingDiagnostics.map((diagnostic) => (
+      `| ${diagnostic.severity} | ${escapeMarkdownCell(diagnostic.code)} | ${escapeMarkdownCell(diagnostic.path)} | ${escapeMarkdownCell(diagnostic.message)} |`
+    ))
+    : ['| - | - | - | handoffを止める診断はありません。 |'];
+  const questionRows = unresolvedQuestions.length
+    ? unresolvedQuestions.map((question) => (
+      `| ${escapeMarkdownCell(question.id)} | ${escapeMarkdownCell(question.relatedEntityIds.join(', ') || '-')} | ${escapeMarkdownCell(question.text)} |`
+    ))
+    : ['| - | - | handoff前に必須確認の質問はありません。 |'];
+
+  return [
+    `# Handoff Review: ${bundle.manifest.target}`,
+    '',
+    `- Model: ${bundle.manifest.modelDocumentId}`,
+    `- Revision: ${bundle.manifest.sourceRevision}`,
+    `- Fingerprint: \`${bundle.manifest.fingerprintAlgorithm}:${bundle.manifest.specificationFingerprint}\``,
+    `- Diagnostics: ${bundle.diagnostics.length}`,
+    `- Blocking diagnostics: ${blockingDiagnostics.length}`,
+    `- Blocking questions: ${unresolvedQuestions.length}`,
+    '',
+    '## Capability Report',
+    '',
+    '| Feature | Support | Entities | Note |',
+    '| --- | --- | --- | --- |',
+    ...capabilityRows,
+    '',
+    '## Blocking Diagnostics',
+    '',
+    '| Severity | Code | Path | Message |',
+    '| --- | --- | --- | --- |',
+    ...diagnosticRows,
+    '',
+    '## Unresolved Questions',
+    '',
+    '| Question | Entities | Text |',
+    '| --- | --- | --- |',
+    ...questionRows,
+  ].join('\n');
+}
+
+function escapeMarkdownCell(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
 function formatSemanticDiff(items: ReturnType<typeof diffModelDocuments>): string {
   if (!items.length) return 'No semantic changes from the initial sample.';
   return items
@@ -662,6 +730,8 @@ export function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialCanvas.edges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [activeLeftPanel, setActiveLeftPanel] = useState<LeftPanelTab>('add');
+  const editorHeadingRef = useRef<HTMLHeadingElement>(null);
   const [promptTarget, setPromptTarget] = useState<PromptTarget>('generic');
   const modelIr = useMemo(() => exportModelIr(nodes, edges), [nodes, edges]);
   const compiledCanvas = useMemo(() => compileCanvas(nodes, edges), [nodes, edges]);
@@ -670,12 +740,20 @@ export function App() {
     [edges, nodes, promptTarget],
   );
   const prompt = useMemo(() => generateAiPrompt(modelIr, promptTarget), [modelIr, promptTarget]);
-  const [activeOutput, setActiveOutput] = useState<'ir' | 'prompt' | 'math' | 'review' | 'handoff' | 'package' | 'diff'>('math');
+  const [activeOutput, setActiveOutput] = useState<'math' | 'review' | 'handoff' | 'advanced'>('math');
+  const [advancedOutput, setAdvancedOutput] = useState<'ir' | 'prompt' | 'package' | 'diff'>('ir');
+  const [handoffPreviewFormat, setHandoffPreviewFormat] = useState<'markdown' | 'json'>('markdown');
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState('');
   const [importError, setImportError] = useState<ImportErrorState | null>(null);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [patchInput, setPatchInput] = useState('');
   const [pendingPatch, setPendingPatch] = useState<PendingPatchState | null>(null);
   const [receipt, setReceipt] = useState<ImplementationReceipt | null>(null);
+  const receiptFingerprintStatus = useMemo(
+    () => receipt ? compareReceiptFingerprint(receipt, handoffBundle.manifest.specificationFingerprint) : null,
+    [handoffBundle.manifest.specificationFingerprint, receipt],
+  );
   const fullTex = useMemo(() => generateModelTex(modelIr), [modelIr]);
   const reviewText = useMemo(() => formatReviewPanel(compiledCanvas.semantic.diagnostics), [compiledCanvas.semantic.diagnostics]);
   const initialCompiledCanvas = useMemo(() => compileCanvas(initialCanvasNodes, initialCanvasEdges), []);
@@ -687,19 +765,47 @@ export function App() {
     () => buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget),
     [edges, nodes, promptTarget],
   );
-  const outputText = activeOutput === 'ir'
+  const blockingDiagnostics = useMemo(
+    () => compiledCanvas.semantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff),
+    [compiledCanvas.semantic.diagnostics],
+  );
+  const blockingQuestions = useMemo(
+    () => handoffBundle.unresolvedQuestions.filter((question) => question.blocking),
+    [handoffBundle.unresolvedQuestions],
+  );
+  const handoffReadiness = blockingDiagnostics.length || blockingQuestions.length || compiledCanvas.semantic.readiness.summary.errors
+    ? {
+        state: 'blocked',
+        label: 'Blocked',
+        message: 'Handoff前に止めている項目があります。',
+      }
+    : compiledCanvas.semantic.readiness.summary.warnings || handoffBundle.unresolvedQuestions.length
+      ? {
+          state: 'review',
+          label: 'Needs review',
+          message: 'Handoff前に確認したい項目があります。',
+        }
+      : {
+          state: 'ready',
+          label: 'Ready',
+          message: 'このtargetへ受け渡しできます。',
+        };
+  const advancedOutputText = advancedOutput === 'ir'
     ? JSON.stringify({ modelIr, modelDocument: compiledCanvas.document, layout: compiledCanvas.layout }, null, 2)
-    : activeOutput === 'prompt'
+    : advancedOutput === 'prompt'
       ? prompt
-      : activeOutput === 'handoff'
-        ? JSON.stringify(handoffBundle, null, 2)
-        : activeOutput === 'package'
-          ? JSON.stringify(portablePackage, null, 2)
-          : activeOutput === 'diff'
-            ? formatSemanticDiff(semanticDiff)
-            : activeOutput === 'review'
-              ? reviewText
-              : fullTex;
+      : advancedOutput === 'package'
+        ? JSON.stringify(portablePackage, null, 2)
+        : formatSemanticDiff(semanticDiff);
+  const outputText = activeOutput === 'review'
+    ? reviewText
+    : activeOutput === 'handoff'
+      ? handoffPreviewFormat === 'markdown'
+        ? formatHandoffMarkdown(handoffBundle)
+        : JSON.stringify(handoffBundle, null, 2)
+      : activeOutput === 'advanced'
+        ? advancedOutputText
+        : fullTex;
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) ?? null,
     [nodes, selectedNodeId],
@@ -778,6 +884,31 @@ export function App() {
     () => compiledCanvas.semantic.diagnostics.filter((diagnostic) => selectedNodeId && diagnostic.path.startsWith(`/entities/${selectedNodeId}`)),
     [compiledCanvas.semantic.diagnostics, selectedNodeId],
   );
+  const reviewDiagnosticGroups = useMemo(() => {
+    const diagnostics = compiledCanvas.semantic.diagnostics;
+    return [
+      {
+        id: 'blocking',
+        label: 'Blocking',
+        diagnostics: diagnostics.filter((diagnostic) => diagnostic.blocksHandoff),
+      },
+      {
+        id: 'error',
+        label: 'Errors',
+        diagnostics: diagnostics.filter((diagnostic) => diagnostic.severity === 'error' && !diagnostic.blocksHandoff),
+      },
+      {
+        id: 'warning',
+        label: 'Warnings',
+        diagnostics: diagnostics.filter((diagnostic) => diagnostic.severity === 'warning' && !diagnostic.blocksHandoff),
+      },
+      {
+        id: 'info',
+        label: 'Info',
+        diagnostics: diagnostics.filter((diagnostic) => diagnostic.severity === 'info' && !diagnostic.blocksHandoff),
+      },
+    ];
+  }, [compiledCanvas.semantic.diagnostics]);
 
   const labeledEdges = useMemo(() => {
     const nodeMap = new Map(nodes.map((n) => [n.id, n.data]));
@@ -830,6 +961,7 @@ export function App() {
       setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
       setSelectedNodeId(id);
       setSelectedEdgeId(null);
+      setActiveLeftPanel('inspector');
     },
     [nodes, setEdges, setNodes],
   );
@@ -855,7 +987,33 @@ export function App() {
   const onSelectionChange = useCallback((params: OnSelectionChangeParams) => {
     setSelectedNodeId(params.nodes[0]?.id ?? null);
     setSelectedEdgeId(params.nodes.length ? null : (params.edges[0]?.id ?? null));
+    if (params.nodes.length || params.edges.length) {
+      setActiveLeftPanel('inspector');
+    }
   }, []);
+
+  const focusEditorHeading = useCallback(() => {
+    window.setTimeout(() => editorHeadingRef.current?.focus(), 0);
+  }, []);
+
+  const selectNodeForEditing = useCallback(
+    (nodeId: string, options: { focusEditor?: boolean } = {}) => {
+      if (!nodes.some((node) => node.id === nodeId)) return;
+      setNodes((currentNodes) =>
+        currentNodes.map((node) => ({ ...node, selected: node.id === nodeId })),
+      );
+      setEdges((currentEdges) =>
+        currentEdges.map((edge) => ({ ...edge, selected: false })),
+      );
+      setSelectedNodeId(nodeId);
+      setSelectedEdgeId(null);
+      if (options.focusEditor) {
+        setActiveLeftPanel('inspector');
+        focusEditorHeading();
+      }
+    },
+    [focusEditorHeading, nodes, setEdges, setNodes],
+  );
 
   const updateSelectedNodeData = useCallback(
     (changes: Partial<BayesNodeData>) => {
@@ -992,6 +1150,7 @@ export function App() {
     setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
     setSelectedNodeId(id);
     setSelectedEdgeId(null);
+    setActiveLeftPanel('inspector');
   }, [nodes, selectedData, selectedNodeId, setEdges, setNodes, updateSelectedNodeData]);
 
   const applyRegressionTermPreset = useCallback(
@@ -1025,6 +1184,7 @@ export function App() {
       setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
       setSelectedNodeId(id);
       setSelectedEdgeId(null);
+      setActiveLeftPanel('inspector');
     },
     [nodes, selectedData, selectedNodeId, setEdges, setNodes, updateSelectedNodeData],
   );
@@ -1163,11 +1323,13 @@ export function App() {
   }, []);
 
   const resetSample = useCallback(() => {
+    if (!window.confirm('現在のキャンバスを初期サンプルへ戻します。元に戻せます。')) return;
+    setUndoState({ message: '初期サンプルへ戻しました。', nodes, edges });
     setNodes(initialCanvasNodes);
     setEdges(initialCanvasEdges);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
-  }, [setEdges, setNodes]);
+  }, [edges, nodes, setEdges, setNodes]);
 
   const handleSave = useCallback(() => {
     const name = window.prompt('保存名:', `モデル ${new Date().toLocaleString()}`);
@@ -1218,6 +1380,99 @@ export function App() {
     };
     input.click();
   }, [setNodes, setEdges]);
+
+  const commands = useMemo<CommandAction[]>(() => [
+    {
+      id: 'add-data',
+      label: 'Add data',
+      group: 'Add',
+      run: () => addNodeFromPalette('data'),
+    },
+    {
+      id: 'add-parameter',
+      label: 'Add parameter',
+      group: 'Add',
+      run: () => addNodeFromPalette('parameter'),
+    },
+    {
+      id: 'add-likelihood',
+      label: 'Add likelihood',
+      group: 'Add',
+      run: () => addNodeFromPalette('likelihood'),
+    },
+    {
+      id: 'add-deterministic',
+      label: 'Add deterministic',
+      group: 'Add',
+      run: () => addNodeFromPalette('deterministic'),
+    },
+    {
+      id: 'open-add',
+      label: 'Open Add panel',
+      group: 'Navigate',
+      run: () => setActiveLeftPanel('add'),
+    },
+    {
+      id: 'open-structure',
+      label: 'Open Structure panel',
+      group: 'Navigate',
+      run: () => setActiveLeftPanel('structure'),
+    },
+    {
+      id: 'go-review',
+      label: 'Go to Review',
+      group: 'Navigate',
+      run: () => setActiveOutput('review'),
+    },
+    {
+      id: 'prepare-handoff',
+      label: 'Prepare Handoff',
+      group: 'Navigate',
+      run: () => setActiveOutput('handoff'),
+    },
+    {
+      id: 'export-package',
+      label: 'Export package',
+      group: 'File',
+      run: () => exportPortablePackageToFile(portablePackage),
+    },
+    {
+      id: 'import-canvas',
+      label: 'Import canvas',
+      group: 'File',
+      run: handleImport,
+    },
+  ], [addNodeFromPalette, handleImport, portablePackage]);
+
+  const filteredCommands = useMemo(() => {
+    const query = commandQuery.trim().toLowerCase();
+    if (!query) return commands;
+    return commands.filter((command) =>
+      `${command.group} ${command.label}`.toLowerCase().includes(query),
+    );
+  }, [commandQuery, commands]);
+
+  const runCommand = useCallback((command: CommandAction) => {
+    command.run();
+    setCommandPaletteOpen(false);
+    setCommandQuery('');
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT' || target?.isContentEditable;
+      if (event.key === '/' && !isTyping) {
+        event.preventDefault();
+        setCommandPaletteOpen(true);
+      }
+      if (event.key === 'Escape') {
+        setCommandPaletteOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   return (
     <main className="app-shell">
@@ -1272,263 +1527,348 @@ export function App() {
         </div>
       ) : null}
 
+      {commandPaletteOpen ? (
+        <div className="command-backdrop" role="presentation" onMouseDown={() => setCommandPaletteOpen(false)}>
+          <div
+            aria-label="Command Palette"
+            aria-modal="true"
+            className="command-palette"
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <input
+              autoFocus
+              placeholder="Commandを検索"
+              value={commandQuery}
+              onChange={(event) => setCommandQuery(event.target.value)}
+            />
+            <div className="command-list">
+              {filteredCommands.length ? filteredCommands.map((command) => (
+                <button key={command.id} type="button" onClick={() => runCommand(command)}>
+                  <span>{command.label}</span>
+                  <small>{command.group}</small>
+                </button>
+              )) : (
+                <p className="empty-note">一致するcommandはありません。</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <section className="workspace">
         <aside className="panel left-panel">
           <div className="panel-title">
-            <h2>追加</h2>
-            <span>モデル要素</span>
+            <h2>
+              {activeLeftPanel === 'add'
+                ? '追加'
+                : activeLeftPanel === 'structure'
+                  ? '構造'
+                  : activeLeftPanel === 'library'
+                    ? '保存'
+                    : '編集'}
+            </h2>
+            <span>
+              {activeLeftPanel === 'add'
+                ? 'モデル要素'
+                : activeLeftPanel === 'structure'
+                  ? `${plateRows.length} plates`
+                  : activeLeftPanel === 'library'
+                    ? `${savedModels.length} snapshots`
+                    : selectedKindLabel}
+            </span>
           </div>
-          <div className="palette-groups">
-            {PALETTE_GROUPS.map((group) => (
-              <div className="palette-group" key={group.title}>
-                <h3>{group.title}</h3>
-                <div className="palette-list">
-                  {group.items.map((item) => (
-                    <button
-                      className={`palette-item ${item.type === 'node' ? `palette-${item.kind}` : 'palette-preset'}`}
-                      key={item.type === 'node' ? item.kind : item.preset}
-                      onClick={() => applyPaletteItem(item)}
-                      type="button"
-                    >
-                      <span>{item.label}</span>
-                      <small>{item.note}</small>
-                    </button>
-                  ))}
-                </div>
-              </div>
+          <div className="panel-tabs" role="tablist" aria-label="左ペイン">
+            {LEFT_PANEL_TABS.map((tab) => (
+              <button
+                aria-selected={activeLeftPanel === tab.id}
+                className={activeLeftPanel === tab.id ? 'is-active' : undefined}
+                key={tab.id}
+                onClick={() => setActiveLeftPanel(tab.id)}
+                role="tab"
+                type="button"
+              >
+                {tab.label}
+              </button>
             ))}
           </div>
-          <div className="plate-panel">
-            <div className="panel-title compact">
-              <h2>Plates</h2>
-              <span>{plateRows.length}</span>
-            </div>
-            <div className="plate-list">
-              {plateRows.map((plate) => (
-                <div className="plate-row" key={plate.id}>
-                  <label>
-                    id
-                    <input
-                      defaultValue={plate.id}
-                      onBlur={(event) => renamePlate(plate.id, event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    index
-                    <input
-                      defaultValue={plate.index}
-                      onBlur={(event) => updatePlateIndex(plate.id, event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    size
-                    <input
-                      defaultValue={plate.size}
-                      onBlur={(event) => updatePlateSize(plate.id, event.target.value)}
-                    />
-                  </label>
-                  <span>{plate.nodeCount} nodes</span>
+          {activeLeftPanel === 'add' ? (
+            <div className="palette-groups">
+              {PALETTE_GROUPS.map((group) => (
+                <div className="palette-group" key={group.title}>
+                  <h3>{group.title}</h3>
+                  <div className="palette-list">
+                    {group.items.map((item) => (
+                      <button
+                        className={`palette-item ${item.type === 'node' ? `palette-${item.kind}` : 'palette-preset'}`}
+                        key={item.type === 'node' ? item.kind : item.preset}
+                        onClick={() => applyPaletteItem(item)}
+                        type="button"
+                      >
+                        <span>{item.label}</span>
+                        <small>{item.note}</small>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ))}
-              {!plateRows.length ? <p className="empty-note">plateを持つノードはまだありません。</p> : null}
             </div>
-            <button disabled={!selectedNodeId} type="button" onClick={addPlateToSelection}>
-              選択ノードにtime plate
-            </button>
-            {modelIr.indexMappings.length ? (
-              <div className="mapping-list">
-                {modelIr.indexMappings.map((mapping) => (
-                  <div className="mapping-row" key={mapping.id}>
-                    <span>{mapping.symbol}[{mapping.inputIndex}]</span>
-                    <small>{mapping.fromPlateId} → {mapping.toPlateId}</small>
+          ) : null}
+          {activeLeftPanel === 'structure' ? (
+            <div className="plate-panel">
+              <div className="panel-title compact">
+                <h2>Plates</h2>
+                <span>{plateRows.length}</span>
+              </div>
+              <div className="plate-list">
+                {plateRows.map((plate) => (
+                  <div className="plate-row" key={plate.id}>
+                    <label>
+                      id
+                      <input
+                        defaultValue={plate.id}
+                        onBlur={(event) => renamePlate(plate.id, event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      index
+                      <input
+                        defaultValue={plate.index}
+                        onBlur={(event) => updatePlateIndex(plate.id, event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      size
+                      <input
+                        defaultValue={plate.size}
+                        onBlur={(event) => updatePlateSize(plate.id, event.target.value)}
+                      />
+                    </label>
+                    <span>{plate.nodeCount} nodes</span>
                   </div>
                 ))}
+                {!plateRows.length ? <p className="empty-note">plateを持つノードはまだありません。</p> : null}
               </div>
-            ) : null}
-          </div>
-          {savedModels.length > 0 ? (
+              <button disabled={!selectedNodeId} type="button" onClick={addPlateToSelection}>
+                選択ノードにtime plate
+              </button>
+              {modelIr.indexMappings.length ? (
+                <div className="mapping-list">
+                  {modelIr.indexMappings.map((mapping) => (
+                    <div className="mapping-row" key={mapping.id}>
+                      <span>{mapping.symbol}[{mapping.inputIndex}]</span>
+                      <small>{mapping.fromPlateId} → {mapping.toPlateId}</small>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {activeLeftPanel === 'library' ? (
             <div className="snapshots-panel">
               <div className="panel-title compact">
                 <h2>保存済み</h2>
                 <span>{savedModels.length}</span>
               </div>
-              <div className="snapshots-list">
-                {savedModels.map((model) => (
-                  <div className="snapshot-row" key={model.id}>
-                    <div className="snapshot-info">
-                      <span className="snapshot-name">{model.name}</span>
-                      <span className="snapshot-meta">
-                        {model.nodeCount}n {model.edgeCount}e · {new Date(model.savedAt).toLocaleDateString()}
-                      </span>
+              {savedModels.length > 0 ? (
+                <div className="snapshots-list">
+                  {savedModels.map((model) => (
+                    <div className="snapshot-row" key={model.id}>
+                      <div className="snapshot-info">
+                        <span className="snapshot-name">{model.name}</span>
+                        <span className="snapshot-meta">
+                          {model.nodeCount}n {model.edgeCount}e · {new Date(model.savedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div className="snapshot-actions">
+                        <button type="button" onClick={() => handleLoad(model.id)}>
+                          読込
+                        </button>
+                        <button type="button" onClick={() => handleDeleteSnapshot(model.id)}>
+                          削除
+                        </button>
+                      </div>
                     </div>
-                    <div className="snapshot-actions">
-                      <button type="button" onClick={() => handleLoad(model.id)}>
-                        読込
-                      </button>
-                      <button type="button" onClick={() => handleDeleteSnapshot(model.id)}>
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-note">保存済みsnapshotはまだありません。</p>
+              )}
             </div>
           ) : null}
-          <div className="editor-panel">
-            <div className="panel-title compact">
-              <h2>編集</h2>
-              <span>{selectedKindLabel}</span>
-            </div>
+          {activeLeftPanel === 'inspector' ? (
+            <div className="editor-panel">
+              <div className="panel-title compact">
+                <h2 ref={editorHeadingRef} tabIndex={-1}>Inspector</h2>
+                <span>{selectedKindLabel}</span>
+              </div>
             {selectedData ? (
               <div className="node-editor">
                 <button className="danger-button compact-danger" onClick={deleteSelectedItem} type="button">
                   選択中を削除
                 </button>
-                <label>
-                  名前
-                  <input
-                    value={selectedData.name}
-                    onChange={(event) => updateSelectedNodeData({ name: event.target.value })}
-                  />
-                </label>
-                <label>
-                  形
-                  <input
-                    placeholder="N, J"
-                    value={selectedData.shape?.join(', ') ?? ''}
-                    onChange={(event) => updateSelectedNodeData({ shape: parseList(event.target.value) })}
-                  />
-                </label>
-                <label>
-                  繰り返し
-                  <input
-                    placeholder="obs"
-                    value={selectedData.plate ?? ''}
-                    onChange={(event) => updateSelectedNodeData({ plate: event.target.value || undefined })}
-                  />
-                </label>
-                {showsConstraintsEditor ? (
-                  <div className="field-group">
-                    <div className="field-group-title">制約</div>
-                    <div className="option-grid">
-                      {CONSTRAINT_OPTIONS.map((option) => (
-                        <label className="choice-card" key={option.kind}>
-                          <input
-                            checked={hasConstraint(selectedData.constraints, option.kind)}
-                            onChange={(event) =>
-                              updateSelectedNodeData({
-                                constraints: toggleSimpleConstraint(
-                                  selectedData.constraints,
-                                  option.kind,
-                                  event.target.checked,
-                                ),
-                              })
-                            }
-                            type="checkbox"
-                          />
-                          <span>{option.label}</span>
-                          <small>{option.note}</small>
-                        </label>
-                      ))}
+                <div className="inspector-section">
+                  <div className="inspector-section-title">Definition</div>
+                  <label>
+                    名前
+                    <input
+                      value={selectedData.name}
+                      onChange={(event) => updateSelectedNodeData({ name: event.target.value })}
+                    />
+                  </label>
+                  <span className={`kind-pill palette-${selectedData.kind}`}>{NODE_KIND_LABELS[selectedData.kind]}</span>
+                </div>
+                <div className="inspector-section">
+                  <div className="inspector-section-title">Shape / Plate</div>
+                  <label>
+                    形
+                    <input
+                      placeholder="N, J"
+                      value={selectedData.shape?.join(', ') ?? ''}
+                      onChange={(event) => updateSelectedNodeData({ shape: parseList(event.target.value) })}
+                    />
+                  </label>
+                  <label>
+                    繰り返し
+                    <input
+                      placeholder="obs"
+                      value={selectedData.plate ?? ''}
+                      onChange={(event) => updateSelectedNodeData({ plate: event.target.value || undefined })}
+                    />
+                  </label>
+                  {showsConstraintsEditor ? (
+                    <div className="field-group">
+                      <div className="field-group-title">制約</div>
+                      <div className="option-grid">
+                        {CONSTRAINT_OPTIONS.map((option) => (
+                          <label className="choice-card" key={option.kind}>
+                            <input
+                              checked={hasConstraint(selectedData.constraints, option.kind)}
+                              onChange={(event) =>
+                                updateSelectedNodeData({
+                                  constraints: toggleSimpleConstraint(
+                                    selectedData.constraints,
+                                    option.kind,
+                                    event.target.checked,
+                                  ),
+                                })
+                              }
+                              type="checkbox"
+                            />
+                            <span>{option.label}</span>
+                            <small>{option.note}</small>
+                          </label>
+                        ))}
+                      </div>
+                      <label>
+                        和を0にする単位
+                        <input
+                          placeholder="group"
+                          value={getSumToZeroPlate(selectedData.constraints)}
+                          onChange={(event) =>
+                            updateSelectedNodeData({
+                              constraints: updateSumToZeroConstraint(selectedData.constraints, event.target.value),
+                            })
+                          }
+                        />
+                      </label>
                     </div>
-                    <label>
-                      和を0にする単位
+                  ) : null}
+                </div>
+                <div className="inspector-section">
+                  <div className="inspector-section-title">Model</div>
+                  {showsObservedEditor ? (
+                    <label className="checkbox-row">
                       <input
-                        placeholder="group"
-                        value={getSumToZeroPlate(selectedData.constraints)}
+                        checked={Boolean(selectedData.observed)}
                         onChange={(event) =>
                           updateSelectedNodeData({
-                            constraints: updateSumToZeroConstraint(selectedData.constraints, event.target.value),
+                            observed: event.target.checked || undefined,
+                            observationProcess: event.target.checked ? selectedData.observationProcess : undefined,
                           })
                         }
+                        type="checkbox"
+                      />
+                      観測済み
+                    </label>
+                  ) : null}
+                  {showsObservationEditor ? (
+                    <label>
+                      観測の扱い
+                      <select
+                        value={selectedData.observationProcess?.kind ?? ''}
+                        onChange={(event) => updateSelectedNodeData({ observationProcess: createObservationProcess(event.target.value) })}
+                      >
+                        {OBSERVATION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  {showsDistributionEditor ? (
+                    <DistributionEditor
+                      distribution={selectedData.distribution}
+                      onChange={(distribution) => updateSelectedNodeData({ distribution })}
+                    />
+                  ) : null}
+                  {showsExpressionEditor ? (
+                    <label>
+                      式
+                      <textarea
+                        placeholder="alpha + beta * x"
+                        value={selectedData.expression ?? ''}
+                        onChange={(event) => updateSelectedNodeData({ expression: event.target.value || undefined })}
                       />
                     </label>
-                  </div>
-                ) : null}
-                <label>
-                  実装メモ
-                  <input
-                    placeholder="non_centered, sparse GP, warning:識別性を確認"
-                    value={formatHintsForInput(selectedData.hints)}
-                    onChange={(event) => updateSelectedNodeData({ hints: parseHints(event.target.value) })}
-                  />
-                </label>
-                {showsObservedEditor ? (
-                  <label className="checkbox-row">
+                  ) : null}
+                  {!showsObservedEditor && !showsDistributionEditor && !showsExpressionEditor ? (
+                    <p className="empty-note">この種類に追加のモデル定義はありません。</p>
+                  ) : null}
+                </div>
+                <div className="inspector-section">
+                  <div className="inspector-section-title">Notes</div>
+                  <label>
+                    実装メモ
                     <input
-                      checked={Boolean(selectedData.observed)}
-                      onChange={(event) =>
-                        updateSelectedNodeData({
-                          observed: event.target.checked || undefined,
-                          observationProcess: event.target.checked ? selectedData.observationProcess : undefined,
-                        })
-                      }
-                      type="checkbox"
+                      placeholder="non_centered, sparse GP, warning:識別性を確認"
+                      value={formatHintsForInput(selectedData.hints)}
+                      onChange={(event) => updateSelectedNodeData({ hints: parseHints(event.target.value) })}
                     />
-                    観測済み
                   </label>
-                ) : null}
-                {showsObservationEditor ? (
                   <label>
-                    観測の扱い
-                    <select
-                      value={selectedData.observationProcess?.kind ?? ''}
-                      onChange={(event) => updateSelectedNodeData({ observationProcess: createObservationProcess(event.target.value) })}
-                    >
-                      {OBSERVATION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-                {showsDistributionEditor ? (
-                  <DistributionEditor
-                    distribution={selectedData.distribution}
-                    onChange={(distribution) => updateSelectedNodeData({ distribution })}
-                  />
-                ) : null}
-                {showsExpressionEditor ? (
-                  <label>
-                    式
+                    ノート
                     <textarea
-                      placeholder="alpha + beta * x"
-                      value={selectedData.expression ?? ''}
-                      onChange={(event) => updateSelectedNodeData({ expression: event.target.value || undefined })}
+                      placeholder="仮定、実装へ渡す注意、あとで確認すること"
+                      value={selectedData.notes ?? ''}
+                      onChange={(event) => updateSelectedNodeData({ notes: event.target.value || undefined })}
                     />
                   </label>
-                ) : null}
-                <label>
-                  ノート
-                  <textarea
-                    placeholder="仮定、実装へ渡す注意、あとで確認すること"
-                    value={selectedData.notes ?? ''}
-                    onChange={(event) => updateSelectedNodeData({ notes: event.target.value || undefined })}
-                  />
-                </label>
-                {selectedDiagnostics.length ? (
-                  <div className="diagnostic-list">
-                    {selectedDiagnostics.map((diagnostic) => (
-                      <div className={`diagnostic-item diagnostic-${diagnostic.severity}`} key={diagnostic.id}>
-                        <strong>{diagnostic.severity}</strong>
-                        <span>{diagnostic.message}</span>
-                        {diagnostic.suggestion ? <small>{diagnostic.suggestion}</small> : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {selectedCompilerDiagnostics.length ? (
-                  <div className="diagnostic-list">
-                    {selectedCompilerDiagnostics.map((diagnostic) => (
-                      <div className={`diagnostic-item diagnostic-${diagnostic.severity}`} key={`${diagnostic.code}-${diagnostic.path}`}>
-                        <strong>{diagnostic.code}</strong>
-                        <span>{diagnostic.message}</span>
-                        <small>{diagnostic.path}</small>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
+                </div>
+                <div className="inspector-section">
+                  <div className="inspector-section-title">Diagnostics</div>
+                  {selectedDiagnostics.length || selectedCompilerDiagnostics.length ? (
+                    <div className="diagnostic-list">
+                      {selectedDiagnostics.map((diagnostic) => (
+                        <div className={`diagnostic-item diagnostic-${diagnostic.severity}`} key={diagnostic.id}>
+                          <strong>{diagnostic.severity}</strong>
+                          <span>{diagnostic.message}</span>
+                          {diagnostic.suggestion ? <small>{diagnostic.suggestion}</small> : null}
+                        </div>
+                      ))}
+                      {selectedCompilerDiagnostics.map((diagnostic) => (
+                        <div className={`diagnostic-item diagnostic-${diagnostic.severity}`} key={`${diagnostic.code}-${diagnostic.path}`}>
+                          <strong>{diagnostic.code}</strong>
+                          <span>{diagnostic.message}</span>
+                          <small>{diagnostic.path}</small>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty-note">選択中の問題はありません。</p>
+                  )}
+                </div>
               </div>
             ) : selectedEdge ? (
               <div className="node-editor">
@@ -1550,37 +1890,57 @@ export function App() {
             ) : (
               <p className="empty-note">ノードかリンクを選ぶと編集できます。</p>
             )}
-          </div>
+            </div>
+          ) : null}
         </aside>
 
         <section className="canvas">
           <div className="canvas-toolbar">
-            <div>
+            <div className="toolbar-title">
               <strong>階層回帰</strong>
               <span>編集キャンバス</span>
             </div>
             <div className="toolbar-actions">
-              <button type="button" onClick={handleSave}>
-                保存
-              </button>
-              <button type="button" onClick={handleExport}>
-                書き出し
-              </button>
-              <button type="button" onClick={() => exportPortablePackageToFile(portablePackage)}>
-                Package
-              </button>
-              <button type="button" onClick={handleImport}>
-                読み込み
-              </button>
-              <button type="button" onClick={() => copyText(JSON.stringify(modelIr, null, 2))}>
-                IRコピー
-              </button>
-              <button disabled={!selectedNode && !selectedEdge} type="button" onClick={deleteSelectedItem}>
-                削除
-              </button>
-              <button type="button" onClick={resetSample}>
-                初期化
-              </button>
+              <div className="toolbar-group toolbar-primary" aria-label="Primary actions">
+                <button type="button" onClick={() => setCommandPaletteOpen(true)}>
+                  Command
+                </button>
+                <button type="button" onClick={() => setActiveOutput('review')}>
+                  Review
+                </button>
+                <button type="button" onClick={() => setActiveOutput('handoff')}>
+                  Handoff
+                </button>
+              </div>
+              <div className="toolbar-group" aria-label="File actions">
+                <button type="button" onClick={handleSave}>
+                  保存
+                </button>
+                <button type="button" onClick={handleImport}>
+                  読み込み
+                </button>
+                <button type="button" onClick={handleExport}>
+                  書き出し
+                </button>
+              </div>
+              <div className="toolbar-group" aria-label="Edit actions">
+                <button disabled={!selectedNode && !selectedEdge} type="button" onClick={deleteSelectedItem}>
+                  削除
+                </button>
+              </div>
+              <div className="toolbar-group" aria-label="Advanced actions">
+                <button type="button" onClick={() => exportPortablePackageToFile(portablePackage)}>
+                  Package
+                </button>
+                <button type="button" onClick={() => copyText(JSON.stringify(modelIr, null, 2))}>
+                  IRコピー
+                </button>
+              </div>
+              <div className="toolbar-group toolbar-danger" aria-label="Danger actions">
+                <button type="button" onClick={resetSample}>
+                  初期化
+                </button>
+              </div>
             </div>
           </div>
           <ReactFlow
@@ -1607,6 +1967,44 @@ export function App() {
             <h2>受け渡し</h2>
             <span>生成される内容</span>
           </div>
+          <section className={`readiness-card readiness-${handoffReadiness.state}`} aria-label="Handoff readiness">
+            <div className="readiness-heading">
+              <span>{handoffReadiness.label}</span>
+              <strong>{getPromptTargetLabel(promptTarget)}</strong>
+            </div>
+            <p>{handoffReadiness.message}</p>
+            <div className="readiness-metrics">
+              <span>{compiledCanvas.semantic.readiness.summary.errors} errors</span>
+              <span>{compiledCanvas.semantic.readiness.summary.warnings} warnings</span>
+              <span>{blockingQuestions.length} questions</span>
+            </div>
+            {blockingDiagnostics.length ? (
+              <div className="readiness-blockers">
+                {blockingDiagnostics.slice(0, 3).map((diagnostic) => (
+                  <button
+                    key={`${diagnostic.code}-${diagnostic.path}`}
+                    type="button"
+                    onClick={() => {
+                      const nodeId = /^\/entities\/([^/]+)/.exec(diagnostic.path)?.[1];
+                      if (nodeId) selectNodeForEditing(nodeId, { focusEditor: true });
+                      setActiveOutput('review');
+                    }}
+                  >
+                    <strong>{diagnostic.code}</strong>
+                    <span>{diagnostic.message}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <div className="readiness-actions">
+              <button type="button" onClick={() => setActiveOutput('review')}>
+                Review issues
+              </button>
+              <button type="button" onClick={() => setActiveOutput('handoff')}>
+                Prepare handoff
+              </button>
+            </div>
+          </section>
           <div className="outline-panel">
             <div className="panel-title compact">
               <h2>Outline</h2>
@@ -1623,14 +2021,7 @@ export function App() {
                       className={selectedNodeId === entityId ? 'outline-row is-active' : 'outline-row'}
                       key={entityId}
                       onClick={() => {
-                        setNodes((currentNodes) =>
-                          currentNodes.map((node) => ({ ...node, selected: node.id === entityId })),
-                        );
-                        setEdges((currentEdges) =>
-                          currentEdges.map((edge) => ({ ...edge, selected: false })),
-                        );
-                        setSelectedNodeId(entityId);
-                        setSelectedEdgeId(null);
+                        selectNodeForEditing(entityId);
                       }}
                       type="button"
                     >
@@ -1651,141 +2042,182 @@ export function App() {
               <span>{compiledCanvas.semantic.readiness.summary.errors} errors</span>
               <span>{compiledCanvas.semantic.readiness.summary.warnings} warnings</span>
               <span>{compiledCanvas.semantic.readiness.summary.infos} info</span>
+              <span>{blockingDiagnostics.length} blocking</span>
             </div>
-            <div className="issue-list">
-              {compiledCanvas.semantic.diagnostics.length ? compiledCanvas.semantic.diagnostics.map((diagnostic) => {
-                const nodeId = /^\/entities\/([^/]+)/.exec(diagnostic.path)?.[1];
-                return (
-                  <button
-                    className={`issue-row diagnostic-${diagnostic.severity}`}
-                    key={`${diagnostic.code}-${diagnostic.path}-${diagnostic.message}`}
-                    onClick={() => {
-                      if (!nodeId || !nodes.some((node) => node.id === nodeId)) return;
-                      setNodes((currentNodes) =>
-                        currentNodes.map((node) => ({ ...node, selected: node.id === nodeId })),
-                      );
-                      setEdges((currentEdges) =>
-                        currentEdges.map((edge) => ({ ...edge, selected: false })),
-                      );
-                      setSelectedNodeId(nodeId);
-                      setSelectedEdgeId(null);
-                    }}
-                    type="button"
-                  >
-                    <strong>{diagnostic.code}</strong>
-                    <span>{diagnostic.message}</span>
-                  </button>
-                );
-              }) : (
-                <div className="empty-note">handoffを止める診断はありません。</div>
-              )}
-            </div>
+            {compiledCanvas.semantic.diagnostics.length ? (
+              <div className="issue-list">
+                {reviewDiagnosticGroups.map((group) => (
+                  group.diagnostics.length ? (
+                    <section className="issue-group" key={group.id}>
+                      <div className="issue-group-title">
+                        <span>{group.label}</span>
+                        <strong>{group.diagnostics.length}</strong>
+                      </div>
+                      {group.diagnostics.map((diagnostic) => {
+                        const nodeId = /^\/entities\/([^/]+)/.exec(diagnostic.path)?.[1];
+                        return (
+                          <button
+                            className={`issue-row diagnostic-${diagnostic.severity}`}
+                            key={`${group.id}-${diagnostic.code}-${diagnostic.path}-${diagnostic.message}`}
+                            onClick={() => {
+                              if (!nodeId) return;
+                              selectNodeForEditing(nodeId, { focusEditor: true });
+                            }}
+                            type="button"
+                          >
+                            <div>
+                              <strong>{diagnostic.code}</strong>
+                              <small>{diagnostic.stage}{diagnostic.blocksHandoff ? ' / blocks handoff' : ''}</small>
+                            </div>
+                            <span>{diagnostic.message}</span>
+                          </button>
+                        );
+                      })}
+                    </section>
+                  ) : null
+                ))}
+              </div>
+            ) : (
+              <div className="empty-note">handoffを止める診断はありません。</div>
+            )}
           </div>
           <div className="output-tabs" role="tablist" aria-label="出力">
             <button
-              aria-selected={activeOutput === 'ir'}
-              className={activeOutput === 'ir' ? 'is-active' : ''}
-              onClick={() => setActiveOutput('ir')}
-              role="tab"
-              type="button"
-            >
-              IR
-            </button>
-            <button
-              aria-selected={activeOutput === 'prompt'}
-              className={activeOutput === 'prompt' ? 'is-active' : ''}
-              onClick={() => setActiveOutput('prompt')}
-              role="tab"
-              type="button"
-            >
-              AIメモ
-            </button>
-            <button
+              aria-controls="output-panel"
               aria-selected={activeOutput === 'math'}
               className={activeOutput === 'math' ? 'is-active' : ''}
+              id="output-tab-math"
               onClick={() => setActiveOutput('math')}
               role="tab"
+              tabIndex={activeOutput === 'math' ? 0 : -1}
               type="button"
             >
               数式
             </button>
             <button
+              aria-controls="output-panel"
               aria-selected={activeOutput === 'review'}
               className={activeOutput === 'review' ? 'is-active' : ''}
+              id="output-tab-review"
               onClick={() => setActiveOutput('review')}
               role="tab"
+              tabIndex={activeOutput === 'review' ? 0 : -1}
               type="button"
             >
               Review
             </button>
             <button
+              aria-controls="output-panel"
               aria-selected={activeOutput === 'handoff'}
               className={activeOutput === 'handoff' ? 'is-active' : ''}
+              id="output-tab-handoff"
               onClick={() => setActiveOutput('handoff')}
               role="tab"
+              tabIndex={activeOutput === 'handoff' ? 0 : -1}
               type="button"
             >
-              Bundle
+              Handoff
             </button>
             <button
-              aria-selected={activeOutput === 'package'}
-              className={activeOutput === 'package' ? 'is-active' : ''}
-              onClick={() => setActiveOutput('package')}
+              aria-controls="output-panel"
+              aria-selected={activeOutput === 'advanced'}
+              className={activeOutput === 'advanced' ? 'is-active' : ''}
+              id="output-tab-advanced"
+              onClick={() => setActiveOutput('advanced')}
               role="tab"
+              tabIndex={activeOutput === 'advanced' ? 0 : -1}
               type="button"
             >
-              Package
-            </button>
-            <button
-              aria-selected={activeOutput === 'diff'}
-              className={activeOutput === 'diff' ? 'is-active' : ''}
-              onClick={() => setActiveOutput('diff')}
-              role="tab"
-              type="button"
-            >
-              Diff
+              Advanced
             </button>
           </div>
-          {activeOutput === 'math' ? (
-            <MathView
-              model={modelIr}
-              onSelectNode={(nodeId) => {
-                setNodes((currentNodes) =>
-                  currentNodes.map((node) => ({ ...node, selected: node.id === nodeId })),
-                );
-                setEdges((currentEdges) =>
-                  currentEdges.map((edge) => ({ ...edge, selected: false })),
-                );
-                setSelectedNodeId(nodeId);
-                setSelectedEdgeId(null);
-              }}
-            />
-          ) : (
-            <>
+          <div
+            aria-labelledby={`output-tab-${activeOutput}`}
+            className="output-panel"
+            id="output-panel"
+            role="tabpanel"
+          >
+            {activeOutput === 'math' ? (
+              <MathView
+                model={modelIr}
+                onSelectNode={(nodeId) => selectNodeForEditing(nodeId, { focusEditor: true })}
+              />
+            ) : (
+              <>
               <div className="output-actions">
                 <span>
-                  {activeOutput === 'ir'
-                    ? 'JSON契約'
-                    : activeOutput === 'review'
-                      ? '診断一覧'
-                      : activeOutput === 'handoff'
-                        ? '固定snapshot'
-                        : activeOutput === 'package'
-                          ? 'portable package'
-                          : activeOutput === 'diff'
-                            ? 'semantic diff'
-                            : '実装用メモ'}
+                  {activeOutput === 'review'
+                    ? '診断一覧'
+                    : activeOutput === 'handoff'
+                      ? '受け渡しsummary'
+                      : advancedOutput === 'ir'
+                        ? 'JSON契約'
+                        : advancedOutput === 'prompt'
+                          ? '実装用メモ'
+                          : advancedOutput === 'package'
+                            ? 'portable package'
+                            : 'semantic diff'}
                 </span>
                 <button type="button" onClick={() => copyText(outputText)}>
                   コピー
                 </button>
-                {activeOutput === 'package' ? (
+                {activeOutput === 'advanced' && advancedOutput === 'package' ? (
                   <button type="button" onClick={() => copyText(portablePackage.files['model.json'])}>
                     model.json
                   </button>
                 ) : null}
+                {activeOutput === 'advanced' ? (
+                  <div className="segmented-control" aria-label="advanced output">
+                    <button
+                      type="button"
+                      className={advancedOutput === 'ir' ? 'is-active' : ''}
+                      onClick={() => setAdvancedOutput('ir')}
+                    >
+                      IR
+                    </button>
+                    <button
+                      type="button"
+                      className={advancedOutput === 'prompt' ? 'is-active' : ''}
+                      onClick={() => setAdvancedOutput('prompt')}
+                    >
+                      AIメモ
+                    </button>
+                    <button
+                      type="button"
+                      className={advancedOutput === 'package' ? 'is-active' : ''}
+                      onClick={() => setAdvancedOutput('package')}
+                    >
+                      Package
+                    </button>
+                    <button
+                      type="button"
+                      className={advancedOutput === 'diff' ? 'is-active' : ''}
+                      onClick={() => setAdvancedOutput('diff')}
+                    >
+                      Diff
+                    </button>
+                  </div>
+                ) : null}
+                {activeOutput === 'handoff' ? (
+                  <div className="segmented-control" aria-label="handoff preview format">
+                    <button
+                      type="button"
+                      className={handoffPreviewFormat === 'markdown' ? 'is-active' : ''}
+                      onClick={() => setHandoffPreviewFormat('markdown')}
+                    >
+                      Markdown
+                    </button>
+                    <button
+                      type="button"
+                      className={handoffPreviewFormat === 'json' ? 'is-active' : ''}
+                      onClick={() => setHandoffPreviewFormat('json')}
+                    >
+                      JSON
+                    </button>
+                  </div>
+                ) : null}
               </div>
-              {activeOutput === 'prompt' || activeOutput === 'handoff' ? (
+              {activeOutput === 'handoff' || (activeOutput === 'advanced' && advancedOutput === 'prompt') ? (
                 <label className="prompt-target">
                   出力先
                   <select
@@ -1801,8 +2233,9 @@ export function App() {
                 </label>
               ) : null}
               <pre>{outputText}</pre>
-            </>
-          )}
+              </>
+            )}
+          </div>
           <div className="receipt-panel">
             <div className="panel-title compact">
               <h2>Receipt</h2>
@@ -1813,6 +2246,11 @@ export function App() {
                 <strong>{receipt.backend}</strong>
                 <span>{receipt.mappings.length} mappings</span>
                 <span>{receipt.deviations.length + receipt.addedAssumptions.length + receipt.approximations.length} review items</span>
+                {receiptFingerprintStatus ? (
+                  <span className={receiptFingerprintStatus.matches ? 'receipt-match' : 'receipt-mismatch'}>
+                    {receiptFingerprintStatus.message}
+                  </span>
+                ) : null}
               </div>
             ) : (
               <p className="empty-note">外部実装の対応表を読み込めます。</p>

@@ -6,6 +6,7 @@
   "required": ["receiptVersion", "inputSpecificationFingerprint", "backend", "mappings", "deviations", "addedAssumptions", "approximations", "unresolvedQuestions"],
   "properties": {
     "receiptVersion": { "const": "1.0.0" },
+    "inputSpecificationFingerprintAlgorithm": { "const": "sha256" },
     "inputSpecificationFingerprint": { "type": "string" },
     "backend": { "type": "string" },
     "mappings": {

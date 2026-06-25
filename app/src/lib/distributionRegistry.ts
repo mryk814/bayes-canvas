@@ -34,6 +34,7 @@ export interface DistributionDefinition {
   id: string;
   name: string;
   aliases?: string[];
+  backendNames?: Partial<Record<'pymc' | 'numpyro' | 'stan', string>>;
   family?: DistributionFamily;
   support: DistributionSupport;
   params: DistributionParamDefinition[];
@@ -55,6 +56,11 @@ export const DISTRIBUTIONS: DistributionDefinition[] = [
     id: 'normal',
     name: 'Normal',
     aliases: ['Gaussian'],
+    backendNames: {
+      pymc: 'pm.Normal',
+      numpyro: 'dist.Normal',
+      stan: 'normal',
+    },
     family: 'continuous',
     support: 'real',
     params: [
@@ -69,6 +75,11 @@ export const DISTRIBUTIONS: DistributionDefinition[] = [
     id: 'student_t',
     name: 'StudentT',
     aliases: ['StudentT', 'Student-t', 'T'],
+    backendNames: {
+      pymc: 'pm.StudentT',
+      numpyro: 'dist.StudentT',
+      stan: 'student_t',
+    },
     family: 'continuous',
     support: 'real',
     params: [
@@ -82,7 +93,12 @@ export const DISTRIBUTIONS: DistributionDefinition[] = [
   {
     id: 'halfnormal',
     name: 'HalfNormal',
-    aliases: ['HalfNormal', 'Half-Normal'],
+    aliases: ['HalfNormal', 'Half-Normal', 'half_normal'],
+    backendNames: {
+      pymc: 'pm.HalfNormal',
+      numpyro: 'dist.HalfNormal',
+      stan: 'normal<lower=0>',
+    },
     family: 'continuous',
     support: 'positive',
     params: [{ name: 'sigma', required: true, role: 'scale', defaultExpression: '1', support: 'positive' }],

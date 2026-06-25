@@ -1,3 +1,4 @@
+import { createStableFingerprint, type FINGERPRINT_ALGORITHM } from './fingerprint.js';
 import type { SemanticModel } from './compiler.js';
 import type { ModelDocument } from './model.js';
 
@@ -19,7 +20,7 @@ export interface HandoffBundle {
     compilerVersion: string;
     target: HandoffTarget;
     createdAt: string;
-    /** Caller should replace this with a cryptographic hash of normalized model.json. */
+    fingerprintAlgorithm: typeof FINGERPRINT_ALGORITHM;
     specificationFingerprint: string;
   };
   model: ModelDocument;
@@ -50,6 +51,7 @@ export function buildHandoffBundle(
   capabilityReport: BackendCapabilityItem[] = [],
   now = new Date(),
 ): HandoffBundle {
+  const fingerprint = createStableFingerprint(document);
   return {
     manifest: {
       bundleVersion: '1.0.0',
@@ -59,7 +61,8 @@ export function buildHandoffBundle(
       compilerVersion: semantic.compilerVersion,
       target,
       createdAt: now.toISOString(),
-      specificationFingerprint: stableFingerprintInput(document),
+      fingerprintAlgorithm: fingerprint.algorithm,
+      specificationFingerprint: fingerprint.value,
     },
     model: document,
     semantic: {
@@ -83,18 +86,4 @@ export function buildHandoffBundle(
       returnMapping: ['entity_id', 'implementation_symbol', 'file', 'line_range'],
     },
   };
-}
-
-/**
- * Stable JSON text is useful as hash input. For production, normalize defaults
- * first and hash this string with SHA-256 (or use a standards-compliant JCS tool).
- */
-export function stableFingerprintInput(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableFingerprintInput).join(',')}]`;
-  const object = value as Record<string, unknown>;
-  return `{${Object.keys(object)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableFingerprintInput(object[key])}`)
-    .join(',')}}`;
 }

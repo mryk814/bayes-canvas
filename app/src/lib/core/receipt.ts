@@ -1,5 +1,6 @@
 export interface ImplementationReceipt {
   receiptVersion: '1.0.0';
+  inputSpecificationFingerprintAlgorithm?: 'sha256';
   inputSpecificationFingerprint: string;
   backend: string;
   mappings: Array<{
@@ -28,6 +29,7 @@ export function validateImplementationReceipt(value: unknown): ImplementationRec
   }
   return {
     receiptVersion: '1.0.0',
+    inputSpecificationFingerprintAlgorithm: receipt.inputSpecificationFingerprintAlgorithm ?? 'sha256',
     inputSpecificationFingerprint: receipt.inputSpecificationFingerprint,
     backend: receipt.backend,
     mappings: receipt.mappings,
@@ -35,5 +37,15 @@ export function validateImplementationReceipt(value: unknown): ImplementationRec
     addedAssumptions: receipt.addedAssumptions ?? [],
     approximations: receipt.approximations ?? [],
     unresolvedQuestions: receipt.unresolvedQuestions ?? [],
+  };
+}
+
+export function compareReceiptFingerprint(receipt: ImplementationReceipt, expectedFingerprint: string) {
+  const matches = receipt.inputSpecificationFingerprint === expectedFingerprint;
+  return {
+    matches,
+    message: matches
+      ? '現在のbundle fingerprintと一致しています。'
+      : '現在のbundle fingerprintと一致しません。別仕様由来のreceiptの可能性があります。',
   };
 }

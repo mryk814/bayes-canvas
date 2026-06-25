@@ -4,7 +4,7 @@
 
 The app now exports a contract-backed bundle from the same `ModelDocument` used by compiler diagnostics. The bundle contains:
 
-- manifest with schema, compiler version, target profile, timestamp, and stable fingerprint input
+- manifest with schema, compiler version, target profile, timestamp, SHA-256 fingerprint algorithm, and specification fingerprint
 - model document
 - semantic symbols and dependency edges
 - diagnostics
@@ -13,6 +13,8 @@ The app now exports a contract-backed bundle from the same `ModelDocument` used 
 - implementation contract requiring entity ID preservation and returned implementation mapping
 
 Prompt text remains useful for copy/paste, but it is no longer the only handoff artifact.
+
+`manifest.specificationFingerprint` is the SHA-256 hex digest of the stable, sorted `ModelDocument` JSON input. Implementation receipts should echo that value in `inputSpecificationFingerprint`; if it differs from the current bundle, the receipt must be treated as coming from another specification until reviewed.
 
 ## AI Patch Proposal
 

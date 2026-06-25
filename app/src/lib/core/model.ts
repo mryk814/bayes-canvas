@@ -95,6 +95,7 @@ export interface BaseEntity {
   plateIds: PlateId[];
   notes?: string;
   tags?: string[];
+  authorship?: 'user' | 'generated' | 'imported';
 }
 
 export interface DataEntity extends BaseEntity {

@@ -37,6 +37,20 @@ npm run dev
 
 The root scripts delegate to `app/`, so `npm run dev`, `npm run build`, and `npm run preview` can be run from the repository root.
 
+## Validation
+
+Run these checks from the repository root before handing off changes:
+
+```bash
+npm run typecheck
+npm run test
+npm run cli:lint:sample
+npm run cli:handoff:sample
+npm run build
+```
+
+`cli:lint:sample` compiles the hierarchical regression sample and fails on blocking diagnostics. `cli:handoff:sample` builds the PyMC handoff bundle from the same sample, which keeps the CLI export path covered by CI.
+
 ## First example
 
 Hierarchical regression:

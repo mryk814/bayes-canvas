@@ -1,3 +1,5 @@
+import { DISTRIBUTIONS } from '../distributionRegistry.js';
+
 export type TargetSupport = 'native' | 'lowered' | 'approximate' | 'unsupported' | 'unknown';
 
 export interface TargetProfile {
@@ -7,6 +9,15 @@ export interface TargetProfile {
   distributionNames: Record<string, string>;
   defaultSupport: TargetSupport;
   notes: string[];
+}
+
+function backendDistributionNames(target: 'pymc' | 'numpyro' | 'stan'): Record<string, string> {
+  return Object.fromEntries(
+    DISTRIBUTIONS.flatMap((distribution) => {
+      const backendName = distribution.backendNames?.[target];
+      return backendName ? [[distribution.id, backendName]] : [];
+    }),
+  );
 }
 
 export const TARGET_PROFILES: Record<TargetProfile['id'], TargetProfile> = {
@@ -22,7 +33,7 @@ export const TARGET_PROFILES: Record<TargetProfile['id'], TargetProfile> = {
     id: 'pymc',
     version: '1.0.0',
     label: 'PyMC',
-    distributionNames: { normal: 'pm.Normal', halfnormal: 'pm.HalfNormal', student_t: 'pm.StudentT' },
+    distributionNames: backendDistributionNames('pymc'),
     defaultSupport: 'native',
     notes: ['Use named coords and dims when axes are declared.'],
   },
@@ -30,7 +41,7 @@ export const TARGET_PROFILES: Record<TargetProfile['id'], TargetProfile> = {
     id: 'numpyro',
     version: '1.0.0',
     label: 'NumPyro',
-    distributionNames: { normal: 'dist.Normal', halfnormal: 'dist.HalfNormal', student_t: 'dist.StudentT' },
+    distributionNames: backendDistributionNames('numpyro'),
     defaultSupport: 'native',
     notes: ['Use numpyro.plate for batch axes.'],
   },
@@ -38,7 +49,7 @@ export const TARGET_PROFILES: Record<TargetProfile['id'], TargetProfile> = {
     id: 'stan',
     version: '1.0.0',
     label: 'Stan',
-    distributionNames: { normal: 'normal', halfnormal: 'normal<lower=0>', student_t: 'student_t' },
+    distributionNames: backendDistributionNames('stan'),
     defaultSupport: 'lowered',
     notes: ['Separate data, parameters, transformed parameters, and generated quantities.'],
   },
