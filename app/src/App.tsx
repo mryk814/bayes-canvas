@@ -37,6 +37,7 @@ import {
   type PromptTarget,
 } from './lib/modelIr';
 import { initialEdges, initialNodes } from './samples/hierarchicalRegression';
+import { modelTemplates, type ModelTemplate } from './samples/modelTemplates';
 import { TexMath } from './components/TexMath';
 import { DistributionEditor } from './components/DistributionEditor';
 import { MathView } from './components/MathView';
@@ -1353,6 +1354,16 @@ export function App() {
     setSavedModels(deleteModelSnapshot(id));
   }, []);
 
+  const applyModelTemplate = useCallback((template: ModelTemplate) => {
+    setUndoState({ message: `${template.name} テンプレートを適用しました。`, nodes, edges });
+    setNodes(template.nodes.map(prepareCanvasNode));
+    setEdges(template.edges);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setActiveLeftPanel('inspector');
+    setActiveOutput('review');
+  }, [edges, nodes, setEdges, setNodes]);
+
   const handleExport = useCallback(() => {
     exportCanvasToFile(nodes, edges);
   }, [nodes, edges]);
@@ -1412,6 +1423,12 @@ export function App() {
       group: 'Navigate',
       run: () => setActiveLeftPanel('add'),
     },
+    ...modelTemplates.map((template) => ({
+      id: `template-${template.id}`,
+      label: `Start ${template.name}`,
+      group: 'Template',
+      run: () => applyModelTemplate(template),
+    })),
     {
       id: 'open-structure',
       label: 'Open Structure panel',
@@ -1442,7 +1459,7 @@ export function App() {
       group: 'File',
       run: handleImport,
     },
-  ], [addNodeFromPalette, handleImport, portablePackage]);
+  ], [addNodeFromPalette, applyModelTemplate, handleImport, portablePackage]);
 
   const filteredCommands = useMemo(() => {
     const query = commandQuery.trim().toLowerCase();
@@ -1593,25 +1610,42 @@ export function App() {
             ))}
           </div>
           {activeLeftPanel === 'add' ? (
-            <div className="palette-groups">
-              {PALETTE_GROUPS.map((group) => (
-                <div className="palette-group" key={group.title}>
-                  <h3>{group.title}</h3>
-                  <div className="palette-list">
-                    {group.items.map((item) => (
-                      <button
-                        className={`palette-item ${item.type === 'node' ? `palette-${item.kind}` : 'palette-preset'}`}
-                        key={item.type === 'node' ? item.kind : item.preset}
-                        onClick={() => applyPaletteItem(item)}
-                        type="button"
-                      >
-                        <span>{item.label}</span>
-                        <small>{item.note}</small>
-                      </button>
-                    ))}
-                  </div>
+            <div className="add-panel">
+              <div className="template-panel">
+                <div className="panel-title compact">
+                  <h2>Templates</h2>
+                  <span>{modelTemplates.length}</span>
                 </div>
-              ))}
+                <div className="template-list">
+                  {modelTemplates.map((template) => (
+                    <button key={template.id} type="button" onClick={() => applyModelTemplate(template)}>
+                      <strong>{template.name}</strong>
+                      <span>{template.family}</span>
+                      <small>{template.description}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="palette-groups">
+                {PALETTE_GROUPS.map((group) => (
+                  <div className="palette-group" key={group.title}>
+                    <h3>{group.title}</h3>
+                    <div className="palette-list">
+                      {group.items.map((item) => (
+                        <button
+                          className={`palette-item ${item.type === 'node' ? `palette-${item.kind}` : 'palette-preset'}`}
+                          key={item.type === 'node' ? item.kind : item.preset}
+                          onClick={() => applyPaletteItem(item)}
+                          type="button"
+                        >
+                          <span>{item.label}</span>
+                          <small>{item.note}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
           {activeLeftPanel === 'structure' ? (
@@ -1665,35 +1699,52 @@ export function App() {
             </div>
           ) : null}
           {activeLeftPanel === 'library' ? (
-            <div className="snapshots-panel">
-              <div className="panel-title compact">
-                <h2>保存済み</h2>
-                <span>{savedModels.length}</span>
-              </div>
-              {savedModels.length > 0 ? (
-                <div className="snapshots-list">
-                  {savedModels.map((model) => (
-                    <div className="snapshot-row" key={model.id}>
-                      <div className="snapshot-info">
-                        <span className="snapshot-name">{model.name}</span>
-                        <span className="snapshot-meta">
-                          {model.nodeCount}n {model.edgeCount}e · {new Date(model.savedAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <div className="snapshot-actions">
-                        <button type="button" onClick={() => handleLoad(model.id)}>
-                          読込
-                        </button>
-                        <button type="button" onClick={() => handleDeleteSnapshot(model.id)}>
-                          削除
-                        </button>
-                      </div>
-                    </div>
+            <div className="library-panel">
+              <div className="template-panel">
+                <div className="panel-title compact">
+                  <h2>Templates</h2>
+                  <span>{modelTemplates.length}</span>
+                </div>
+                <div className="template-list">
+                  {modelTemplates.map((template) => (
+                    <button key={template.id} type="button" onClick={() => applyModelTemplate(template)}>
+                      <strong>{template.name}</strong>
+                      <span>{template.family}</span>
+                      <small>{template.reviewQuestions[0]}</small>
+                    </button>
                   ))}
                 </div>
-              ) : (
-                <p className="empty-note">保存済みsnapshotはまだありません。</p>
-              )}
+              </div>
+              <div className="snapshots-panel">
+                <div className="panel-title compact">
+                  <h2>保存済み</h2>
+                  <span>{savedModels.length}</span>
+                </div>
+                {savedModels.length > 0 ? (
+                  <div className="snapshots-list">
+                    {savedModels.map((model) => (
+                      <div className="snapshot-row" key={model.id}>
+                        <div className="snapshot-info">
+                          <span className="snapshot-name">{model.name}</span>
+                          <span className="snapshot-meta">
+                            {model.nodeCount}n {model.edgeCount}e · {new Date(model.savedAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <div className="snapshot-actions">
+                          <button type="button" onClick={() => handleLoad(model.id)}>
+                            読込
+                          </button>
+                          <button type="button" onClick={() => handleDeleteSnapshot(model.id)}>
+                            削除
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="empty-note">保存済みsnapshotはまだありません。</p>
+                )}
+              </div>
             </div>
           ) : null}
           {activeLeftPanel === 'inspector' ? (
