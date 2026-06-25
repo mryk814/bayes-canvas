@@ -205,7 +205,7 @@ export function buildCapabilityReport(document: ModelDocument, target: HandoffTa
       const backendName = TARGET_PROFILES[target].distributionNames[entity.distribution.distributionId];
       items.push({
         feature: `${entity.distribution.distributionId} distribution`,
-        support: backendName ? 'native' : TARGET_PROFILES[target].defaultSupport,
+        support: backendName ? 'native' : distributionSupportForTarget(target),
         relatedEntityIds: [entity.id],
         note: backendName ? `Backend name: ${backendName}` : 'No backend-specific distribution name is registered.',
       });
@@ -221,6 +221,11 @@ export function buildCapabilityReport(document: ModelDocument, target: HandoffTa
   }
 
   return items;
+}
+
+function distributionSupportForTarget(target: HandoffTarget): BackendCapabilityItem['support'] {
+  if (target === 'generic' || target === 'review') return TARGET_PROFILES[target].defaultSupport;
+  return 'unsupported';
 }
 
 function buildMacros(nodes: Node<BayesNodeData>[]): ModelDocument['macros'] | undefined {
@@ -520,7 +525,7 @@ function supportToDomain(support: string): Domain {
 
 function normalizeDistributionId(value: string): string {
   const lowered = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
-  if (lowered === 'halfnormal') return 'halfnormal';
+  if (lowered === 'halfnormal' || lowered === 'half_normal') return 'halfnormal';
   if (lowered === 'studentt') return 'student_t';
   if (lowered === 'multivariatenormal' || lowered === 'mvn') return 'multivariate_normal';
   return lowered;

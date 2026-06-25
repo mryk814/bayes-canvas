@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compileCanvas, buildCanvasHandoff } from '../dist-test/lib/documentAdapter.js';
+import { compileCanvas, buildCanvasHandoff, buildCapabilityReport } from '../dist-test/lib/documentAdapter.js';
 import { parseExpression } from '../dist-test/lib/core/expression.js';
 import { assertJsonComplexity } from '../dist-test/lib/core/migrations.js';
 import { previewPatchProposal } from '../dist-test/lib/core/patch-proposal.js';
@@ -8,6 +8,9 @@ import { buildPortablePackage } from '../dist-test/lib/core/portable.js';
 import { validateImplementationReceipt } from '../dist-test/lib/core/receipt.js';
 import { initialEdges, initialNodes } from '../dist-test/samples/hierarchicalRegression.js';
 import { minimalDistributionRegistry } from '../dist-test/lib/core/registry.js';
+import { hierarchicalRegression } from '../dist-test/lib/core/example.js';
+import { compileModel } from '../dist-test/lib/core/compiler.js';
+import { TARGET_PROFILES } from '../dist-test/lib/core/target-profiles.js';
 
 test('parses indexed Bayesian expressions', () => {
   const parsed = parseExpression('alpha[group_id[i]] + beta * x[i]');
@@ -27,6 +30,11 @@ test('builds a contract-backed handoff bundle', () => {
   assert.equal(bundle.manifest.bundleVersion, '1.0.0');
   assert.equal(bundle.implementationContract.preserveEntityIds, true);
   assert.ok(bundle.capabilityReport.length >= 2);
+  assert.ok(bundle.capabilityReport.some((item) => (
+    item.feature === 'halfnormal distribution'
+    && item.support === 'native'
+    && item.note === 'Backend name: pm.HalfNormal'
+  )));
 });
 
 test('rejects over-large imports before replacing current work', () => {
@@ -69,4 +77,35 @@ test('validates implementation receipts', () => {
     unresolvedQuestions: [],
   });
   assert.equal(receipt.mappings.length, 1);
+});
+
+test('uses canonical distribution ids across registry and target profiles', () => {
+  assert.equal(minimalDistributionRegistry.get('halfnormal')?.label, 'HalfNormal');
+  assert.equal(minimalDistributionRegistry.get('half_normal')?.id, 'halfnormal');
+  assert.equal(TARGET_PROFILES.pymc.distributionNames.halfnormal, 'pm.HalfNormal');
+  assert.equal(TARGET_PROFILES.numpyro.distributionNames.halfnormal, 'dist.HalfNormal');
+  assert.equal(TARGET_PROFILES.stan.distributionNames.halfnormal, 'normal<lower=0>');
+
+  const compiled = compileModel(hierarchicalRegression, minimalDistributionRegistry);
+  assert.equal(compiled.readiness.summary.errors, 0);
+  assert.equal(hierarchicalRegression.entities.rv_sigma.distribution.distributionId, 'halfnormal');
+
+  const unsupportedReport = buildCapabilityReport({
+    ...hierarchicalRegression,
+    entities: {
+      ...hierarchicalRegression.entities,
+      rv_sigma: {
+        ...hierarchicalRegression.entities.rv_sigma,
+        distribution: {
+          ...hierarchicalRegression.entities.rv_sigma.distribution,
+          distributionId: 'wishart',
+        },
+      },
+    },
+  }, 'pymc');
+  assert.ok(unsupportedReport.some((item) => (
+    item.feature === 'wishart distribution'
+    && item.support === 'unsupported'
+    && item.note === 'No backend-specific distribution name is registered.'
+  )));
 });

@@ -77,7 +77,7 @@ export const hierarchicalRegression: ModelDocument = {
     rv_tau_alpha: {
       id: 'rv_tau_alpha', kind: 'random_variable', role: 'parameter', symbol: 'tau_alpha',
       valueType: scalarPositive(), plateIds: [],
-      distribution: { distributionId: 'half_normal', args: { sigma: expr('1') } },
+      distribution: { distributionId: 'halfnormal', args: { sigma: expr('1') } },
     },
     rv_alpha: {
       id: 'rv_alpha', kind: 'random_variable', role: 'parameter', symbol: 'alpha',
@@ -96,7 +96,7 @@ export const hierarchicalRegression: ModelDocument = {
     rv_sigma: {
       id: 'rv_sigma', kind: 'random_variable', role: 'parameter', symbol: 'sigma',
       valueType: scalarPositive(), plateIds: [],
-      distribution: { distributionId: 'half_normal', args: { sigma: expr('1') } },
+      distribution: { distributionId: 'halfnormal', args: { sigma: expr('1') } },
     },
     det_mu: {
       id: 'det_mu', kind: 'deterministic', symbol: 'mu', valueType: obsReal(),
