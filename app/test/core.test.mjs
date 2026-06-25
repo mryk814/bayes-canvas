@@ -11,6 +11,7 @@ import { minimalDistributionRegistry } from '../dist-test/lib/core/registry.js';
 import { hierarchicalRegression } from '../dist-test/lib/core/example.js';
 import { compileModel } from '../dist-test/lib/core/compiler.js';
 import { TARGET_PROFILES } from '../dist-test/lib/core/target-profiles.js';
+import { sha256Hex } from '../dist-test/lib/core/fingerprint.js';
 
 test('parses indexed Bayesian expressions', () => {
   const parsed = parseExpression('alpha[group_id[i]] + beta * x[i]');
@@ -28,6 +29,8 @@ test('compiles the canvas sample through ModelDocument and LayoutDocument', () =
 test('builds a contract-backed handoff bundle', () => {
   const bundle = buildCanvasHandoff(initialNodes, initialEdges, 'pymc');
   assert.equal(bundle.manifest.bundleVersion, '1.0.0');
+  assert.equal(bundle.manifest.fingerprintAlgorithm, 'sha256');
+  assert.match(bundle.manifest.specificationFingerprint, /^[0-9a-f]{64}$/u);
   assert.equal(bundle.implementationContract.preserveEntityIds, true);
   assert.ok(bundle.capabilityReport.length >= 2);
   assert.ok(bundle.capabilityReport.some((item) => (
@@ -60,6 +63,8 @@ test('previews AI patch proposals through sandbox compile and semantic diff', ()
 test('builds a portable package with model and layout separated', () => {
   const compiled = compileCanvas(initialNodes, initialEdges);
   const pkg = buildPortablePackage(compiled.document, compiled.layout, compiled.semantic);
+  assert.equal(pkg.manifest.fingerprintAlgorithm, 'sha256');
+  assert.match(pkg.manifest.fingerprint, /^[0-9a-f]{64}$/u);
   assert.ok(pkg.files['model.json']);
   assert.ok(pkg.files['layout.json']);
   assert.ok(pkg.files['handoff.json']);
@@ -77,6 +82,10 @@ test('validates implementation receipts', () => {
     unresolvedQuestions: [],
   });
   assert.equal(receipt.mappings.length, 1);
+});
+
+test('hashes stable fingerprint input with SHA-256', () => {
+  assert.equal(sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
 });
 
 test('uses canonical distribution ids across registry and target profiles', () => {

@@ -48,10 +48,10 @@ import {
   previewCanvasPatch,
 } from './lib/documentAdapter';
 import { assertJsonComplexity } from './lib/core/migrations.js';
-import type { HandoffTarget } from './lib/core/handoff.js';
+import type { HandoffBundle, HandoffTarget } from './lib/core/handoff.js';
 import type { PatchPreview } from './lib/core/patch-proposal.js';
 import { diffModelDocuments } from './lib/core/semantic-diff.js';
-import { validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
+import { compareReceiptFingerprint, validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
 import { saveAutosave } from './lib/storage';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
@@ -644,6 +644,59 @@ function formatReviewPanel(diagnostics: ReturnType<typeof compileCanvas>['semant
     .join('\n\n');
 }
 
+function formatHandoffMarkdown(bundle: HandoffBundle): string {
+  const blockingDiagnostics = bundle.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff);
+  const unresolvedQuestions = bundle.unresolvedQuestions.filter((question) => question.blocking);
+  const capabilityRows = bundle.capabilityReport.length
+    ? bundle.capabilityReport.map((item) => (
+      `| ${escapeMarkdownCell(item.feature)} | ${item.support} | ${escapeMarkdownCell(item.relatedEntityIds.join(', ') || '-')} | ${escapeMarkdownCell(item.note ?? '-')} |`
+    ))
+    : ['| - | - | - | - |'];
+  const diagnosticRows = blockingDiagnostics.length
+    ? blockingDiagnostics.map((diagnostic) => (
+      `| ${diagnostic.severity} | ${escapeMarkdownCell(diagnostic.code)} | ${escapeMarkdownCell(diagnostic.path)} | ${escapeMarkdownCell(diagnostic.message)} |`
+    ))
+    : ['| - | - | - | handoffを止める診断はありません。 |'];
+  const questionRows = unresolvedQuestions.length
+    ? unresolvedQuestions.map((question) => (
+      `| ${escapeMarkdownCell(question.id)} | ${escapeMarkdownCell(question.relatedEntityIds.join(', ') || '-')} | ${escapeMarkdownCell(question.text)} |`
+    ))
+    : ['| - | - | handoff前に必須確認の質問はありません。 |'];
+
+  return [
+    `# Handoff Review: ${bundle.manifest.target}`,
+    '',
+    `- Model: ${bundle.manifest.modelDocumentId}`,
+    `- Revision: ${bundle.manifest.sourceRevision}`,
+    `- Fingerprint: \`${bundle.manifest.fingerprintAlgorithm}:${bundle.manifest.specificationFingerprint}\``,
+    `- Diagnostics: ${bundle.diagnostics.length}`,
+    `- Blocking diagnostics: ${blockingDiagnostics.length}`,
+    `- Blocking questions: ${unresolvedQuestions.length}`,
+    '',
+    '## Capability Report',
+    '',
+    '| Feature | Support | Entities | Note |',
+    '| --- | --- | --- | --- |',
+    ...capabilityRows,
+    '',
+    '## Blocking Diagnostics',
+    '',
+    '| Severity | Code | Path | Message |',
+    '| --- | --- | --- | --- |',
+    ...diagnosticRows,
+    '',
+    '## Unresolved Questions',
+    '',
+    '| Question | Entities | Text |',
+    '| --- | --- | --- |',
+    ...questionRows,
+  ].join('\n');
+}
+
+function escapeMarkdownCell(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
 function formatSemanticDiff(items: ReturnType<typeof diffModelDocuments>): string {
   if (!items.length) return 'No semantic changes from the initial sample.';
   return items
@@ -671,11 +724,16 @@ export function App() {
   );
   const prompt = useMemo(() => generateAiPrompt(modelIr, promptTarget), [modelIr, promptTarget]);
   const [activeOutput, setActiveOutput] = useState<'ir' | 'prompt' | 'math' | 'review' | 'handoff' | 'package' | 'diff'>('math');
+  const [handoffPreviewFormat, setHandoffPreviewFormat] = useState<'markdown' | 'json'>('markdown');
   const [importError, setImportError] = useState<ImportErrorState | null>(null);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [patchInput, setPatchInput] = useState('');
   const [pendingPatch, setPendingPatch] = useState<PendingPatchState | null>(null);
   const [receipt, setReceipt] = useState<ImplementationReceipt | null>(null);
+  const receiptFingerprintStatus = useMemo(
+    () => receipt ? compareReceiptFingerprint(receipt, handoffBundle.manifest.specificationFingerprint) : null,
+    [handoffBundle.manifest.specificationFingerprint, receipt],
+  );
   const fullTex = useMemo(() => generateModelTex(modelIr), [modelIr]);
   const reviewText = useMemo(() => formatReviewPanel(compiledCanvas.semantic.diagnostics), [compiledCanvas.semantic.diagnostics]);
   const initialCompiledCanvas = useMemo(() => compileCanvas(initialCanvasNodes, initialCanvasEdges), []);
@@ -691,8 +749,10 @@ export function App() {
     ? JSON.stringify({ modelIr, modelDocument: compiledCanvas.document, layout: compiledCanvas.layout }, null, 2)
     : activeOutput === 'prompt'
       ? prompt
-      : activeOutput === 'handoff'
-        ? JSON.stringify(handoffBundle, null, 2)
+    : activeOutput === 'handoff'
+        ? handoffPreviewFormat === 'markdown'
+          ? formatHandoffMarkdown(handoffBundle)
+          : JSON.stringify(handoffBundle, null, 2)
         : activeOutput === 'package'
           ? JSON.stringify(portablePackage, null, 2)
           : activeOutput === 'diff'
@@ -1784,6 +1844,24 @@ export function App() {
                     model.json
                   </button>
                 ) : null}
+                {activeOutput === 'handoff' ? (
+                  <div className="segmented-control" aria-label="handoff preview format">
+                    <button
+                      type="button"
+                      className={handoffPreviewFormat === 'markdown' ? 'is-active' : ''}
+                      onClick={() => setHandoffPreviewFormat('markdown')}
+                    >
+                      Markdown
+                    </button>
+                    <button
+                      type="button"
+                      className={handoffPreviewFormat === 'json' ? 'is-active' : ''}
+                      onClick={() => setHandoffPreviewFormat('json')}
+                    >
+                      JSON
+                    </button>
+                  </div>
+                ) : null}
               </div>
               {activeOutput === 'prompt' || activeOutput === 'handoff' ? (
                 <label className="prompt-target">
@@ -1813,6 +1891,11 @@ export function App() {
                 <strong>{receipt.backend}</strong>
                 <span>{receipt.mappings.length} mappings</span>
                 <span>{receipt.deviations.length + receipt.addedAssumptions.length + receipt.approximations.length} review items</span>
+                {receiptFingerprintStatus ? (
+                  <span className={receiptFingerprintStatus.matches ? 'receipt-match' : 'receipt-mismatch'}>
+                    {receiptFingerprintStatus.message}
+                  </span>
+                ) : null}
               </div>
             ) : (
               <p className="empty-note">外部実装の対応表を読み込めます。</p>

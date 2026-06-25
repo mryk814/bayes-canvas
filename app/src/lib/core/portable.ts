@@ -1,5 +1,5 @@
 import { buildHandoffBundle, type HandoffTarget } from './handoff.js';
-import { stableFingerprintInput } from './handoff.js';
+import { createStableFingerprint, type FINGERPRINT_ALGORITHM } from './fingerprint.js';
 import type { SemanticModel } from './compiler.js';
 import type { LayoutDocument, ModelDocument } from './model.js';
 
@@ -10,6 +10,7 @@ export interface PortableBayesCanvasPackage {
     sourceRevision: number;
     schemaVersion: string;
     createdAt: string;
+    fingerprintAlgorithm: typeof FINGERPRINT_ALGORITHM;
     fingerprint: string;
     files: string[];
   };
@@ -24,6 +25,7 @@ export function buildPortablePackage(
   now = new Date(),
 ): PortableBayesCanvasPackage {
   const handoff = buildHandoffBundle(document, semantic, target);
+  const fingerprint = createStableFingerprint({ model: document, layout });
   const files = {
     'manifest.json': '',
     'model.json': JSON.stringify(document, null, 2),
@@ -38,7 +40,8 @@ export function buildPortablePackage(
     sourceRevision: document.revision,
     schemaVersion: document.schemaVersion,
     createdAt: now.toISOString(),
-    fingerprint: stableFingerprintInput({ model: document, layout }),
+    fingerprintAlgorithm: fingerprint.algorithm,
+    fingerprint: fingerprint.value,
     files: Object.keys(files),
   };
   files['manifest.json'] = JSON.stringify(manifest, null, 2);
