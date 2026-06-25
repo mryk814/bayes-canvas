@@ -1146,6 +1146,116 @@ pre {
   font-size: var(--text-xs);
 }
 
+.readiness-card {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.readiness-ready {
+  border-color: var(--color-status-done-bd);
+  background: var(--color-status-done-bg);
+}
+
+.readiness-review {
+  border-color: var(--color-status-review-bd);
+  background: var(--color-status-review-bg);
+}
+
+.readiness-blocked {
+  border-color: var(--color-status-blocked-bd);
+  background: var(--color-status-blocked-bg);
+}
+
+.readiness-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.readiness-heading span,
+.readiness-heading strong {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+}
+
+.readiness-ready .readiness-heading span {
+  color: var(--color-status-done-fg);
+}
+
+.readiness-review .readiness-heading span {
+  color: var(--color-status-review-fg);
+}
+
+.readiness-blocked .readiness-heading span {
+  color: var(--color-status-blocked-fg);
+}
+
+.readiness-card p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.readiness-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.readiness-blockers {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.readiness-blockers button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  color: var(--color-text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.readiness-blockers button:hover {
+  border-color: var(--color-border-strong);
+}
+
+.readiness-blockers strong {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+}
+
+.readiness-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.readiness-actions button {
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.readiness-actions button:hover {
+  border-color: var(--color-accent);
+}
+
 .issue-list {
   display: grid;
   gap: var(--space-2);

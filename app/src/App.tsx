@@ -746,6 +746,31 @@ export function App() {
     () => buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget),
     [edges, nodes, promptTarget],
   );
+  const blockingDiagnostics = useMemo(
+    () => compiledCanvas.semantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff),
+    [compiledCanvas.semantic.diagnostics],
+  );
+  const blockingQuestions = useMemo(
+    () => handoffBundle.unresolvedQuestions.filter((question) => question.blocking),
+    [handoffBundle.unresolvedQuestions],
+  );
+  const handoffReadiness = blockingDiagnostics.length || blockingQuestions.length || compiledCanvas.semantic.readiness.summary.errors
+    ? {
+        state: 'blocked',
+        label: 'Blocked',
+        message: 'Handoff前に止めている項目があります。',
+      }
+    : compiledCanvas.semantic.readiness.summary.warnings || handoffBundle.unresolvedQuestions.length
+      ? {
+          state: 'review',
+          label: 'Needs review',
+          message: 'Handoff前に確認したい項目があります。',
+        }
+      : {
+          state: 'ready',
+          label: 'Ready',
+          message: 'このtargetへ受け渡しできます。',
+        };
   const outputText = activeOutput === 'ir'
     ? JSON.stringify({ modelIr, modelDocument: compiledCanvas.document, layout: compiledCanvas.layout }, null, 2)
     : activeOutput === 'prompt'
@@ -1688,6 +1713,44 @@ export function App() {
             <h2>受け渡し</h2>
             <span>生成される内容</span>
           </div>
+          <section className={`readiness-card readiness-${handoffReadiness.state}`} aria-label="Handoff readiness">
+            <div className="readiness-heading">
+              <span>{handoffReadiness.label}</span>
+              <strong>{getPromptTargetLabel(promptTarget)}</strong>
+            </div>
+            <p>{handoffReadiness.message}</p>
+            <div className="readiness-metrics">
+              <span>{compiledCanvas.semantic.readiness.summary.errors} errors</span>
+              <span>{compiledCanvas.semantic.readiness.summary.warnings} warnings</span>
+              <span>{blockingQuestions.length} questions</span>
+            </div>
+            {blockingDiagnostics.length ? (
+              <div className="readiness-blockers">
+                {blockingDiagnostics.slice(0, 3).map((diagnostic) => (
+                  <button
+                    key={`${diagnostic.code}-${diagnostic.path}`}
+                    type="button"
+                    onClick={() => {
+                      const nodeId = /^\/entities\/([^/]+)/.exec(diagnostic.path)?.[1];
+                      if (nodeId) selectNodeForEditing(nodeId, { focusEditor: true });
+                      setActiveOutput('review');
+                    }}
+                  >
+                    <strong>{diagnostic.code}</strong>
+                    <span>{diagnostic.message}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <div className="readiness-actions">
+              <button type="button" onClick={() => setActiveOutput('review')}>
+                Review issues
+              </button>
+              <button type="button" onClick={() => setActiveOutput('handoff')}>
+                Prepare handoff
+              </button>
+            </div>
+          </section>
           <div className="outline-panel">
             <div className="panel-title compact">
               <h2>Outline</h2>
