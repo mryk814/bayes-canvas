@@ -12,6 +12,7 @@ import { assertJsonComplexity } from '../dist-test/lib/core/migrations.js';
 import { previewPatchProposal } from '../dist-test/lib/core/patch-proposal.js';
 import { buildPortablePackage } from '../dist-test/lib/core/portable.js';
 import { compareReceiptFingerprint, validateImplementationReceipt } from '../dist-test/lib/core/receipt.js';
+import { buildModelViewProjections } from '../dist-test/lib/modelViewProjections.js';
 import { initialEdges, initialNodes } from '../dist-test/samples/hierarchicalRegression.js';
 import { modelTemplates } from '../dist-test/samples/modelTemplates.js';
 import { modelCorpus } from '../dist-test/samples/modelCorpus.js';
@@ -110,6 +111,45 @@ test('builds a contract-backed handoff bundle', () => {
     && item.support === 'native'
     && item.note === 'Backend name: pm.HalfNormal'
   )));
+});
+
+test('projects the sample model into synchronized model views', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  const handoff = buildCanvasHandoff(initialNodes, initialEdges, 'review');
+  const projections = buildModelViewProjections({
+    document: compiled.document,
+    semantic: compiled.semantic,
+    handoff,
+  });
+
+  assert.deepEqual(
+    projections.map((projection) => projection.id),
+    ['canvas', 'story', 'equations', 'structure', 'contract'],
+  );
+
+  const diagnosticFingerprints = compiled.semantic.diagnostics.map((diagnostic) =>
+    `${diagnostic.code}|${diagnostic.path}|${diagnostic.message}`,
+  );
+  for (const projection of projections) {
+    assert.equal(projection.source.documentId, compiled.document.documentId, projection.id);
+    assert.equal(projection.source.revision, compiled.document.revision, projection.id);
+    assert.ok(projection.consumes.length > 0, projection.id);
+    assert.ok(projection.sections.length > 0, projection.id);
+    assert.deepEqual(
+      projection.diagnosticLinks.map((diagnostic) => `${diagnostic.code}|${diagnostic.path}|${diagnostic.message}`),
+      diagnosticFingerprints,
+      projection.id,
+    );
+  }
+
+  const story = projections.find((projection) => projection.id === 'story');
+  const equations = projections.find((projection) => projection.id === 'equations');
+  const structure = projections.find((projection) => projection.id === 'structure');
+  const contract = projections.find((projection) => projection.id === 'contract');
+  assert.ok(story?.copyText.includes('alpha'));
+  assert.ok(equations?.sections.some((section) => section.id === 'equation-compiler'));
+  assert.ok(structure?.sections.some((section) => section.id === 'structure-index-mapping'));
+  assert.ok(contract?.sections.some((section) => section.id === 'contract-observed'));
 });
 
 test('rejects over-large imports before replacing current work', () => {

@@ -9,14 +9,17 @@ The goal is to make complex Bayesian models easier to design, inspect, export, a
 Bayes Canvas keeps the compiled `ModelDocument` and `LayoutDocument` as the portable source of truth, with the visual graph as the editing projection:
 
 ```text
-Visual graph → ModelDocument + LayoutDocument → Review / Package / Handoff → Implementation receipt
+Visual graph → ModelDocument + LayoutDocument → View projections → Review / Package / Handoff → Implementation receipt
 ```
+
+Canvas, Story, Equations, Structure, and Contract are synchronized projections of the same canonical document. They do not store independent semantic state.
 
 ## MVP scope
 
 - Node-based visual model editor
 - Variables, priors, deterministic expressions, likelihoods, and plates
 - Shape/index awareness
+- Multi-view projections for canvas editing, generative story, equations, structure, and handoff contract review
 - Model IR export as JSON/YAML
 - AI implementation prompt export
 - Portable package import with validation preview before replacing current work
