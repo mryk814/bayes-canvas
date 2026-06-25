@@ -9,9 +9,10 @@ export type ExprNode =
   | { kind: 'number'; value: number; raw: string; span: SourceSpan }
   | { kind: 'reference'; symbol: string; span: SourceSpan }
   | { kind: 'unary'; operator: '+' | '-'; operand: ExprNode; span: SourceSpan }
-  | { kind: 'binary'; operator: '+' | '-' | '*' | '/' | '^'; left: ExprNode; right: ExprNode; span: SourceSpan }
+  | { kind: 'binary'; operator: '+' | '-' | '*' | '/' | '^' | '=' | '<' | '<=' | '>' | '>=' | '=='; left: ExprNode; right: ExprNode; span: SourceSpan }
   | { kind: 'call'; functionName: string; args: ExprNode[]; span: SourceSpan }
-  | { kind: 'index'; target: ExprNode; indices: ExprNode[]; span: SourceSpan };
+  | { kind: 'index'; target: ExprNode; indices: ExprNode[]; span: SourceSpan }
+  | { kind: 'slice'; start?: ExprNode; end?: ExprNode; span: SourceSpan };
 
 export interface ExpressionParseError {
   code: 'unexpected_token' | 'unexpected_end' | 'invalid_number' | 'invalid_call_target';
@@ -31,11 +32,20 @@ type TokenKind =
   | 'star'
   | 'slash'
   | 'caret'
+  | 'equal'
+  | 'double_equal'
+  | 'lt'
+  | 'lte'
+  | 'gt'
+  | 'gte'
   | 'lparen'
   | 'rparen'
   | 'lbracket'
   | 'rbracket'
   | 'comma'
+  | 'semicolon'
+  | 'colon'
+  | 'dot'
   | 'eof';
 
 interface Token {
@@ -64,12 +74,23 @@ class Tokenizer {
       '*': 'star',
       '/': 'slash',
       '^': 'caret',
+      '=': 'equal',
+      '<': 'lt',
+      '>': 'gt',
       '(': 'lparen',
       ')': 'rparen',
       '[': 'lbracket',
       ']': 'rbracket',
       ',': 'comma',
+      ';': 'semicolon',
+      ':': 'colon',
+      '.': 'dot',
     };
+    if ((ch === '<' || ch === '>' || ch === '=') && this.source[this.offset + 1] === '=') {
+      this.offset += 2;
+      const kind = ch === '<' ? 'lte' : ch === '>' ? 'gte' : 'double_equal';
+      return { kind, text: `${ch}=`, span: { start, end: this.offset } };
+    }
     const punctuationKind = punctuation[ch];
     if (punctuationKind) {
       this.offset += 1;
@@ -117,7 +138,7 @@ class Parser {
 
   parse(): ParseExpressionResult {
     try {
-      const ast = this.parseAdditive();
+      const ast = this.parseComparison();
       if (this.current.kind !== 'eof') {
         return {
           ok: false,
@@ -166,6 +187,29 @@ class Parser {
       message,
       span: this.current.span,
     });
+  }
+
+  private parseComparison(): ExprNode {
+    let node = this.parseAdditive();
+    while (
+      this.current.kind === 'equal'
+      || this.current.kind === 'double_equal'
+      || this.current.kind === 'lt'
+      || this.current.kind === 'lte'
+      || this.current.kind === 'gt'
+      || this.current.kind === 'gte'
+    ) {
+      const operator = this.advance();
+      const right = this.parseAdditive();
+      node = {
+        kind: 'binary',
+        operator: operator.text as '=' | '<' | '<=' | '>' | '>=' | '==',
+        left: node,
+        right,
+        span: { start: node.span.start, end: right.span.end },
+      };
+    }
+    return node;
   }
 
   private parseAdditive(): ExprNode {
@@ -245,8 +289,8 @@ class Parser {
         const args: ExprNode[] = [];
         if (!this.isCurrent('rparen')) {
           do {
-            args.push(this.parseAdditive());
-          } while (this.accept('comma'));
+            args.push(this.parseComparison());
+          } while (this.accept('comma') || this.accept('semicolon'));
         }
         const end = this.expect('rparen', 'Expected ")" after function arguments.');
         node = {
@@ -261,9 +305,10 @@ class Parser {
       this.expect('lbracket', 'Expected "[".');
       const indices: ExprNode[] = [];
       if (!this.isCurrent('rbracket')) {
-        do {
-          indices.push(this.parseAdditive());
-        } while (this.accept('comma'));
+        while (!this.isCurrent('rbracket')) {
+          indices.push(this.parseIndexItem());
+          if (!this.accept('comma')) break;
+        }
       }
       const end = this.expect('rbracket', 'Expected "]" after index expression.');
       node = {
@@ -275,6 +320,27 @@ class Parser {
     }
 
     return node;
+  }
+
+  private parseIndexItem(): ExprNode {
+    if (this.accept('colon')) {
+      const end = this.isCurrent('comma') || this.isCurrent('rbracket') ? undefined : this.parseAdditive();
+      return {
+        kind: 'slice',
+        end,
+        span: { start: end?.span.start ?? this.current.span.start, end: end?.span.end ?? this.current.span.start },
+      };
+    }
+
+    const start = this.parseAdditive();
+    if (!this.accept('colon')) return start;
+    const end = this.isCurrent('comma') || this.isCurrent('rbracket') ? undefined : this.parseAdditive();
+    return {
+      kind: 'slice',
+      start,
+      end,
+      span: { start: start.span.start, end: end?.span.end ?? start.span.end },
+    };
   }
 
   private parsePrimary(): ExprNode {
@@ -300,7 +366,14 @@ class Parser {
           span: token.span,
         });
       }
-      return { kind: 'reference', symbol: token.text, span: token.span };
+      let symbol = token.text;
+      let end = token.span.end;
+      while (this.accept('dot')) {
+        const part = this.expect('identifier', 'Expected identifier after ".".');
+        symbol = `${symbol}.${part.text}`;
+        end = part.span.end;
+      }
+      return { kind: 'reference', symbol, span: { start: token.span.start, end } };
     }
 
     if (this.accept('lparen')) {
@@ -356,6 +429,10 @@ export function collectReferenceOccurrences(ast: ExprNode): ReferenceOccurrence[
       case 'index':
         visit(node.target);
         node.indices.forEach(visit);
+        break;
+      case 'slice':
+        if (node.start) visit(node.start);
+        if (node.end) visit(node.end);
         break;
       case 'number':
         break;
