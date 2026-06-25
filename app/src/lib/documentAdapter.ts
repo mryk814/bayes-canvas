@@ -47,6 +47,9 @@ export function canvasToAuthoringSnapshot({
 }: CanvasProjectorInput): AuthoringSnapshot {
   const axes = buildAxes(nodes);
   const plates = buildPlates(nodes, axes);
+  const generatedObservationIds = nodes
+    .filter((node) => node.data.kind === 'likelihood' && node.data.observed)
+    .map((node) => `obs_${node.id}`);
   const entities = {
     ...Object.fromEntries(nodes.map((node) => [node.id, nodeToEntity(node)])),
     ...Object.fromEntries(
@@ -71,9 +74,7 @@ export function canvasToAuthoringSnapshot({
     entities,
     entityOrder: [
       ...nodes.map((node) => node.id),
-      ...nodes
-        .filter((node) => node.data.kind === 'likelihood' && node.data.observed)
-        .map((node) => `obs_${node.id}`),
+      ...generatedObservationIds,
     ],
     macros: buildMacros(nodes),
     notes: buildNotes(nodes),
@@ -96,6 +97,7 @@ export function canvasToAuthoringSnapshot({
       schemaVersion: '1.0.0',
       modelDocumentId: document.documentId,
       revision: 1,
+      hiddenEntityIds: generatedObservationIds,
       nodes: Object.fromEntries(nodes.map((node) => [
         node.id,
         {
@@ -151,6 +153,8 @@ export function projectToReactFlow(snapshot: AuthoringSnapshot): { nodes: Node<B
   return {
     nodes: snapshot.document.entityOrder
       .filter((entityId) => snapshot.document.entities[entityId])
+      .filter((entityId) => snapshot.document.entities[entityId].authorship !== 'generated')
+      .filter((entityId) => !snapshot.layout.hiddenEntityIds?.includes(entityId))
       .map((entityId) => {
         const entity = snapshot.document.entities[entityId];
         const layout = snapshot.layout.nodes[entityId];
@@ -266,6 +270,7 @@ function nodeToEntity(node: Node<BayesNodeData>): ModelEntity {
     valueType,
     plateIds,
     notes: data.notes,
+    authorship: 'user' as const,
   };
 
   if (data.kind === 'data') {
@@ -335,6 +340,7 @@ function likelihoodObservationData(node: Node<BayesNodeData>): ModelEntity {
     valueType: toValueType({ ...node.data, kind: 'data' }),
     plateIds: node.data.plate ? [node.data.plate] : [],
     notes: 'Generated observation binding for the likelihood node.',
+    authorship: 'generated',
   };
 }
 

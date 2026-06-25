@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compileCanvas, buildCanvasHandoff, buildCapabilityReport } from '../dist-test/lib/documentAdapter.js';
+import { compileCanvas, buildCanvasHandoff, buildCapabilityReport, projectToReactFlow } from '../dist-test/lib/documentAdapter.js';
 import { parseExpression } from '../dist-test/lib/core/expression.js';
 import { assertJsonComplexity } from '../dist-test/lib/core/migrations.js';
 import { previewPatchProposal } from '../dist-test/lib/core/patch-proposal.js';
@@ -24,6 +24,17 @@ test('compiles the canvas sample through ModelDocument and LayoutDocument', () =
   assert.equal(compiled.layout.modelDocumentId, compiled.document.documentId);
   assert.ok(compiled.semantic.symbols.alpha);
   assert.ok(compiled.semantic.dependencyEdges.some((edge) => edge.from === 'beta' && edge.to === 'mu'));
+});
+
+test('keeps generated observation data out of the projected canvas', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  assert.equal(compiled.document.entities.obs_y?.authorship, 'generated');
+  assert.equal(compiled.document.entities.y.observedDataId, 'obs_y');
+  assert.ok(compiled.layout.hiddenEntityIds?.includes('obs_y'));
+
+  const projected = projectToReactFlow({ document: compiled.document, layout: compiled.layout });
+  assert.ok(!projected.nodes.some((node) => node.id === 'obs_y'));
+  assert.ok(projected.nodes.some((node) => node.id === 'y'));
 });
 
 test('builds a contract-backed handoff bundle', () => {

@@ -80,6 +80,7 @@
         "kind": { "enum": ["data", "random_variable", "deterministic", "factor", "block_instance", "query"] },
         "valueType": { "type": "object" },
         "plateIds": { "type": "array", "items": { "type": "string" } },
+        "authorship": { "enum": ["user", "generated", "imported"] },
         "notes": { "type": "string" }
       },
       "additionalProperties": true
