@@ -7,6 +7,7 @@ import { previewPatchProposal } from '../dist-test/lib/core/patch-proposal.js';
 import { buildPortablePackage } from '../dist-test/lib/core/portable.js';
 import { validateImplementationReceipt } from '../dist-test/lib/core/receipt.js';
 import { initialEdges, initialNodes } from '../dist-test/samples/hierarchicalRegression.js';
+import { modelTemplates } from '../dist-test/samples/modelTemplates.js';
 import { minimalDistributionRegistry } from '../dist-test/lib/core/registry.js';
 import { hierarchicalRegression } from '../dist-test/lib/core/example.js';
 import { compileModel } from '../dist-test/lib/core/compiler.js';
@@ -24,6 +25,16 @@ test('compiles the canvas sample through ModelDocument and LayoutDocument', () =
   assert.equal(compiled.layout.modelDocumentId, compiled.document.documentId);
   assert.ok(compiled.semantic.symbols.alpha);
   assert.ok(compiled.semantic.dependencyEdges.some((edge) => edge.from === 'beta' && edge.to === 'mu'));
+});
+
+test('compiles model templates into canvas documents', () => {
+  assert.ok(modelTemplates.length >= 3);
+  for (const template of modelTemplates) {
+    const compiled = compileCanvas(template.nodes, template.edges);
+    assert.equal(compiled.layout.modelDocumentId, compiled.document.documentId, template.id);
+    assert.ok(compiled.document.entityOrder.length >= 4, template.id);
+    assert.ok(Array.isArray(compiled.semantic.diagnostics), template.id);
+  }
 });
 
 test('keeps generated observation data out of the projected canvas', () => {
