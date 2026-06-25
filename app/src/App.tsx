@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js';
 import {
   addEdge,
   Background,
@@ -317,6 +318,7 @@ const NODE_LAYOUT_ORIGIN_Y = 110;
 const NODE_LAYOUT_COLUMN_STEP = Math.max(...Object.values(NODE_LAYOUT_WIDTH)) + NODE_LAYOUT_GAP_X;
 const NODE_LAYOUT_ROW_STEP = NODE_LAYOUT_HEIGHT + NODE_LAYOUT_GAP_Y;
 const NODE_LAYOUT_SINK_BASE_ROW = 1;
+const elk = new ELK();
 
 const initialCanvasNodes: BayesCanvasNode[] = initialNodes.map((node) => ({
   ...node,
@@ -553,6 +555,67 @@ function takeNearestFreeY(desiredY: number, occupiedYs: number[]): number {
   }
 
   return minY + occupiedYs.length * NODE_LAYOUT_ROW_STEP;
+}
+
+async function layoutCanvasNodesWithElk(nodes: BayesCanvasNode[], edges: Edge[]): Promise<BayesCanvasNode[]> {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const graph: ElkNode = {
+    id: 'bayes-canvas-root',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'RIGHT',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.spacing.nodeNode': '54',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '96',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '42',
+      'elk.layered.spacing.edgeEdgeBetweenLayers': '18',
+      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+      'elk.layered.cycleBreaking.strategy': 'GREEDY',
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
+      'elk.padding': '[top=36,left=36,bottom=36,right=36]',
+    },
+    children: nodes.map((node) => ({
+      id: node.id,
+      width: NODE_LAYOUT_WIDTH[node.data.kind],
+      height: NODE_LAYOUT_HEIGHT,
+      layoutOptions: {
+        'elk.layered.priority.direction': String(getNodeDownstreamPriority(node)),
+      },
+    })),
+    edges: edges
+      .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+      .map((edge, index) => ({
+        id: edge.id || `edge-${index}`,
+        sources: [edge.source],
+        targets: [edge.target],
+      })),
+  };
+
+  const layout = await elk.layout(graph);
+  const layoutById = new Map((layout.children ?? []).map((node) => [node.id, node]));
+
+  return nodes.map((node) => {
+    const layoutNode = layoutById.get(node.id);
+    if (layoutNode?.x === undefined || layoutNode.y === undefined) return node;
+    return {
+      ...node,
+      position: {
+        x: Math.round(layoutNode.x),
+        y: Math.round(layoutNode.y),
+      },
+    };
+  });
+}
+
+function getNodeDownstreamPriority(node: BayesCanvasNode): number {
+  if (node.data.kind === 'likelihood') return 100;
+  if (node.data.kind === 'derived_quantity') return 90;
+  if (node.data.kind === 'model_block') return 80;
+  if (node.data.kind === 'deterministic') return 70;
+  if (node.data.observed && node.data.kind === 'data') return 10;
+  return 40;
 }
 
 function loadInitialCanvas(): CanvasState {
@@ -1969,16 +2032,32 @@ export function App() {
     ]);
   }, [patchInput]);
 
-  const resolveCanvasOverlaps = useCallback(() => {
+  const resolveCanvasOverlaps = useCallback(async () => {
     if (nodes.length < 2) return;
     const previousPositions = new Map(nodes.map((node) => [node.id, node.position]));
-    const arrangedNodes = arrangeCanvasNodes(nodes, edges).map((node) => ({ ...node, selected: false }));
+    let arrangedNodes: BayesCanvasNode[];
+    let undoMessage = 'ELKでノード配置を整理しました。';
+
+    try {
+      arrangedNodes = (await layoutCanvasNodesWithElk(nodes, edges)).map((node) => ({ ...node, selected: false }));
+      setImportError(null);
+    } catch (error) {
+      arrangedNodes = arrangeCanvasNodes(nodes, edges).map((node) => ({ ...node, selected: false }));
+      undoMessage = 'ノード配置を整理しました。';
+      setImportError({
+        title: '自動レイアウトに失敗しました',
+        detail: error instanceof Error
+          ? `${error.message}。簡易レイアウトへ切り替えました。`
+          : '簡易レイアウトへ切り替えました。',
+      });
+    }
+
     const movedCount = arrangedNodes.filter((node) => {
       const previous = previousPositions.get(node.id);
       return previous && (previous.x !== node.position.x || previous.y !== node.position.y);
     }).length;
     if (!movedCount) return;
-    setUndoState({ message: 'ノード配置を整理しました。', nodes, edges });
+    setUndoState({ message: undoMessage, nodes, edges });
     setNodes(arrangedNodes);
     setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
     setSelectedNodeId(null);
@@ -2035,7 +2114,9 @@ export function App() {
       id: 'resolve-overlaps',
       label: '重なり解消',
       group: 'Canvas',
-      run: resolveCanvasOverlaps,
+      run: () => {
+        void resolveCanvasOverlaps();
+      },
     },
     {
       id: 'go-review',
@@ -2648,7 +2729,13 @@ export function App() {
                 </button>
               </div>
               <div className="toolbar-group" aria-label="Edit actions">
-                <button disabled={nodes.length < 2} type="button" onClick={resolveCanvasOverlaps}>
+                <button
+                  disabled={nodes.length < 2}
+                  type="button"
+                  onClick={() => {
+                    void resolveCanvasOverlaps();
+                  }}
+                >
                   重なり解消
                 </button>
                 <button disabled={!selectedNode && !selectedEdge} type="button" onClick={deleteSelectedItem}>
