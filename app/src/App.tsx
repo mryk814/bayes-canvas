@@ -61,14 +61,14 @@ import { loadLatestAutosave, saveAutosave, type StoredSnapshot } from './lib/sto
 import { buildModelViewProjections, type ModelViewProjectionId } from './lib/modelViewProjections';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
-  data: 'Data',
-  deterministic: 'Deterministic',
-  derived_quantity: 'Derived quantity',
-  hyperparameter: 'Hyperparameter',
-  latent: 'Latent',
-  likelihood: 'Likelihood',
-  model_block: 'Model block',
-  parameter: 'Parameter',
+  data: 'データ',
+  deterministic: '決定式',
+  derived_quantity: '確認量',
+  hyperparameter: 'ハイパーパラメータ',
+  latent: '潜在変数',
+  likelihood: '尤度',
+  model_block: 'モデルブロック',
+  parameter: 'パラメータ',
 };
 
 type PaletteItem =
@@ -84,10 +84,10 @@ type CommandAction = {
 };
 
 const LEFT_PANEL_TABS: Array<{ id: LeftPanelTab; label: string }> = [
-  { id: 'add', label: 'Add' },
-  { id: 'structure', label: 'Structure' },
-  { id: 'inspector', label: 'Inspector' },
-  { id: 'library', label: 'Library' },
+  { id: 'add', label: '追加' },
+  { id: 'structure', label: '構造' },
+  { id: 'inspector', label: '編集' },
+  { id: 'library', label: '保存' },
 ];
 
 const PALETTE_GROUPS: Array<{
@@ -95,30 +95,30 @@ const PALETTE_GROUPS: Array<{
   items: PaletteItem[];
 }> = [
   {
-    title: 'Variables',
+    title: '変数',
     items: [
-      { type: 'node', kind: 'data', label: 'Data', note: 'Observed values' },
-      { type: 'node', kind: 'parameter', label: 'Parameter', note: 'Unknown quantity' },
-      { type: 'node', kind: 'latent', label: 'Latent', note: 'Unobserved value' },
-      { type: 'node', kind: 'deterministic', label: 'Deterministic', note: 'Derived expression' },
-      { type: 'node', kind: 'likelihood', label: 'Likelihood', note: 'Observed outcome' },
-      { type: 'node', kind: 'hyperparameter', label: 'Hyperparameter', note: 'Prior control' },
+      { type: 'node', kind: 'data', label: 'データ', note: '観測された値' },
+      { type: 'node', kind: 'parameter', label: 'パラメータ', note: '推定したい未知量' },
+      { type: 'node', kind: 'latent', label: '潜在変数', note: '直接は観測しない値' },
+      { type: 'node', kind: 'deterministic', label: '決定式', note: '式から決まる値' },
+      { type: 'node', kind: 'likelihood', label: '尤度', note: '観測データの生成過程' },
+      { type: 'node', kind: 'hyperparameter', label: 'ハイパーパラメータ', note: '事前分布の調整値' },
     ],
   },
   {
-    title: 'Patterns',
+    title: '型',
     items: [
-      { type: 'preset', preset: 'horseshoe_prior', label: 'Horseshoe prior', note: 'Apply to parameter' },
-      { type: 'preset', preset: 'linear_term', label: 'Linear term', note: 'Insert into predictor' },
-      { type: 'preset', preset: 'group_effect', label: 'Group effect', note: 'Insert varying effect' },
-      { type: 'preset', preset: 'interaction_term', label: 'Interaction', note: 'Insert product term' },
-      { type: 'node', kind: 'model_block', label: 'Model block', note: 'Opaque structure' },
+      { type: 'preset', preset: 'horseshoe_prior', label: 'Horseshoe事前分布', note: 'パラメータへ適用' },
+      { type: 'preset', preset: 'linear_term', label: '線形項', note: '予測子へ追加' },
+      { type: 'preset', preset: 'group_effect', label: 'グループ効果', note: '階層効果を追加' },
+      { type: 'preset', preset: 'interaction_term', label: '交互作用', note: '積の項を追加' },
+      { type: 'node', kind: 'model_block', label: 'モデルブロック', note: '詳細をまとめる構造' },
     ],
   },
   {
-    title: 'Outputs',
+    title: '出力',
     items: [
-      { type: 'node', kind: 'derived_quantity', label: 'Derived quantity', note: 'Target value' },
+      { type: 'node', kind: 'derived_quantity', label: '確認量', note: '見たい指標や目的量' },
     ],
   },
 ];
@@ -1031,7 +1031,7 @@ function renameIndexedSymbol(name: string, nextIndex: string): string {
 
 function formatReviewPanel(diagnostics: ReturnType<typeof compileCanvas>['semantic']['diagnostics']): string {
   if (!diagnostics.length) {
-    return 'No compiler diagnostics. Handoff is ready.';
+    return 'compiler診断はありません。受け渡しできます。';
   }
 
   return diagnostics
@@ -1072,30 +1072,30 @@ function formatHandoffMarkdown(bundle: HandoffBundle): string {
     : ['| - | - | handoff前に必須確認の質問はありません。 |'];
 
   return [
-    `# Handoff Review: ${bundle.manifest.target}`,
+    `# 受け渡しレビュー: ${bundle.manifest.target}`,
     '',
     `- Model: ${bundle.manifest.modelDocumentId}`,
     `- Revision: ${bundle.manifest.sourceRevision}`,
     `- Fingerprint: \`${bundle.manifest.fingerprintAlgorithm}:${bundle.manifest.specificationFingerprint}\``,
-    `- Diagnostics: ${bundle.diagnostics.length}`,
-    `- Blocking diagnostics: ${blockingDiagnostics.length}`,
-    `- Blocking questions: ${unresolvedQuestions.length}`,
+    `- 診断: ${bundle.diagnostics.length}`,
+    `- 受け渡し停止の診断: ${blockingDiagnostics.length}`,
+    `- 必須確認の質問: ${unresolvedQuestions.length}`,
     '',
-    '## Capability Report',
+    '## 出力先の対応状況',
     '',
-    '| Feature | Support | Entities | Note |',
+    '| 機能 | 対応 | 要素 | メモ |',
     '| --- | --- | --- | --- |',
     ...capabilityRows,
     '',
-    '## Blocking Diagnostics',
+    '## 受け渡し停止の診断',
     '',
-    '| Severity | Code | Path | Message |',
+    '| 重要度 | Code | Path | Message |',
     '| --- | --- | --- | --- |',
     ...diagnosticRows,
     '',
-    '## Unresolved Questions',
+    '## 未解決の質問',
     '',
-    '| Question | Entities | Text |',
+    '| 質問 | 要素 | 内容 |',
     '| --- | --- | --- |',
     ...questionRows,
   ].join('\n');
@@ -1106,7 +1106,7 @@ function escapeMarkdownCell(value: string): string {
 }
 
 function formatSemanticDiff(items: ReturnType<typeof diffModelDocuments>): string {
-  if (!items.length) return 'No semantic changes from the initial sample.';
+  if (!items.length) return '初期サンプルからの意味的な変更はありません。';
   return items
     .map((item) => [
       `${item.kind}: ${item.label}`,
@@ -1198,18 +1198,18 @@ export function App() {
   const handoffReadiness = blockingDiagnostics.length || blockingQuestions.length || compiledCanvas.semantic.readiness.summary.errors
     ? {
         state: 'blocked',
-        label: 'Blocked',
+        label: '要修正',
         message: 'Handoff前に止めている項目があります。',
       }
     : compiledCanvas.semantic.readiness.summary.warnings || handoffBundle.unresolvedQuestions.length
       ? {
           state: 'review',
-          label: 'Needs review',
+          label: '要確認',
           message: 'Handoff前に確認したい項目があります。',
         }
       : {
           state: 'ready',
-          label: 'Ready',
+          label: '準備OK',
           message: 'このtargetへ受け渡しできます。',
         };
   const advancedOutputText = advancedOutput === 'ir'
@@ -1302,29 +1302,29 @@ export function App() {
   );
   const reviewChecklist = useMemo(() => [
     {
-      label: 'Blocking diagnostics cleared',
+      label: '受け渡しを止める診断がない',
       done: blockingDiagnostics.length === 0,
-      detail: `${blockingDiagnostics.length} blocking`,
+      detail: `${blockingDiagnostics.length}件`,
     },
     {
-      label: 'Observed likelihood is bound',
+      label: '観測済みの尤度がある',
       done: nodes.some((node) => node.data.kind === 'likelihood' && node.data.observed),
-      detail: 'observed likelihood',
+      detail: '観測データとの接続',
     },
     {
-      label: 'QoI is defined',
+      label: '確認量が定義されている',
       done: queryNodes.length > 0,
       detail: `${queryNodes.length} QoI`,
     },
     {
-      label: 'Decision notes exist',
+      label: '判断メモが残っている',
       done: decisionNotes.length > 0,
-      detail: `${decisionNotes.length} notes`,
+      detail: `${decisionNotes.length}件`,
     },
     {
-      label: 'Target support reviewed',
+      label: '出力先の対応状況を確認済み',
       done: handoffBundle.capabilityReport.every((item) => item.support !== 'unsupported'),
-      detail: `${handoffBundle.capabilityReport.filter((item) => item.support === 'unsupported').length} unsupported`,
+      detail: `未対応 ${handoffBundle.capabilityReport.filter((item) => item.support === 'unsupported').length}件`,
     },
   ], [blockingDiagnostics.length, decisionNotes.length, handoffBundle.capabilityReport, nodes, queryNodes.length]);
   const overlapCount = useMemo(() => countNodeOverlaps(nodes), [nodes]);
@@ -1362,22 +1362,22 @@ export function App() {
     return [
       {
         id: 'blocking',
-        label: 'Blocking',
+        label: '受け渡し停止',
         diagnostics: diagnostics.filter((diagnostic) => diagnostic.blocksHandoff),
       },
       {
         id: 'error',
-        label: 'Errors',
+        label: 'エラー',
         diagnostics: diagnostics.filter((diagnostic) => diagnostic.severity === 'error' && !diagnostic.blocksHandoff),
       },
       {
         id: 'warning',
-        label: 'Warnings',
+        label: '確認',
         diagnostics: diagnostics.filter((diagnostic) => diagnostic.severity === 'warning' && !diagnostic.blocksHandoff),
       },
       {
         id: 'info',
-        label: 'Info',
+        label: '情報',
         diagnostics: diagnostics.filter((diagnostic) => diagnostic.severity === 'info' && !diagnostic.blocksHandoff),
       },
     ];
@@ -2107,100 +2107,100 @@ export function App() {
   const commands = useMemo<CommandAction[]>(() => [
     {
       id: 'add-data',
-      label: 'Add data',
-      group: 'Add',
+      label: 'データを追加',
+      group: '追加',
       run: () => addNodeFromPalette('data'),
     },
     {
       id: 'add-parameter',
-      label: 'Add parameter',
-      group: 'Add',
+      label: 'パラメータを追加',
+      group: '追加',
       run: () => addNodeFromPalette('parameter'),
     },
     {
       id: 'add-likelihood',
-      label: 'Add likelihood',
-      group: 'Add',
+      label: '尤度を追加',
+      group: '追加',
       run: () => addNodeFromPalette('likelihood'),
     },
     {
       id: 'add-deterministic',
-      label: 'Add deterministic',
-      group: 'Add',
+      label: '決定式を追加',
+      group: '追加',
       run: () => addNodeFromPalette('deterministic'),
     },
     {
       id: 'open-add',
-      label: 'Open Add panel',
-      group: 'Navigate',
+      label: '追加パネルを開く',
+      group: '移動',
       run: () => setActiveLeftPanel('add'),
     },
     ...modelTemplates.map((template) => ({
       id: `template-${template.id}`,
-      label: `Start ${template.name}`,
-      group: 'Template',
+      label: `${template.name} から始める`,
+      group: 'テンプレート',
       run: () => applyModelTemplate(template),
     })),
     {
       id: 'open-structure',
-      label: 'Open Structure panel',
-      group: 'Navigate',
+      label: '構造パネルを開く',
+      group: '移動',
       run: () => setActiveLeftPanel('structure'),
     },
     ...modelViewProjections.map((projection) => ({
       id: `view-${projection.id}`,
-      label: `Open ${projection.title} view`,
-      group: 'View',
+      label: `${projection.title} ビューを開く`,
+      group: 'ビュー',
       run: () => setActiveModelView(projection.id),
     })),
     {
       id: 'resolve-overlaps',
       label: '重なり解消',
-      group: 'Canvas',
+      group: 'キャンバス',
       run: () => {
         void resolveCanvasOverlaps();
       },
     },
     {
       id: 'go-review',
-      label: 'Go to Review',
-      group: 'Navigate',
+      label: '診断へ移動',
+      group: '移動',
       run: () => setActiveOutput('review'),
     },
     {
       id: 'add-qoi',
-      label: 'Add QoI',
-      group: 'Builder',
+      label: '確認量を追加',
+      group: '補助',
       run: addQoIFromSelection,
     },
     {
       id: 'add-model-block',
-      label: 'Add model block',
-      group: 'Builder',
+      label: 'モデルブロックを追加',
+      group: '補助',
       run: addModelBlock,
     },
     {
       id: 'prepare-handoff',
-      label: 'Prepare Handoff',
-      group: 'Navigate',
+      label: '受け渡しを準備',
+      group: '移動',
       run: () => setActiveOutput('handoff'),
     },
     {
       id: 'export-package',
-      label: 'Export package',
-      group: 'File',
+      label: 'Packageを書き出し',
+      group: 'ファイル',
       run: () => exportPortablePackageToFile(portablePackage),
     },
     {
       id: 'import-canvas',
-      label: 'Import canvas',
-      group: 'File',
+      label: 'キャンバスを読み込み',
+      group: 'ファイル',
       run: handleImport,
     },
     {
       id: 'external-model-import-prompt',
-      label: 'Copy external model import prompt',
-      group: 'File',
+      label: '外部モデル取り込みプロンプトをコピー',
+      group: 'ファイル',
       run: copyExternalImportPrompt,
     },
   ], [
@@ -2314,9 +2314,9 @@ export function App() {
 
         {pendingImport ? (
           <div className="status-banner status-undo" role="status">
-            <strong>読み込みpreview: {pendingImport.sourceName}</strong>
+            <strong>読み込みプレビュー: {pendingImport.sourceName}</strong>
             <span>
-              {pendingImport.sourceKind} / {pendingImport.summary} / blocking {pendingImport.blockingDiagnostics}
+              {pendingImport.sourceKind} / {pendingImport.summary} / 停止 {pendingImport.blockingDiagnostics}件
             </span>
             <button type="button" onClick={applyPendingImport}>
               適用
@@ -2331,7 +2331,7 @@ export function App() {
       {commandPaletteOpen ? (
         <div className="command-backdrop" role="presentation" onMouseDown={() => setCommandPaletteOpen(false)}>
           <div
-            aria-label="Command Palette"
+            aria-label="コマンドパレット"
             aria-modal="true"
             className="command-palette"
             onMouseDown={(event) => event.stopPropagation()}
@@ -2339,7 +2339,7 @@ export function App() {
           >
             <input
               autoFocus
-              placeholder="Commandを検索"
+              placeholder="操作を検索"
               value={commandQuery}
               onChange={(event) => setCommandQuery(event.target.value)}
             />
@@ -2350,7 +2350,7 @@ export function App() {
                   <small>{command.group}</small>
                 </button>
               )) : (
-                <p className="empty-note">一致するcommandはありません。</p>
+                <p className="empty-note">一致する操作はありません。</p>
               )}
             </div>
           </div>
@@ -2373,9 +2373,9 @@ export function App() {
               {activeLeftPanel === 'add'
                 ? 'モデル要素'
                 : activeLeftPanel === 'structure'
-                  ? `${plateRows.length} plates`
+                  ? `${plateRows.length}件のplate`
                   : activeLeftPanel === 'library'
-                    ? `${savedModels.length} snapshots`
+                    ? `${savedModels.length}件のsnapshot`
                     : selectedKindLabel}
             </span>
           </div>
@@ -2397,7 +2397,7 @@ export function App() {
             <div className="add-panel">
               <div className="template-panel">
                 <div className="panel-title compact">
-                  <h2>Templates</h2>
+                  <h2>テンプレート</h2>
                   <span>{modelTemplates.length}</span>
                 </div>
                 <div className="template-list">
@@ -2435,7 +2435,7 @@ export function App() {
           {activeLeftPanel === 'structure' ? (
             <div className="plate-panel">
               <div className="panel-title compact">
-                <h2>Plates</h2>
+                <h2>プレート</h2>
                 <span>{plateRows.length}</span>
               </div>
               <div className="plate-list">
@@ -2462,13 +2462,13 @@ export function App() {
                         onBlur={(event) => updatePlateSize(plate.id, event.target.value)}
                       />
                     </label>
-                    <span>{plate.nodeCount} nodes</span>
+                    <span>{plate.nodeCount}ノード</span>
                   </div>
                 ))}
                 {!plateRows.length ? <p className="empty-note">plateを持つノードはまだありません。</p> : null}
               </div>
               <button disabled={!selectedNodeId} type="button" onClick={addPlateToSelection}>
-                選択ノードにtime plate
+                選択ノードにtime plateを追加
               </button>
               {modelIr.indexMappings.length ? (
                 <div className="mapping-list">
@@ -2486,7 +2486,7 @@ export function App() {
             <div className="library-panel">
               <div className="template-panel">
                 <div className="panel-title compact">
-                  <h2>Templates</h2>
+                  <h2>テンプレート</h2>
                   <span>{modelTemplates.length}</span>
                 </div>
                 <div className="template-list">
@@ -2534,7 +2534,7 @@ export function App() {
           {activeLeftPanel === 'inspector' ? (
             <div className="editor-panel">
               <div className="panel-title compact">
-                <h2 ref={editorHeadingRef} tabIndex={-1}>Inspector</h2>
+                <h2 ref={editorHeadingRef} tabIndex={-1}>編集</h2>
                 <span>{selectedKindLabel}</span>
               </div>
             {selectedData ? (
@@ -2543,7 +2543,7 @@ export function App() {
                   選択中を削除
                 </button>
                 <div className="inspector-section">
-                  <div className="inspector-section-title">Definition</div>
+                  <div className="inspector-section-title">基本</div>
                   <label>
                     名前
                     <input
@@ -2619,7 +2619,7 @@ export function App() {
                   ) : null}
                 </div>
                 <div className="inspector-section">
-                  <div className="inspector-section-title">Model</div>
+                  <div className="inspector-section-title">モデル定義</div>
                   {showsObservedEditor ? (
                     <label className="checkbox-row">
                       <input
@@ -2671,7 +2671,7 @@ export function App() {
                   ) : null}
                 </div>
                 <div className="inspector-section">
-                  <div className="inspector-section-title">Notes</div>
+                  <div className="inspector-section-title">メモ</div>
                   <label>
                     実装メモ
                     <input
@@ -2690,7 +2690,7 @@ export function App() {
                   </label>
                 </div>
                 <div className="inspector-section">
-                  <div className="inspector-section-title">Diagnostics</div>
+                  <div className="inspector-section-title">診断</div>
                   {selectedDiagnostics.length || selectedCompilerDiagnostics.length ? (
                     <div className="diagnostic-list">
                       {selectedDiagnostics.map((diagnostic) => (
@@ -2741,7 +2741,7 @@ export function App() {
           <div className="canvas-toolbar">
             <div className="toolbar-title">
               <strong>{compiledCanvas.document.model.name}</strong>
-              <span>{activeProjection.title} view</span>
+              <span>{activeProjection.title}ビュー</span>
               <span className={overlapCount ? 'layout-status layout-status-warning' : 'layout-status'}>
                 重なり {overlapCount}
               </span>
@@ -2761,18 +2761,18 @@ export function App() {
               ))}
             </div>
             <div className="toolbar-actions">
-              <div className="toolbar-group toolbar-primary" aria-label="Primary actions">
+              <div className="toolbar-group toolbar-primary" aria-label="主要操作">
                 <button type="button" onClick={() => setCommandPaletteOpen(true)}>
-                  Command
+                  操作検索
                 </button>
                 <button type="button" onClick={() => setActiveOutput('review')}>
-                  Review
+                  診断
                 </button>
                 <button type="button" onClick={() => setActiveOutput('handoff')}>
-                  Handoff
+                  受け渡し
                 </button>
               </div>
-              <div className="toolbar-group" aria-label="File actions">
+              <div className="toolbar-group" aria-label="ファイル操作">
                 <button type="button" onClick={handleSave}>
                   保存
                 </button>
@@ -2786,7 +2786,7 @@ export function App() {
                   書き出し
                 </button>
               </div>
-              <div className="toolbar-group" aria-label="Edit actions">
+              <div className="toolbar-group" aria-label="編集操作">
                 <button
                   disabled={nodes.length < 2}
                   type="button"
@@ -2800,7 +2800,7 @@ export function App() {
                   削除
                 </button>
               </div>
-              <div className="toolbar-group" aria-label="Advanced actions">
+              <div className="toolbar-group" aria-label="高度な操作">
                 <button type="button" onClick={() => exportPortablePackageToFile(portablePackage)}>
                   Package
                 </button>
@@ -2808,7 +2808,7 @@ export function App() {
                   IRコピー
                 </button>
               </div>
-              <div className="toolbar-group toolbar-danger" aria-label="Danger actions">
+              <div className="toolbar-group toolbar-danger" aria-label="危険な操作">
                 <button type="button" onClick={resetSample}>
                   初期化
                 </button>
@@ -2852,16 +2852,16 @@ export function App() {
             <h2>受け渡し</h2>
             <span>生成される内容</span>
           </div>
-          <section className={`readiness-card readiness-${handoffReadiness.state}`} aria-label="Handoff readiness">
+          <section className={`readiness-card readiness-${handoffReadiness.state}`} aria-label="受け渡し準備状況">
             <div className="readiness-heading">
               <span>{handoffReadiness.label}</span>
               <strong>{getPromptTargetLabel(promptTarget)}</strong>
             </div>
             <p>{handoffReadiness.message}</p>
             <div className="readiness-metrics">
-              <span>{compiledCanvas.semantic.readiness.summary.errors} errors</span>
-              <span>{compiledCanvas.semantic.readiness.summary.warnings} warnings</span>
-              <span>{blockingQuestions.length} questions</span>
+              <span>{compiledCanvas.semantic.readiness.summary.errors}エラー</span>
+              <span>{compiledCanvas.semantic.readiness.summary.warnings}確認</span>
+              <span>{blockingQuestions.length}質問</span>
             </div>
             {blockingDiagnostics.length ? (
               <div className="readiness-blockers">
@@ -2883,16 +2883,16 @@ export function App() {
             ) : null}
             <div className="readiness-actions">
               <button type="button" onClick={() => setActiveOutput('review')}>
-                Review issues
+                診断を見る
               </button>
               <button type="button" onClick={() => setActiveOutput('handoff')}>
-                Prepare handoff
+                受け渡しを準備
               </button>
             </div>
           </section>
           <div className="outline-panel">
             <div className="panel-title compact">
-              <h2>Outline</h2>
+              <h2>構成</h2>
               <span>{compiledCanvas.document.entityOrder.length}</span>
             </div>
             <div className="outline-list">
@@ -2912,7 +2912,7 @@ export function App() {
                     >
                       <strong>{entity.symbol}</strong>
                       <span>{entity.kind}</span>
-                      <small>{references.length} refs</small>
+                      <small>{references.length}参照</small>
                     </button>
                   );
                 })}
@@ -2920,14 +2920,14 @@ export function App() {
           </div>
           <div className="issues-panel">
             <div className="panel-title compact">
-              <h2>Review</h2>
-              <span>{compiledCanvas.semantic.readiness.handoff === 'ready' ? 'ready' : 'blocked'}</span>
+              <h2>診断</h2>
+              <span>{compiledCanvas.semantic.readiness.handoff === 'ready' ? '準備OK' : '要修正'}</span>
             </div>
             <div className="issue-summary">
-              <span>{compiledCanvas.semantic.readiness.summary.errors} errors</span>
-              <span>{compiledCanvas.semantic.readiness.summary.warnings} warnings</span>
-              <span>{compiledCanvas.semantic.readiness.summary.infos} info</span>
-              <span>{blockingDiagnostics.length} blocking</span>
+              <span>{compiledCanvas.semantic.readiness.summary.errors}エラー</span>
+              <span>{compiledCanvas.semantic.readiness.summary.warnings}確認</span>
+              <span>{compiledCanvas.semantic.readiness.summary.infos}情報</span>
+              <span>{blockingDiagnostics.length}停止</span>
             </div>
             {compiledCanvas.semantic.diagnostics.length ? (
               <div className="issue-list">
@@ -2952,7 +2952,7 @@ export function App() {
                           >
                             <div>
                               <strong>{diagnostic.code}</strong>
-                              <small>{diagnostic.stage}{diagnostic.blocksHandoff ? ' / blocks handoff' : ''}</small>
+                              <small>{diagnostic.stage}{diagnostic.blocksHandoff ? ' / 受け渡し停止' : ''}</small>
                             </div>
                             <span>{diagnostic.message}</span>
                           </button>
@@ -2968,30 +2968,30 @@ export function App() {
           </div>
           <div className="assistant-panel">
             <div className="panel-title compact">
-              <h2>Design Assistants</h2>
+              <h2>設計補助</h2>
               <span>{reviewChecklist.filter((item) => item.done).length}/{reviewChecklist.length}</span>
             </div>
             <div className="assistant-grid">
               <button type="button" onClick={() => setActiveLeftPanel('library')}>
-                <strong>Interview / Templates</strong>
-                <span>{modelTemplates.length} starting points</span>
+                <strong>聞き取り / テンプレート</strong>
+                <span>{modelTemplates.length}個の出発点</span>
               </button>
               <button type="button" onClick={addQoIFromSelection}>
-                <strong>QoI Builder</strong>
-                <span>{queryNodes.length} quantities</span>
+                <strong>確認量ビルダー</strong>
+                <span>{queryNodes.length}個の確認量</span>
               </button>
               <button type="button" onClick={addModelBlock}>
-                <strong>Block Inspector</strong>
-                <span>{blockNodes.length} blocks</span>
+                <strong>ブロック確認</strong>
+                <span>{blockNodes.length}個のブロック</span>
               </button>
               <button type="button" onClick={applyHorseshoePrior}>
-                <strong>Prior Assistant</strong>
-                <span>{selectedData ? selectedData.name : 'select or create'}</span>
+                <strong>事前分布補助</strong>
+                <span>{selectedData ? selectedData.name : '選択または作成'}</span>
               </button>
             </div>
             <div className="schema-assistant">
               <label>
-                Schema Importer
+                スキーマ取り込み
                 <textarea value={schemaInput} onChange={(event) => setSchemaInput(event.target.value)} />
               </label>
               <button type="button" onClick={importSchemaColumns}>列をDataノード化</button>
@@ -2999,7 +2999,7 @@ export function App() {
             <div className="checklist-list">
               {reviewChecklist.map((item) => (
                 <div className={item.done ? 'checklist-item is-done' : 'checklist-item'} key={item.label}>
-                  <strong>{item.done ? 'done' : 'todo'}</strong>
+                  <strong>{item.done ? '完了' : '未了'}</strong>
                   <span>{item.label}</span>
                   <small>{item.detail}</small>
                 </div>
@@ -3007,7 +3007,7 @@ export function App() {
             </div>
             <div className="decision-list">
               <div className="assistant-subtitle">
-                <span>Decision Log</span>
+                <span>判断メモ</span>
                 <strong>{decisionNotes.length}</strong>
               </div>
               {decisionNotes.slice(0, 4).map((note) => (
@@ -3016,16 +3016,16 @@ export function App() {
                   <small>{note.text}</small>
                 </button>
               ))}
-              {!decisionNotes.length ? <p className="empty-note">ノートやprior rationaleはまだありません。</p> : null}
+              {!decisionNotes.length ? <p className="empty-note">ノートや事前分布の理由はまだありません。</p> : null}
             </div>
             <div className="assistant-grid">
               <button disabled={!selectedNodeId} type="button" onClick={() => setFocusNodeId(selectedNodeId)}>
-                <strong>Dependency Slice</strong>
-                <span>{focusNodeId ? 'focused' : 'selected node'}</span>
+                <strong>依存関係だけ表示</strong>
+                <span>{focusNodeId ? '絞り込み中' : '選択ノード'}</span>
               </button>
               <button disabled={!focusNodeId} type="button" onClick={() => setFocusNodeId(null)}>
-                <strong>Clear Focus</strong>
-                <span>{focusedNodeIds ? `${focusedNodeIds.size} visible` : 'all visible'}</span>
+                <strong>絞り込み解除</strong>
+                <span>{focusedNodeIds ? `${focusedNodeIds.size}件表示` : 'すべて表示'}</span>
               </button>
             </div>
           </div>
@@ -3052,7 +3052,7 @@ export function App() {
               tabIndex={activeOutput === 'review' ? 0 : -1}
               type="button"
             >
-              Review
+              診断
             </button>
             <button
               aria-controls="output-panel"
@@ -3064,7 +3064,7 @@ export function App() {
               tabIndex={activeOutput === 'handoff' ? 0 : -1}
               type="button"
             >
-              Handoff
+              受け渡し
             </button>
             <button
               aria-controls="output-panel"
@@ -3076,7 +3076,7 @@ export function App() {
               tabIndex={activeOutput === 'advanced' ? 0 : -1}
               type="button"
             >
-              Advanced
+              詳細
             </button>
           </div>
           <div
@@ -3097,7 +3097,7 @@ export function App() {
                   {activeOutput === 'review'
                     ? '診断一覧'
                     : activeOutput === 'handoff'
-                      ? '受け渡しsummary'
+                      ? '受け渡しサマリー'
                       : advancedOutput === 'ir'
                         ? 'JSON契約'
                         : advancedOutput === 'prompt'
@@ -3115,7 +3115,7 @@ export function App() {
                   </button>
                 ) : null}
                 {activeOutput === 'advanced' ? (
-                  <div className="segmented-control" aria-label="advanced output">
+                  <div className="segmented-control" aria-label="詳細出力">
                     <button
                       type="button"
                       className={advancedOutput === 'ir' ? 'is-active' : ''}
@@ -3147,7 +3147,7 @@ export function App() {
                   </div>
                 ) : null}
                 {activeOutput === 'handoff' ? (
-                  <div className="segmented-control" aria-label="handoff preview format">
+                  <div className="segmented-control" aria-label="受け渡しプレビュー形式">
                     <button
                       type="button"
                       className={handoffPreviewFormat === 'markdown' ? 'is-active' : ''}
@@ -3186,14 +3186,14 @@ export function App() {
           </div>
           <div className="receipt-panel">
             <div className="panel-title compact">
-              <h2>Receipt</h2>
+              <h2>実装対応表</h2>
               <button type="button" onClick={handleReceiptImport}>読込</button>
             </div>
             {receipt ? (
               <div className="receipt-summary">
                 <strong>{receipt.backend}</strong>
-                <span>{receipt.mappings.length} mappings</span>
-                <span>{receipt.deviations.length + receipt.addedAssumptions.length + receipt.approximations.length} review items</span>
+                <span>{receipt.mappings.length}件の対応</span>
+                <span>{receipt.deviations.length + receipt.addedAssumptions.length + receipt.approximations.length}件の確認項目</span>
                 {receiptFingerprintStatus ? (
                   <span className={receiptFingerprintStatus.matches ? 'receipt-match' : 'receipt-mismatch'}>
                     {receiptFingerprintStatus.message}
@@ -3223,7 +3223,7 @@ export function App() {
             ) : null}
             <textarea
               aria-label="JSON Patch proposal"
-              placeholder="AI patch proposal JSON"
+              placeholder="AI patch proposal JSONを貼り付け"
               value={patchInput}
               onChange={(event) => setPatchInput(event.target.value)}
             />

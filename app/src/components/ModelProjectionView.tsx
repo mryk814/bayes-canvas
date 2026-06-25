@@ -22,7 +22,7 @@ export function ModelProjectionView({
           コピー
         </button>
       </div>
-      <div className="projection-metrics" aria-label={`${projection.title} metrics`}>
+      <div className="projection-metrics" aria-label={`${projection.title}の指標`}>
         {projection.metrics.map((metric) => (
           <div key={`${projection.id}-${metric.label}`}>
             <span>{metric.value}</span>
@@ -30,7 +30,7 @@ export function ModelProjectionView({
           </div>
         ))}
       </div>
-      <div className="projection-consumes" aria-label="Projection sources">
+      <div className="projection-consumes" aria-label="ビューが参照する正本">
         {projection.consumes.map((use) => (
           <span key={`${projection.id}-${use.source}`}>
             {use.source}: {use.fields.join(', ')}

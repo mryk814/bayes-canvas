@@ -119,8 +119,8 @@ function attachSharedProjectionData({
 }): ModelViewProjection {
   const diagnosticSection: ProjectionSection = {
     id: 'diagnostics',
-    title: 'Diagnostics',
-    summary: diagnostics.length ? `${diagnostics.length} compiler diagnostics` : 'No compiler diagnostics',
+    title: '診断',
+    summary: diagnostics.length ? `${diagnostics.length}件のcompiler診断` : 'compiler診断はありません',
     rows: diagnostics.length
       ? diagnostics.map((diagnostic) => ({
           id: diagnostic.id,
@@ -132,7 +132,7 @@ function attachSharedProjectionData({
         }))
       : [{
           id: 'diagnostics-empty',
-          text: 'No compiler diagnostics. All views point at the same clean SemanticModel.',
+          text: 'compiler診断はありません。すべてのビューが同じSemanticModelを参照しています。',
           tone: 'success',
         }],
   };
@@ -157,8 +157,8 @@ function buildCanvasProjection(
   const visibleEntities = orderedEntities(document).filter((entity) => entity.authorship !== 'generated');
   return {
     id: 'canvas',
-    title: 'Canvas',
-    purpose: 'Spatial editing and dependency overview for the canonical model.',
+    title: 'キャンバス',
+    purpose: '正本モデルの依存関係を、図として編集・確認するビュー。',
     source,
     consumes: [
       { source: 'ModelDocument', fields: ['entities', 'entityOrder', 'plates', 'axes'] },
@@ -166,16 +166,16 @@ function buildCanvasProjection(
       { source: 'SemanticModel', fields: ['dependencyEdges', 'diagnostics'] },
     ],
     metrics: [
-      { label: 'entities', value: String(visibleEntities.length) },
-      { label: 'dependencies', value: String(semantic.dependencyEdges.length) },
-      { label: 'plates', value: String(Object.keys(document.plates).length) },
+      { label: '要素', value: String(visibleEntities.length) },
+      { label: '依存', value: String(semantic.dependencyEdges.length) },
+      { label: 'plate', value: String(Object.keys(document.plates).length) },
     ],
     entityIds: visibleEntities.map((entity) => entity.id),
     sections: [
       {
         id: 'canvas-entities',
-        title: 'Visible entities',
-        summary: 'Canvas nodes are layout state over the same ModelDocument entities.',
+        title: '表示中の要素',
+        summary: 'キャンバスのノードは、同じModelDocument要素を図として配置したものです。',
         rows: visibleEntities.map((entity) => ({
           id: `canvas-${entity.id}`,
           text: `${entity.symbol} (${formatEntityKind(entity)})`,
@@ -198,17 +198,17 @@ function buildStoryProjection(
 
   return {
     id: 'story',
-    title: 'Story',
-    purpose: 'Readable generative explanation generated from ModelDocument and SemanticModel.',
+    title: '説明',
+    purpose: 'ModelDocumentとSemanticModelから生成した、読みやすい生成過程の説明。',
     source,
     consumes: [
       { source: 'ModelDocument', fields: ['entities', 'entityOrder', 'plates', 'axes'] },
       { source: 'SemanticModel', fields: ['symbols', 'dependencyEdges', 'diagnostics'] },
     ],
     metrics: [
-      { label: 'steps', value: String(sections.reduce((total, section) => total + section.rows.length, 0)) },
-      { label: 'symbols', value: String(Object.keys(semantic.symbols).length) },
-      { label: 'scopes', value: String(sections.length) },
+      { label: '手順', value: String(sections.reduce((total, section) => total + section.rows.length, 0)) },
+      { label: '記号', value: String(Object.keys(semantic.symbols).length) },
+      { label: '範囲', value: String(sections.length) },
     ],
     entityIds: userEntities.map((entity) => entity.id),
     sections,
@@ -229,8 +229,8 @@ function buildEquationProjection(
   const sections = compactSections([
     {
       id: 'equation-random',
-      title: 'Priors and likelihood',
-      summary: `${randomVariables.length} random variables`,
+      title: '事前分布と尤度',
+      summary: `${randomVariables.length}個の確率変数`,
       rows: randomVariables.map((entity) => ({
         id: `equation-rv-${entity.id}`,
         text: `${entity.symbol} ~ ${formatDistributionCall(entity.distribution.distributionId, entity.distribution.args)}`,
@@ -241,8 +241,8 @@ function buildEquationProjection(
     },
     {
       id: 'equation-deterministic',
-      title: 'Deterministic equations',
-      summary: `${deterministic.length} expressions`,
+      title: '決定式',
+      summary: `${deterministic.length}個の式`,
       rows: deterministic.map((entity) => ({
         id: `equation-det-${entity.id}`,
         text: `${entity.symbol} = ${entity.expression.source}`,
@@ -253,8 +253,8 @@ function buildEquationProjection(
     },
     {
       id: 'equation-query',
-      title: 'Quantities of interest',
-      summary: `${queries.length} queries`,
+      title: '確認量',
+      summary: `${queries.length}個のquery`,
       rows: queries.map((entity) => ({
         id: `equation-query-${entity.id}`,
         text: `${entity.symbol} = ${entity.expression.source}`,
@@ -265,8 +265,8 @@ function buildEquationProjection(
     },
     {
       id: 'equation-factor',
-      title: 'Factor contributions',
-      summary: `${factors.length} factors`,
+      title: 'Factor寄与',
+      summary: `${factors.length}個のfactor`,
       rows: factors.map((entity) => ({
         id: `equation-factor-${entity.id}`,
         text: `${entity.symbol}: ${entity.logDensity.source}`,
@@ -277,8 +277,8 @@ function buildEquationProjection(
     },
     {
       id: 'equation-compiler',
-      title: 'Compiler expression sources',
-      summary: 'Expression AST inputs used by SemanticModel.',
+      title: 'compiler式ソース',
+      summary: 'SemanticModelが使うExpression AST入力。',
       rows: compilerExpressions.map((expression) => ({
         id: `compiler-${expression.path}`,
         text: expression.source.source,
@@ -292,17 +292,17 @@ function buildEquationProjection(
 
   return {
     id: 'equations',
-    title: 'Equations',
-    purpose: 'Compact mathematical review kept aligned with compiler expression sources.',
+    title: '数式',
+    purpose: 'compilerの式ソースと揃えて確認する、数式中心のビュー。',
     source,
     consumes: [
       { source: 'ModelDocument', fields: ['entities.*.distribution', 'entities.*.expression', 'entities.*.valueType'] },
       { source: 'SemanticModel', fields: ['expressions', 'symbols', 'diagnostics'] },
     ],
     metrics: [
-      { label: 'random vars', value: String(randomVariables.length) },
-      { label: 'expressions', value: String(compilerExpressions.length) },
-      { label: 'queries', value: String(queries.length) },
+      { label: '確率変数', value: String(randomVariables.length) },
+      { label: '式', value: String(compilerExpressions.length) },
+      { label: 'query', value: String(queries.length) },
     ],
     entityIds: entities.map((entity) => entity.id),
     sections,
@@ -319,8 +319,8 @@ function buildStructureProjection(
   const sections: ProjectionSection[] = [
     {
       id: 'structure-axes',
-      title: 'Axes',
-      summary: `${Object.keys(document.axes).length} axes`,
+      title: '軸',
+      summary: `${Object.keys(document.axes).length}個の軸`,
       rows: Object.values(document.axes).map((axis) => ({
         id: `axis-${axis.id}`,
         text: `${axis.id}: ${axis.symbol} = ${axis.size.source}`,
@@ -330,8 +330,8 @@ function buildStructureProjection(
     },
     {
       id: 'structure-plates',
-      title: 'Plates',
-      summary: `${Object.keys(document.plates).length} plates`,
+      title: 'プレート',
+      summary: `${Object.keys(document.plates).length}個のplate`,
       rows: Object.values(document.plates).map((plate) => ({
         id: `plate-${plate.id}`,
         text: formatPlateLine(document, plate),
@@ -341,8 +341,8 @@ function buildStructureProjection(
     },
     {
       id: 'structure-dimensions',
-      title: 'Batch and event dimensions',
-      summary: `${entities.length} entities`,
+      title: 'Batch / event次元',
+      summary: `${entities.length}個の要素`,
       rows: entities.map((entity) => ({
         id: `dims-${entity.id}`,
         text: `${entity.symbol}: ${formatAxisUses(entity.valueType.axes)}`,
@@ -353,20 +353,20 @@ function buildStructureProjection(
     },
     {
       id: 'structure-index-mapping',
-      title: 'Index mappings',
-      summary: indexMappings.length ? `${indexMappings.length} mappings` : 'No index mapping data detected',
+      title: 'Index対応',
+      summary: indexMappings.length ? `${indexMappings.length}件の対応` : 'index対応データはありません',
       rows: indexMappings.length
         ? indexMappings
         : [{
             id: 'index-mapping-empty',
-            text: 'No index mapping data variables were detected.',
+            text: 'index対応用のデータ変数は見つかりませんでした。',
             tone: 'muted',
           }],
     },
     {
       id: 'structure-dependencies',
-      title: 'Semantic dependencies',
-      summary: `${semantic.dependencyEdges.length} compiler edges`,
+      title: '意味的な依存関係',
+      summary: `${semantic.dependencyEdges.length}本のcompiler edge`,
       rows: semantic.dependencyEdges.map((edge, index) => ({
         id: `semantic-edge-${index}-${edge.from}-${edge.to}`,
         text: `${entitySymbol(document, edge.from)} -> ${entitySymbol(document, edge.to)}`,
@@ -379,17 +379,17 @@ function buildStructureProjection(
 
   return {
     id: 'structure',
-    title: 'Structure',
-    purpose: 'Axes, plates, shapes, nesting, index mappings, and semantic dependencies.',
+    title: '構造',
+    purpose: '軸、plate、shape、入れ子、index対応、意味的な依存関係を確認するビュー。',
     source,
     consumes: [
       { source: 'ModelDocument', fields: ['axes', 'plates', 'entities.*.valueType', 'entities.*.plateIds'] },
       { source: 'SemanticModel', fields: ['dependencyEdges', 'diagnostics'] },
     ],
     metrics: [
-      { label: 'axes', value: String(Object.keys(document.axes).length) },
-      { label: 'plates', value: String(Object.keys(document.plates).length) },
-      { label: 'mappings', value: String(indexMappings.length) },
+      { label: '軸', value: String(Object.keys(document.axes).length) },
+      { label: 'plate', value: String(Object.keys(document.plates).length) },
+      { label: '対応', value: String(indexMappings.length) },
     ],
     entityIds: entities.map((entity) => entity.id),
     sections,
@@ -418,26 +418,26 @@ function buildContractProjection(
   const sections: ProjectionSection[] = [
     {
       id: 'contract-observed',
-      title: 'Observed data bindings',
-      summary: observedBindings.length ? `${observedBindings.length} bindings` : 'No observed bindings',
+      title: '観測データの対応',
+      summary: observedBindings.length ? `${observedBindings.length}件の対応` : '観測データ対応はありません',
       rows: observedBindings.length
         ? observedBindings.map((entity) => ({
             id: `binding-${entity.id}`,
             text: `${entity.symbol} -> ${entity.observedDataId}`,
-            detail: entity.observationProcess ? formatObservationProcess(entity.observationProcess.kind) : 'exact observation',
+            detail: entity.observationProcess ? formatObservationProcess(entity.observationProcess.kind) : 'そのまま観測',
             entityIds: [entity.id, entity.observedDataId!],
             monospace: true,
           }))
         : [{
             id: 'binding-empty',
-            text: 'No observed random variable bindings are declared.',
+            text: '観測データに対応する確率変数が宣言されていません。',
             tone: 'warning',
           }],
     },
     {
       id: 'contract-qoi',
-      title: 'Quantities of interest',
-      summary: queries.length ? `${queries.length} query entities` : 'No quantities declared',
+      title: '確認量',
+      summary: queries.length ? `${queries.length}個のquery要素` : '確認量はありません',
       rows: queries.length
         ? queries.map((entity) => ({
             id: `qoi-${entity.id}`,
@@ -448,14 +448,14 @@ function buildContractProjection(
           }))
         : [{
             id: 'qoi-empty',
-            text: 'No quantity of interest is declared.',
+            text: '確認量が宣言されていません。',
             tone: 'warning',
           }],
     },
     {
       id: 'contract-notes',
-      title: 'Assumptions and decisions',
-      summary: notes.length ? `${notes.length} notes` : 'No notes',
+      title: '仮定と判断',
+      summary: notes.length ? `${notes.length}件のメモ` : 'メモはありません',
       rows: notes.length
         ? notes.map((note) => ({
             id: `note-${note.id}`,
@@ -466,41 +466,41 @@ function buildContractProjection(
           }))
         : [{
             id: 'notes-empty',
-            text: 'No assumptions, decisions, or review questions are recorded.',
+            text: '仮定、判断、確認質問はまだ記録されていません。',
             tone: 'muted',
           }],
     },
     {
       id: 'contract-capability',
-      title: 'Target capability report',
-      summary: handoff ? `${handoff.manifest.target} target` : 'No handoff target selected',
+      title: '出力先の対応状況',
+      summary: handoff ? `${handoff.manifest.target} target` : '受け渡し先が未選択です',
       rows: capabilityRows.length
         ? capabilityRows
         : [{
             id: 'capability-empty',
-            text: 'Capability report is not available for this projection.',
+            text: 'このビューでは対応状況レポートを利用できません。',
             tone: 'muted',
           }],
     },
     {
       id: 'contract-implementation',
-      title: 'Implementation contract',
+      title: '実装契約',
       summary: handoff ? handoff.manifest.specificationFingerprint.slice(0, 12) : undefined,
       rows: handoff
         ? [
             {
               id: 'contract-preserve-ids',
-              text: `Preserve entity IDs: ${handoff.implementationContract.preserveEntityIds ? 'yes' : 'no'}`,
+              text: `entity IDを維持: ${handoff.implementationContract.preserveEntityIds ? 'yes' : 'no'}`,
               tone: 'success',
             },
             {
               id: 'contract-assumptions',
-              text: `Do not invent assumptions: ${handoff.implementationContract.doNotInventAssumptions ? 'yes' : 'no'}`,
+              text: `仮定を勝手に増やさない: ${handoff.implementationContract.doNotInventAssumptions ? 'yes' : 'no'}`,
               tone: 'success',
             },
             {
               id: 'contract-deviations',
-              text: `Report deviations: ${handoff.implementationContract.reportDeviations ? 'yes' : 'no'}`,
+              text: `差分を報告: ${handoff.implementationContract.reportDeviations ? 'yes' : 'no'}`,
               tone: 'success',
             },
             {
@@ -511,7 +511,7 @@ function buildContractProjection(
           ]
         : [{
             id: 'contract-empty',
-            text: 'No handoff bundle is available.',
+            text: '受け渡しbundleはまだ利用できません。',
             tone: 'muted',
           }],
     },
@@ -519,8 +519,8 @@ function buildContractProjection(
 
   return {
     id: 'contract',
-    title: 'Contract',
-    purpose: 'Implementation and review handoff generated from the same canonical document.',
+    title: '契約',
+    purpose: '同じ正本ドキュメントから生成される、実装・レビュー用の受け渡し情報。',
     source,
     consumes: [
       { source: 'ModelDocument', fields: ['entities', 'notes', 'noteOrder'] },
@@ -528,9 +528,9 @@ function buildContractProjection(
       { source: 'HandoffBundle', fields: ['manifest', 'capabilityReport', 'implementationContract'] },
     ],
     metrics: [
-      { label: 'bindings', value: String(observedBindings.length) },
-      { label: 'questions', value: String(handoff?.unresolvedQuestions.length ?? 0) },
-      { label: 'capabilities', value: String(handoff?.capabilityReport.length ?? 0) },
+      { label: '対応', value: String(observedBindings.length) },
+      { label: '質問', value: String(handoff?.unresolvedQuestions.length ?? 0) },
+      { label: '対応状況', value: String(handoff?.capabilityReport.length ?? 0) },
     ],
     entityIds: unique([
       ...observedBindings.flatMap((entity) => [entity.id, entity.observedDataId!]),
@@ -562,8 +562,8 @@ function groupEntitiesForStory(document: ModelDocument, entities: ModelEntity[])
       const plate = document.plates[sectionId];
       return {
         id: `story-${sectionId}`,
-        title: plate ? `For each ${plate.label}` : 'Global story',
-        summary: plate ? formatPlateLine(document, plate) : 'Model-level declarations',
+        title: plate ? `${plate.label}ごと` : '全体の流れ',
+        summary: plate ? formatPlateLine(document, plate) : 'モデル全体の宣言',
         rows: (groups.get(sectionId) ?? []).map((entity) => ({
           id: `story-${entity.id}`,
           text: formatStoryLine(document, entity),
@@ -604,10 +604,10 @@ function inferIndexMappings(document: ModelDocument): ProjectionLine[] {
     const fromPlate = fromPlateId ? document.plates[fromPlateId] : undefined;
     const targetPlate = document.plates[targetPlateId];
     if (!fromPlateId || !fromPlate || !targetPlate) {
-      mappings.push({
-        id: `index-${entity.id}`,
-        text: `${entity.symbol}: index data`,
-        detail: 'Target plate is not declared yet.',
+    mappings.push({
+      id: `index-${entity.id}`,
+      text: `${entity.symbol}: index data`,
+      detail: '対応先のplateがまだ宣言されていません。',
         entityId: entity.id,
         tone: 'warning',
         monospace: true,
@@ -618,7 +618,7 @@ function inferIndexMappings(document: ModelDocument): ProjectionLine[] {
     mappings.push({
       id: `index-${entity.id}`,
       text: `${entity.symbol}[${fromPlate.indexSymbol}]: ${fromPlateId} -> ${targetPlateId}`,
-      detail: `${fromPlate.label} index maps into ${targetPlate.label}`,
+      detail: `${fromPlate.label}のindexを${targetPlate.label}へ対応付け`,
       entityId: entity.id,
       monospace: true,
     });
@@ -674,7 +674,7 @@ function formatProjectionText(projection: Omit<ModelViewProjection, 'copyText'>)
     '',
     `Source: ${projection.source.documentId} rev ${projection.source.revision} / compiler ${projection.source.compilerVersion}`,
     '',
-    'Consumes:',
+    '参照している正本:',
     ...projection.consumes.map((use) => `- ${use.source}: ${use.fields.join(', ')}`),
     '',
     ...projection.sections.flatMap((section) => [
