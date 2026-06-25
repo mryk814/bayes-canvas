@@ -42,6 +42,7 @@ import { modelTemplates, type ModelTemplate } from './samples/modelTemplates';
 import { TexMath } from './components/TexMath';
 import { DistributionEditor } from './components/DistributionEditor';
 import { MathView } from './components/MathView';
+import { ModelProjectionView } from './components/ModelProjectionView';
 import {
   buildCanvasHandoff,
   buildCanvasPortablePackage,
@@ -57,6 +58,7 @@ import type { PatchPreview } from './lib/core/patch-proposal.js';
 import { diffModelDocuments } from './lib/core/semantic-diff.js';
 import { compareReceiptFingerprint, validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
 import { loadLatestAutosave, saveAutosave, type StoredSnapshot } from './lib/storage';
+import { buildModelViewProjections, type ModelViewProjectionId } from './lib/modelViewProjections';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   data: 'Data',
@@ -1131,7 +1133,16 @@ export function App() {
     () => buildCanvasHandoff(nodes, edges, promptTarget as HandoffTarget),
     [edges, nodes, promptTarget],
   );
+  const modelViewProjections = useMemo(
+    () => buildModelViewProjections({
+      document: compiledCanvas.document,
+      semantic: compiledCanvas.semantic,
+      handoff: handoffBundle,
+    }),
+    [compiledCanvas.document, compiledCanvas.semantic, handoffBundle],
+  );
   const prompt = useMemo(() => generateAiPrompt(modelIr, promptTarget), [modelIr, promptTarget]);
+  const [activeModelView, setActiveModelView] = useState<ModelViewProjectionId>('canvas');
   const [activeOutput, setActiveOutput] = useState<'math' | 'review' | 'handoff' | 'advanced'>('math');
   const [advancedOutput, setAdvancedOutput] = useState<'ir' | 'prompt' | 'package' | 'diff'>('ir');
   const [handoffPreviewFormat, setHandoffPreviewFormat] = useState<'markdown' | 'json'>('markdown');
@@ -1162,6 +1173,10 @@ export function App() {
     ],
   );
   const fullTex = useMemo(() => generateModelTex(modelIr), [modelIr]);
+  const activeProjection = useMemo(
+    () => modelViewProjections.find((projection) => projection.id === activeModelView) ?? modelViewProjections[0]!,
+    [activeModelView, modelViewProjections],
+  );
   const reviewText = useMemo(() => formatReviewPanel(compiledCanvas.semantic.diagnostics), [compiledCanvas.semantic.diagnostics]);
   const initialCompiledCanvas = useMemo(() => compileCanvas(initialCanvasNodes, initialCanvasEdges), []);
   const semanticDiff = useMemo(
@@ -1533,6 +1548,28 @@ export function App() {
       }
     },
     [focusEditorHeading, nodes, setEdges, setNodes],
+  );
+
+  const selectProjectionEntity = useCallback(
+    (entityId: string) => {
+      const candidateIds = [
+        entityId,
+        entityId.startsWith('obs_') ? entityId.slice(4) : undefined,
+      ].filter((candidate): candidate is string => Boolean(candidate));
+      const nodeId = candidateIds.find((candidate) => nodes.some((node) => node.id === candidate));
+
+      if (nodeId) {
+        setActiveModelView('canvas');
+        selectNodeForEditing(nodeId, { focusEditor: true });
+        return;
+      }
+
+      setImportError({
+        title: '対応するキャンバスノードがありません',
+        detail: `${entityId} は生成または契約用のentityです。Contract viewで内容を確認できます。`,
+      });
+    },
+    [nodes, selectNodeForEditing],
   );
 
   const updateSelectedNodeData = useCallback(
@@ -2110,6 +2147,12 @@ export function App() {
       group: 'Navigate',
       run: () => setActiveLeftPanel('structure'),
     },
+    ...modelViewProjections.map((projection) => ({
+      id: `view-${projection.id}`,
+      label: `Open ${projection.title} view`,
+      group: 'View',
+      run: () => setActiveModelView(projection.id),
+    })),
     {
       id: 'resolve-overlaps',
       label: '重なり解消',
@@ -2167,6 +2210,7 @@ export function App() {
     applyModelTemplate,
     copyExternalImportPrompt,
     handleImport,
+    modelViewProjections,
     portablePackage,
     resolveCanvasOverlaps,
   ]);
@@ -2696,11 +2740,25 @@ export function App() {
         <section className="canvas">
           <div className="canvas-toolbar">
             <div className="toolbar-title">
-              <strong>階層回帰</strong>
-              <span>編集キャンバス</span>
+              <strong>{compiledCanvas.document.model.name}</strong>
+              <span>{activeProjection.title} view</span>
               <span className={overlapCount ? 'layout-status layout-status-warning' : 'layout-status'}>
                 重なり {overlapCount}
               </span>
+            </div>
+            <div className="model-view-tabs" role="tablist" aria-label="モデルビュー">
+              {modelViewProjections.map((projection) => (
+                <button
+                  aria-selected={activeModelView === projection.id}
+                  className={activeModelView === projection.id ? 'is-active' : undefined}
+                  key={projection.id}
+                  onClick={() => setActiveModelView(projection.id)}
+                  role="tab"
+                  type="button"
+                >
+                  {projection.title}
+                </button>
+              ))}
             </div>
             <div className="toolbar-actions">
               <div className="toolbar-group toolbar-primary" aria-label="Primary actions">
@@ -2757,28 +2815,36 @@ export function App() {
               </div>
             </div>
           </div>
-          <ReactFlow
-            nodes={flowNodes}
-            edges={labeledEdges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            onConnect={onConnect}
-            onEdgesChange={onEdgesChange}
-            onNodesChange={onNodesChange}
-            onSelectionChange={onSelectionChange}
-            onInit={(instance) => {
-              reactFlowRef.current = {
-                fitView: (options) => instance.fitView(options),
-              };
-            }}
-            deleteKeyCode={['Backspace', 'Delete']}
-            fitView
-            fitViewOptions={{ padding: 0.18 }}
-          >
-            <Background color="var(--color-border)" gap={24} />
-            <MiniMap />
-            <Controls />
-          </ReactFlow>
+          {activeModelView === 'canvas' ? (
+            <ReactFlow
+              nodes={flowNodes}
+              edges={labeledEdges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              onConnect={onConnect}
+              onEdgesChange={onEdgesChange}
+              onNodesChange={onNodesChange}
+              onSelectionChange={onSelectionChange}
+              onInit={(instance) => {
+                reactFlowRef.current = {
+                  fitView: (options) => instance.fitView(options),
+                };
+              }}
+              deleteKeyCode={['Backspace', 'Delete']}
+              fitView
+              fitViewOptions={{ padding: 0.18 }}
+            >
+              <Background color="var(--color-border)" gap={24} />
+              <MiniMap />
+              <Controls />
+            </ReactFlow>
+          ) : (
+            <ModelProjectionView
+              projection={activeProjection}
+              onCopy={copyText}
+              onSelectEntity={selectProjectionEntity}
+            />
+          )}
         </section>
 
         <aside className="panel right-panel">

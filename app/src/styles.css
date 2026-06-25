@@ -278,8 +278,11 @@ select:focus-visible,
 
 .palette-item,
 .canvas-toolbar button,
+.model-view-tabs button,
 .output-tabs button,
 .output-actions button,
+.projection-copy-button,
+.projection-row,
 .danger-button {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -295,8 +298,11 @@ select:focus-visible,
 
 .palette-item:hover,
 .canvas-toolbar button:hover,
+.model-view-tabs button:hover,
 .output-tabs button:hover,
 .output-actions button:hover,
+.projection-copy-button:hover,
+button.projection-row:hover,
 .danger-button:hover {
   border-color: var(--color-border-strong);
   background: var(--color-surface-subtle);
@@ -304,8 +310,11 @@ select:focus-visible,
 
 .palette-item:active,
 .canvas-toolbar button:active,
+.model-view-tabs button:active,
 .output-tabs button:active,
 .output-actions button:active,
+.projection-copy-button:active,
+button.projection-row:active,
 .danger-button:active {
   transform: translateY(1px);
 }
@@ -672,6 +681,7 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   background: color-mix(in srgb, var(--color-surface) 90%, transparent);
@@ -687,6 +697,38 @@ button:disabled {
   flex-wrap: wrap;
   gap: var(--space-2);
   min-width: 0;
+}
+
+.model-view-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(72px, 1fr));
+  gap: 3px;
+  min-width: min(420px, 100%);
+  padding: 2px;
+  background: color-mix(in srgb, var(--color-surface-muted) 74%, transparent);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  pointer-events: auto;
+}
+
+.model-view-tabs button {
+  min-width: 0;
+  padding: 6px 7px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-view-tabs button.is-active {
+  color: var(--color-accent);
+  background: var(--color-surface);
+  border-color: var(--color-accent-subtle-bd);
+  box-shadow: var(--shadow-sm);
 }
 
 .canvas-toolbar .toolbar-actions {
@@ -982,9 +1024,202 @@ button:disabled {
   background: var(--color-surface-subtle);
 }
 
+/* ---- Model projections ---- */
+
+.projection-view {
+  height: 100%;
+  padding: 126px var(--space-4) var(--space-4);
+  overflow: auto;
+  background: var(--color-surface-subtle);
+}
+
+.projection-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.projection-header h2 {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text);
+  font-size: var(--text-xl);
+}
+
+.projection-header p {
+  max-width: 720px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.projection-copy-button {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  background: var(--color-surface);
+  font-size: var(--text-sm);
+}
+
+.projection-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(88px, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.projection-metrics div {
+  padding: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.projection-metrics span,
+.projection-metrics strong {
+  display: block;
+}
+
+.projection-metrics span {
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.projection-metrics strong {
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+}
+
+.projection-consumes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+
+.projection-consumes span,
+.projection-entity-chips span {
+  padding: 2px 7px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.projection-sections {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.projection-section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.projection-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.projection-section-title h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-base);
+}
+
+.projection-section-title span {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.projection-rows {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.projection-row {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-align: left;
+  line-height: 1.4;
+}
+
+button.projection-row {
+  cursor: pointer;
+}
+
+div.projection-row {
+  cursor: default;
+}
+
+.projection-row-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+}
+
+.projection-row-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.projection-row small {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.projection-entity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.projection-row-success {
+  border-color: var(--color-success-bd);
+  background: var(--color-success-bg);
+}
+
+.projection-row-warning {
+  border-color: var(--color-warning-bd);
+  background: var(--color-warning-bg);
+  box-shadow: inset 3px 0 0 var(--color-warning-strong);
+}
+
+.projection-row-danger {
+  border-color: var(--color-danger-bd);
+  background: var(--color-danger-bg);
+  box-shadow: inset 3px 0 0 var(--color-danger-strong);
+}
+
+.projection-row-muted {
+  color: var(--color-text-secondary);
+  background: var(--color-surface-muted);
+}
+
 .output-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-1);
   padding: var(--space-1);
   background: var(--color-surface-subtle);
@@ -1978,6 +2213,20 @@ pre {
   .canvas-toolbar {
     left: var(--space-3);
     right: var(--space-3);
+  }
+
+  .model-view-tabs {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+  }
+
+  .projection-view {
+    padding-top: 190px;
+  }
+
+  .projection-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   pre {
