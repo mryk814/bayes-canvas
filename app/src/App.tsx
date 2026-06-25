@@ -1271,11 +1271,13 @@ export function App() {
   }, []);
 
   const resetSample = useCallback(() => {
+    if (!window.confirm('現在のキャンバスを初期サンプルへ戻します。元に戻せます。')) return;
+    setUndoState({ message: '初期サンプルへ戻しました。', nodes, edges });
     setNodes(initialCanvasNodes);
     setEdges(initialCanvasEdges);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
-  }, [setEdges, setNodes]);
+  }, [edges, nodes, setEdges, setNodes]);
 
   const handleSave = useCallback(() => {
     const name = window.prompt('保存名:', `モデル ${new Date().toLocaleString()}`);
@@ -1663,32 +1665,48 @@ export function App() {
 
         <section className="canvas">
           <div className="canvas-toolbar">
-            <div>
+            <div className="toolbar-title">
               <strong>階層回帰</strong>
               <span>編集キャンバス</span>
             </div>
             <div className="toolbar-actions">
-              <button type="button" onClick={handleSave}>
-                保存
-              </button>
-              <button type="button" onClick={handleExport}>
-                書き出し
-              </button>
-              <button type="button" onClick={() => exportPortablePackageToFile(portablePackage)}>
-                Package
-              </button>
-              <button type="button" onClick={handleImport}>
-                読み込み
-              </button>
-              <button type="button" onClick={() => copyText(JSON.stringify(modelIr, null, 2))}>
-                IRコピー
-              </button>
-              <button disabled={!selectedNode && !selectedEdge} type="button" onClick={deleteSelectedItem}>
-                削除
-              </button>
-              <button type="button" onClick={resetSample}>
-                初期化
-              </button>
+              <div className="toolbar-group toolbar-primary" aria-label="Primary actions">
+                <button type="button" onClick={() => setActiveOutput('review')}>
+                  Review
+                </button>
+                <button type="button" onClick={() => setActiveOutput('handoff')}>
+                  Handoff
+                </button>
+              </div>
+              <div className="toolbar-group" aria-label="File actions">
+                <button type="button" onClick={handleSave}>
+                  保存
+                </button>
+                <button type="button" onClick={handleImport}>
+                  読み込み
+                </button>
+                <button type="button" onClick={handleExport}>
+                  書き出し
+                </button>
+              </div>
+              <div className="toolbar-group" aria-label="Edit actions">
+                <button disabled={!selectedNode && !selectedEdge} type="button" onClick={deleteSelectedItem}>
+                  削除
+                </button>
+              </div>
+              <div className="toolbar-group" aria-label="Advanced actions">
+                <button type="button" onClick={() => exportPortablePackageToFile(portablePackage)}>
+                  Package
+                </button>
+                <button type="button" onClick={() => copyText(JSON.stringify(modelIr, null, 2))}>
+                  IRコピー
+                </button>
+              </div>
+              <div className="toolbar-group toolbar-danger" aria-label="Danger actions">
+                <button type="button" onClick={resetSample}>
+                  初期化
+                </button>
+              </div>
             </div>
           </div>
           <ReactFlow
