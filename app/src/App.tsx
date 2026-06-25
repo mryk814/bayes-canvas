@@ -750,6 +750,9 @@ export function App() {
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [patchInput, setPatchInput] = useState('');
   const [pendingPatch, setPendingPatch] = useState<PendingPatchState | null>(null);
+  const [patchInbox, setPatchInbox] = useState<Array<{ id: string; label: string; value: string }>>([]);
+  const [schemaInput, setSchemaInput] = useState('x, real, N\ny, real, N');
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ImplementationReceipt | null>(null);
   const receiptFingerprintStatus = useMemo(
     () => receipt ? compareReceiptFingerprint(receipt, handoffBundle.manifest.specificationFingerprint) : null,
@@ -867,15 +870,65 @@ export function App() {
     }
     return counts;
   }, [compiledCanvas.semantic.diagnostics, modelIr.diagnostics]);
+  const queryNodes = useMemo(() => nodes.filter((node) => node.data.kind === 'derived_quantity'), [nodes]);
+  const blockNodes = useMemo(() => nodes.filter((node) => node.data.kind === 'model_block'), [nodes]);
+  const decisionNotes = useMemo(
+    () => nodes
+      .filter((node) => node.data.notes || node.data.hints?.length)
+      .map((node) => ({
+        id: node.id,
+        name: node.data.name,
+        text: node.data.notes ?? formatHintsForInput(node.data.hints),
+      })),
+    [nodes],
+  );
+  const reviewChecklist = useMemo(() => [
+    {
+      label: 'Blocking diagnostics cleared',
+      done: blockingDiagnostics.length === 0,
+      detail: `${blockingDiagnostics.length} blocking`,
+    },
+    {
+      label: 'Observed likelihood is bound',
+      done: nodes.some((node) => node.data.kind === 'likelihood' && node.data.observed),
+      detail: 'observed likelihood',
+    },
+    {
+      label: 'QoI is defined',
+      done: queryNodes.length > 0,
+      detail: `${queryNodes.length} QoI`,
+    },
+    {
+      label: 'Decision notes exist',
+      done: decisionNotes.length > 0,
+      detail: `${decisionNotes.length} notes`,
+    },
+    {
+      label: 'Target support reviewed',
+      done: handoffBundle.capabilityReport.every((item) => item.support !== 'unsupported'),
+      detail: `${handoffBundle.capabilityReport.filter((item) => item.support === 'unsupported').length} unsupported`,
+    },
+  ], [blockingDiagnostics.length, decisionNotes.length, handoffBundle.capabilityReport, nodes, queryNodes.length]);
+  const focusedNodeIds = useMemo(() => {
+    if (!focusNodeId) return null;
+    const related = new Set([focusNodeId]);
+    for (const edge of edges) {
+      if (edge.source === focusNodeId) related.add(edge.target);
+      if (edge.target === focusNodeId) related.add(edge.source);
+    }
+    return related;
+  }, [edges, focusNodeId]);
   const flowNodes = useMemo(
-    () => nodes.map((node) => ({
-      ...node,
-      data: {
-        ...node.data,
-        diagnosticCount: diagnosticCounts.get(node.id) ?? 0,
-      },
-    })),
-    [diagnosticCounts, nodes],
+    () => nodes
+      .filter((node) => !focusedNodeIds || focusedNodeIds.has(node.id))
+      .map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          diagnosticCount: diagnosticCounts.get(node.id) ?? 0,
+        },
+      })),
+    [diagnosticCounts, focusedNodeIds, nodes],
   );
   const selectedDiagnostics = useMemo(
     () => modelIr.diagnostics.filter((diagnostic) => diagnostic.target.nodeId === selectedNodeId || diagnostic.target.expressionId === selectedNodeId),
@@ -913,13 +966,13 @@ export function App() {
 
   const labeledEdges = useMemo(() => {
     const nodeMap = new Map(nodes.map((n) => [n.id, n.data]));
-    return edges.map((edge) => {
+    return edges.filter((edge) => !focusedNodeIds || (focusedNodeIds.has(edge.source) && focusedNodeIds.has(edge.target))).map((edge) => {
       const targetData = nodeMap.get(edge.target);
       if (!targetData) return { ...edge, type: 'paramEdge' as const };
       const paramLabel = resolveEdgeParam(edge.source, targetData);
       return { ...edge, type: 'paramEdge' as const, data: { ...edge.data, paramLabel } };
     });
-  }, [nodes, edges]);
+  }, [nodes, edges, focusedNodeIds]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ nodes, edges }));
@@ -1392,6 +1445,99 @@ export function App() {
     input.click();
   }, [setNodes, setEdges]);
 
+  const addQoIFromSelection = useCallback(() => {
+    const sourceNode = selectedNode ?? nodes.find((node) => ['parameter', 'deterministic', 'likelihood'].includes(node.data.kind));
+    const id = `qoi_${Date.now()}`;
+    setUndoState({ message: 'QoIを追加しました。', nodes, edges });
+    setNodes((currentNodes) => [
+      ...currentNodes,
+      {
+        id,
+        type: 'bayesNode',
+        position: {
+          x: (sourceNode?.position.x ?? 520) + 220,
+          y: sourceNode?.position.y ?? 220,
+        },
+        data: {
+          kind: 'derived_quantity',
+          name: sourceNode ? `${sourceNode.data.name.replace(/\[[^\]]+\]/u, '')}_qoi` : 'quantity_of_interest',
+          expression: sourceNode?.data.name.replace(/\[[^\]]+\]/u, '') ?? 'target',
+          notes: 'QoI generated from the builder. Confirm scale before handoff.',
+        },
+      },
+    ]);
+    if (sourceNode) {
+      setEdges((currentEdges) => [
+        ...currentEdges,
+        { id: `${sourceNode.id}-${id}`, source: sourceNode.id, target: id, data: { role: 'query-source' } },
+      ]);
+    }
+    setSelectedNodeId(id);
+    setSelectedEdgeId(null);
+    setActiveLeftPanel('inspector');
+  }, [edges, nodes, selectedNode, setEdges, setNodes]);
+
+  const addModelBlock = useCallback(() => {
+    const id = `block_${Date.now()}`;
+    setUndoState({ message: 'Model Blockを追加しました。', nodes, edges });
+    setNodes((currentNodes) => [
+      ...currentNodes,
+      {
+        id,
+        type: 'bayesNode',
+        position: { x: 620, y: 120 + (blockNodes.length * 130) },
+        data: {
+          kind: 'model_block',
+          name: `custom_block_${blockNodes.length + 1}`,
+          expression: 'inputs -> outputs',
+          notes: 'Block boundary. Fill in inputs, outputs, validation coverage, and backend support notes.',
+        },
+      },
+    ]);
+    setSelectedNodeId(id);
+    setSelectedEdgeId(null);
+    setActiveLeftPanel('inspector');
+  }, [blockNodes.length, edges, nodes, setNodes]);
+
+  const importSchemaColumns = useCallback(() => {
+    const rows = schemaInput.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (!rows.length) return;
+    setUndoState({ message: 'SchemaからDataノードを追加しました。', nodes, edges });
+    setNodes((currentNodes) => [
+      ...currentNodes,
+      ...rows.map((row, index) => {
+        const [name = `column_${index + 1}`, scalar = 'real', shape = 'N'] = row.split(',').map((item) => item.trim());
+        const id = `data_${name.replace(/[^a-zA-Z0-9_]/gu, '_')}_${Date.now()}_${index}`;
+        return {
+          id,
+          type: 'bayesNode' as const,
+          position: { x: 80 + (index % 2) * 220, y: 120 + Math.floor(index / 2) * 150 },
+          data: {
+            kind: 'data' as const,
+            name: shape ? `${name}[i]` : name,
+            shape: shape ? [shape] : undefined,
+            plate: shape ? 'obs' : undefined,
+            observed: true,
+            notes: `Imported column. Type: ${scalar}. Confirm role before handoff.`,
+          },
+        };
+      }),
+    ]);
+    setActiveLeftPanel('inspector');
+  }, [edges, nodes, schemaInput, setNodes]);
+
+  const savePatchToInbox = useCallback(() => {
+    if (!patchInput.trim()) return;
+    setPatchInbox((items) => [
+      ...items,
+      {
+        id: `patch_${Date.now()}`,
+        label: `Proposal ${items.length + 1}`,
+        value: patchInput,
+      },
+    ]);
+  }, [patchInput]);
+
   const commands = useMemo<CommandAction[]>(() => [
     {
       id: 'add-data',
@@ -1442,6 +1588,18 @@ export function App() {
       run: () => setActiveOutput('review'),
     },
     {
+      id: 'add-qoi',
+      label: 'Add QoI',
+      group: 'Builder',
+      run: addQoIFromSelection,
+    },
+    {
+      id: 'add-model-block',
+      label: 'Add model block',
+      group: 'Builder',
+      run: addModelBlock,
+    },
+    {
       id: 'prepare-handoff',
       label: 'Prepare Handoff',
       group: 'Navigate',
@@ -1459,7 +1617,7 @@ export function App() {
       group: 'File',
       run: handleImport,
     },
-  ], [addNodeFromPalette, applyModelTemplate, handleImport, portablePackage]);
+  ], [addModelBlock, addNodeFromPalette, addQoIFromSelection, applyModelTemplate, handleImport, portablePackage]);
 
   const filteredCommands = useMemo(() => {
     const query = commandQuery.trim().toLowerCase();
@@ -2132,6 +2290,69 @@ export function App() {
               <div className="empty-note">handoffを止める診断はありません。</div>
             )}
           </div>
+          <div className="assistant-panel">
+            <div className="panel-title compact">
+              <h2>Design Assistants</h2>
+              <span>{reviewChecklist.filter((item) => item.done).length}/{reviewChecklist.length}</span>
+            </div>
+            <div className="assistant-grid">
+              <button type="button" onClick={() => setActiveLeftPanel('library')}>
+                <strong>Interview / Templates</strong>
+                <span>{modelTemplates.length} starting points</span>
+              </button>
+              <button type="button" onClick={addQoIFromSelection}>
+                <strong>QoI Builder</strong>
+                <span>{queryNodes.length} quantities</span>
+              </button>
+              <button type="button" onClick={addModelBlock}>
+                <strong>Block Inspector</strong>
+                <span>{blockNodes.length} blocks</span>
+              </button>
+              <button type="button" onClick={applyHorseshoePrior}>
+                <strong>Prior Assistant</strong>
+                <span>{selectedData ? selectedData.name : 'select or create'}</span>
+              </button>
+            </div>
+            <div className="schema-assistant">
+              <label>
+                Schema Importer
+                <textarea value={schemaInput} onChange={(event) => setSchemaInput(event.target.value)} />
+              </label>
+              <button type="button" onClick={importSchemaColumns}>列をDataノード化</button>
+            </div>
+            <div className="checklist-list">
+              {reviewChecklist.map((item) => (
+                <div className={item.done ? 'checklist-item is-done' : 'checklist-item'} key={item.label}>
+                  <strong>{item.done ? 'done' : 'todo'}</strong>
+                  <span>{item.label}</span>
+                  <small>{item.detail}</small>
+                </div>
+              ))}
+            </div>
+            <div className="decision-list">
+              <div className="assistant-subtitle">
+                <span>Decision Log</span>
+                <strong>{decisionNotes.length}</strong>
+              </div>
+              {decisionNotes.slice(0, 4).map((note) => (
+                <button key={note.id} type="button" onClick={() => selectNodeForEditing(note.id, { focusEditor: true })}>
+                  <span>{note.name}</span>
+                  <small>{note.text}</small>
+                </button>
+              ))}
+              {!decisionNotes.length ? <p className="empty-note">ノートやprior rationaleはまだありません。</p> : null}
+            </div>
+            <div className="assistant-grid">
+              <button disabled={!selectedNodeId} type="button" onClick={() => setFocusNodeId(selectedNodeId)}>
+                <strong>Dependency Slice</strong>
+                <span>{focusNodeId ? 'focused' : 'selected node'}</span>
+              </button>
+              <button disabled={!focusNodeId} type="button" onClick={() => setFocusNodeId(null)}>
+                <strong>Clear Focus</strong>
+                <span>{focusedNodeIds ? `${focusedNodeIds.size} visible` : 'all visible'}</span>
+              </button>
+            </div>
+          </div>
           <div className="output-tabs" role="tablist" aria-label="出力">
             <button
               aria-controls="output-panel"
@@ -2310,8 +2531,20 @@ export function App() {
           <div className="patch-panel">
             <div className="panel-title compact">
               <h2>Patch</h2>
-              <button type="button" onClick={insertPatchTemplate}>雛形</button>
+              <div className="mini-actions">
+                <button type="button" onClick={insertPatchTemplate}>雛形</button>
+                <button disabled={!patchInput.trim()} type="button" onClick={savePatchToInbox}>保存</button>
+              </div>
             </div>
+            {patchInbox.length ? (
+              <div className="patch-inbox">
+                {patchInbox.map((item) => (
+                  <button key={item.id} type="button" onClick={() => setPatchInput(item.value)}>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <textarea
               aria-label="JSON Patch proposal"
               placeholder="AI patch proposal JSON"
