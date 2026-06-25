@@ -683,11 +683,42 @@ button:disabled {
 .bayes-node {
   width: 190px;
   padding: var(--space-3);
-  background: linear-gradient(180deg, var(--color-surface), var(--node-bg));
+  background: var(--color-surface);
   border: 1px solid var(--node-border);
-  border-top: 4px solid var(--node-color);
+  border-left: 5px solid var(--node-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
+}
+
+.bayes-node-data {
+  width: 170px;
+  background: linear-gradient(180deg, var(--color-surface), var(--color-info-bg));
+}
+
+.bayes-node-parameter,
+.bayes-node-hyperparameter,
+.bayes-node-latent {
+  width: 198px;
+}
+
+.bayes-node-deterministic,
+.bayes-node-derived_quantity {
+  border-style: solid dashed solid solid;
+}
+
+.bayes-node-likelihood {
+  width: 208px;
+  border-width: 2px 2px 2px 6px;
+  background: linear-gradient(180deg, var(--color-surface), var(--node-bg));
+}
+
+.bayes-node-model_block {
+  width: 220px;
+  border-style: dashed;
+  border-left-style: solid;
+  background:
+    linear-gradient(90deg, var(--node-bg), transparent 46px),
+    var(--color-surface);
 }
 
 .node-heading,
@@ -714,13 +745,14 @@ button:disabled {
   color: var(--color-info-strong);
   background: var(--color-info-bg);
   border: 1px solid var(--color-info-bd);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
 }
 
 .node-chip-warning {
   color: var(--color-warning-strong);
   background: var(--color-warning-bg);
   border-color: var(--color-warning-bd);
+  box-shadow: inset 3px 0 0 var(--color-warning-strong);
 }
 
 .node-name {
@@ -735,7 +767,11 @@ button:disabled {
 .node-formula {
   margin-top: var(--space-2);
   min-height: 34px;
+  padding: var(--space-2);
   color: var(--color-text-secondary);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.35;
@@ -778,6 +814,13 @@ button:disabled {
   margin-top: var(--space-2);
   color: var(--color-text-tertiary);
   font-size: var(--text-xs);
+}
+
+.node-meta span {
+  padding: 2px 6px;
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
 }
 
 .node-handle {
