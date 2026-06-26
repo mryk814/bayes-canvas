@@ -663,8 +663,9 @@ function arrangeCanvasNodes(nodes: BayesCanvasNode[], edges: Edge[]): BayesCanva
 
 function arrangeCanvasNodesByPlate(nodes: BayesCanvasNode[], edges: Edge[]): BayesCanvasNode[] {
   const depths = getNodeLayoutDepths(nodes, edges);
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const layoutScopeByNodeId = new Map(nodes.map((node) => [node.id, getLayoutScopeId(node, edges, nodeById)]));
   const scopeGroups = new Map<string, BayesCanvasNode[]>();
-  const scopeOrder = new Map([[GLOBAL_SCOPE_ID, 0], ['group', 1], ['obs', 2], ['observation', 2], ['time', 3]]);
   const baseY = NODE_LAYOUT_ORIGIN_Y;
   const scopeGapY = 112;
   const rowGapY = NODE_LAYOUT_HEIGHT + 38;
@@ -672,18 +673,21 @@ function arrangeCanvasNodesByPlate(nodes: BayesCanvasNode[], edges: Edge[]): Bay
   const originX = NODE_LAYOUT_ORIGIN_X;
 
   for (const node of nodes) {
-    const scopeId = node.data.plate ?? GLOBAL_SCOPE_ID;
+    const scopeId = layoutScopeByNodeId.get(node.id) ?? GLOBAL_SCOPE_ID;
     scopeGroups.set(scopeId, [...(scopeGroups.get(scopeId) ?? []), node]);
   }
 
   const arrangedById = new Map<string, BayesCanvasNode>();
-  const orderedScopes = [...scopeGroups.entries()].sort(([a], [b]) => (
-    (scopeOrder.get(a) ?? 10) - (scopeOrder.get(b) ?? 10) || a.localeCompare(b)
+  const orderedScopes = [...scopeGroups.entries()].sort(([a, aNodes], [b, bNodes]) => (
+    getScopeLayoutScore(aNodes) - getScopeLayoutScore(bNodes)
+    || getScopeFallbackOrder(a) - getScopeFallbackOrder(b)
+    || a.localeCompare(b)
   ));
 
   let nextScopeTop = baseY;
   for (const [, scopeNodes] of orderedScopes) {
     const nodesByDepth = new Map<number, BayesCanvasNode[]>();
+    const rowByNodeId = new Map<string, number>();
     let maxRow = 0;
 
     for (const node of scopeNodes) {
@@ -697,9 +701,14 @@ function arrangeCanvasNodesByPlate(nodes: BayesCanvasNode[], edges: Edge[]): Bay
         || getNodeLayoutPriority(a) - getNodeLayoutPriority(b)
         || a.position.x - b.position.x
       ));
+      const usedRows = new Set<number>();
 
-      for (const [row, node] of orderedColumnNodes.entries()) {
+      for (const node of orderedColumnNodes) {
+        const preferredRow = getPreferredConnectedRow(node, edges, layoutScopeByNodeId, rowByNodeId);
+        const row = getAvailableLayoutRow(usedRows, preferredRow ?? 0);
+        usedRows.add(row);
         maxRow = Math.max(maxRow, row);
+        rowByNodeId.set(node.id, row);
         arrangedById.set(node.id, {
           ...node,
           selected: false,
@@ -715,6 +724,55 @@ function arrangeCanvasNodesByPlate(nodes: BayesCanvasNode[], edges: Edge[]): Bay
   }
 
   return nodes.map((node) => arrangedById.get(node.id) ?? node);
+}
+
+function getAvailableLayoutRow(usedRows: Set<number>, preferredRow: number): number {
+  let row = Math.max(0, preferredRow);
+  while (usedRows.has(row)) row += 1;
+  return row;
+}
+
+function getPreferredConnectedRow(
+  node: BayesCanvasNode,
+  edges: Edge[],
+  layoutScopeByNodeId: Map<string, string>,
+  rowByNodeId: Map<string, number>,
+): number | null {
+  const nodeScope = layoutScopeByNodeId.get(node.id);
+  if (!nodeScope) return null;
+
+  const connectedRows = edges
+    .filter((edge) => edge.source === node.id || edge.target === node.id)
+    .map((edge) => (edge.source === node.id ? edge.target : edge.source))
+    .filter((connectedId) => layoutScopeByNodeId.get(connectedId) === nodeScope)
+    .map((connectedId) => rowByNodeId.get(connectedId))
+    .filter((row): row is number => row !== undefined);
+
+  return connectedRows.length === 1 ? connectedRows[0] : null;
+}
+
+function getScopeLayoutScore(nodes: BayesCanvasNode[]): number {
+  if (!nodes.length) return Number.POSITIVE_INFINITY;
+  return nodes.reduce((total, node) => total + node.position.y, 0) / nodes.length;
+}
+
+function getScopeFallbackOrder(scopeId: string): number {
+  const order = new Map([[GLOBAL_SCOPE_ID, 0], ['group', 1], ['obs', 2], ['observation', 2], ['time', 3]]);
+  return order.get(scopeId) ?? 10;
+}
+
+function getLayoutScopeId(node: BayesCanvasNode, edges: Edge[], nodeById: Map<string, BayesCanvasNode>): string {
+  if (node.data.plate) return node.data.plate;
+  const connectedScopeIds = new Set<string>();
+
+  for (const edge of edges) {
+    if (edge.source !== node.id && edge.target !== node.id) continue;
+    const otherNodeId = edge.source === node.id ? edge.target : edge.source;
+    const otherScopeId = nodeById.get(otherNodeId)?.data.plate;
+    if (otherScopeId) connectedScopeIds.add(otherScopeId);
+  }
+
+  return connectedScopeIds.size === 1 ? [...connectedScopeIds][0] : GLOBAL_SCOPE_ID;
 }
 
 function getDesiredNodeY(
