@@ -790,16 +790,18 @@ function getScopeFallbackOrder(scopeId: string): number {
 function getLayoutScopeId(node: BayesCanvasNode, edges: Edge[], nodeById: Map<string, BayesCanvasNode>): string {
   if (node.data.plate) return node.data.plate;
   if (shouldKeepUnplatedNodeInGlobalLayout(node)) return GLOBAL_SCOPE_ID;
+  const connectedNodeIds = new Set<string>();
   const connectedScopeIds = new Set<string>();
 
   for (const edge of edges) {
     if (edge.source !== node.id && edge.target !== node.id) continue;
     const otherNodeId = edge.source === node.id ? edge.target : edge.source;
+    connectedNodeIds.add(otherNodeId);
     const otherScopeId = nodeById.get(otherNodeId)?.data.plate;
     if (otherScopeId) connectedScopeIds.add(otherScopeId);
   }
 
-  return connectedScopeIds.size === 1 ? [...connectedScopeIds][0] : GLOBAL_SCOPE_ID;
+  return connectedNodeIds.size === 1 && connectedScopeIds.size === 1 ? [...connectedScopeIds][0] : GLOBAL_SCOPE_ID;
 }
 
 function shouldKeepUnplatedNodeInGlobalLayout(node: BayesCanvasNode): boolean {
