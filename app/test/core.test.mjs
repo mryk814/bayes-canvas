@@ -13,6 +13,7 @@ import { previewPatchProposal } from '../dist-test/lib/core/patch-proposal.js';
 import { buildPortablePackage } from '../dist-test/lib/core/portable.js';
 import { compareReceiptFingerprint, validateImplementationReceipt } from '../dist-test/lib/core/receipt.js';
 import { buildModelViewProjections } from '../dist-test/lib/modelViewProjections.js';
+import { getDynamicEdgeHandles } from '../dist-test/lib/edgeRouting.js';
 import { initialEdges, initialNodes } from '../dist-test/samples/hierarchicalRegression.js';
 import { modelTemplates } from '../dist-test/samples/modelTemplates.js';
 import { modelCorpus } from '../dist-test/samples/modelCorpus.js';
@@ -150,6 +151,30 @@ test('projects the sample model into synchronized model views', () => {
   assert.ok(equations?.sections.some((section) => section.id === 'equation-compiler'));
   assert.ok(structure?.sections.some((section) => section.id === 'structure-index-mapping'));
   assert.ok(contract?.sections.some((section) => section.id === 'contract-observed'));
+});
+
+test('routes canvas edges through the shortest readable handle pair', () => {
+  assert.deepEqual(
+    getDynamicEdgeHandles(
+      { x: 0, y: 0, width: 100, height: 100 },
+      { x: 120, y: 150, width: 100, height: 100 },
+    ),
+    { sourceHandle: 'source-bottom', targetHandle: 'target-left' },
+  );
+  assert.deepEqual(
+    getDynamicEdgeHandles(
+      { x: 0, y: 0, width: 100, height: 100 },
+      { x: 130, y: -120, width: 100, height: 100 },
+    ),
+    { sourceHandle: 'source-right', targetHandle: 'target-bottom' },
+  );
+  assert.deepEqual(
+    getDynamicEdgeHandles(
+      { x: 0, y: 0, width: 100, height: 100 },
+      { x: -120, y: 130, width: 100, height: 100 },
+    ),
+    { sourceHandle: 'source-bottom', targetHandle: 'target-right' },
+  );
 });
 
 test('rejects over-large imports before replacing current work', () => {

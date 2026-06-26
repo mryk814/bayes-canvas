@@ -63,6 +63,7 @@ import { diffModelDocuments } from './lib/core/semantic-diff.js';
 import { compareReceiptFingerprint, validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
 import { loadLatestAutosave, saveAutosave, type StoredSnapshot } from './lib/storage';
 import { buildModelViewProjections, type ModelViewProjectionId } from './lib/modelViewProjections';
+import { getDynamicEdgeHandles } from './lib/edgeRouting';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   data: 'データ',
@@ -150,7 +151,6 @@ const OBSERVATION_OPTIONS = [
 ] as const;
 
 const EDGE_ROUTE_SPACING = 18;
-const HORIZONTAL_EDGE_THRESHOLD = 90;
 
 interface PlateRow {
   id: string;
@@ -544,31 +544,11 @@ function countNodeOverlaps(nodes: BayesCanvasNode[]): number {
   return count;
 }
 
-function getNodeCenter(node: BayesCanvasNode): { x: number; y: number } {
-  return {
-    x: node.position.x + NODE_LAYOUT_WIDTH[node.data.kind] / 2,
-    y: node.position.y + NODE_LAYOUT_HEIGHT / 2,
-  };
-}
-
 function getPreferredEdgeHandles(
   sourceNode: BayesCanvasNode,
   targetNode: BayesCanvasNode,
 ): Pick<Edge, 'sourceHandle' | 'targetHandle'> {
-  const sourceCenter = getNodeCenter(sourceNode);
-  const targetCenter = getNodeCenter(targetNode);
-  const dx = targetCenter.x - sourceCenter.x;
-  const dy = targetCenter.y - sourceCenter.y;
-
-  if (Math.abs(dx) > HORIZONTAL_EDGE_THRESHOLD) {
-    return dx > 0
-      ? { sourceHandle: 'source-right', targetHandle: 'target-left' }
-      : { sourceHandle: 'source-left', targetHandle: 'target-right' };
-  }
-
-  return dy >= 0
-    ? { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
-    : { sourceHandle: 'source-top', targetHandle: 'target-bottom' };
+  return getDynamicEdgeHandles(getNodeRect(sourceNode), getNodeRect(targetNode));
 }
 
 function getEdgeRouteOffset(index: number): number {
