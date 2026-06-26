@@ -151,6 +151,7 @@ const OBSERVATION_OPTIONS = [
 ] as const;
 
 const EDGE_ROUTE_SPACING = 18;
+const EDGE_ENDPOINT_SPACING = 12;
 
 interface PlateRow {
   id: string;
@@ -307,8 +308,15 @@ const edgeTypes = {
     markerEnd, style, data,
   }: EdgeProps) {
     const routeOffset = Number(data?.routeOffset ?? 0);
+    const sourceLaneOffset = Number(data?.sourceLaneOffset ?? 0);
+    const targetLaneOffset = Number(data?.targetLaneOffset ?? 0);
+    const adjustedSource = getLaneAdjustedPoint(sourceX, sourceY, sourcePosition, sourceLaneOffset);
+    const adjustedTarget = getLaneAdjustedPoint(targetX, targetY, targetPosition, targetLaneOffset);
     const [edgePath, labelX, labelY] = getSmoothStepPath({
-      sourceX, sourceY, targetX, targetY,
+      sourceX: adjustedSource.x,
+      sourceY: adjustedSource.y,
+      targetX: adjustedTarget.x,
+      targetY: adjustedTarget.y,
       sourcePosition, targetPosition,
       offset: 26 + Math.abs(routeOffset),
     });
@@ -344,6 +352,14 @@ const edgeTypes = {
     );
   }),
 };
+
+function getLaneAdjustedPoint(x: number, y: number, position: Position, laneOffset: number): { x: number; y: number } {
+  if (position === Position.Top || position === Position.Bottom) {
+    return { x: x + laneOffset, y };
+  }
+
+  return { x, y: y + laneOffset };
+}
 
 type BayesCanvasNode = Node<BayesNodeData>;
 
@@ -552,8 +568,16 @@ function getPreferredEdgeHandles(
 }
 
 function getEdgeRouteOffset(index: number): number {
+  return getSymmetricLaneOffset(index, EDGE_ROUTE_SPACING);
+}
+
+function getEdgeEndpointOffset(index: number): number {
+  return getSymmetricLaneOffset(index, EDGE_ENDPOINT_SPACING);
+}
+
+function getSymmetricLaneOffset(index: number, spacing: number): number {
   if (index === 0) return 0;
-  const lane = Math.ceil(index / 2) * EDGE_ROUTE_SPACING;
+  const lane = Math.ceil(index / 2) * spacing;
   return index % 2 === 0 ? lane : -lane;
 }
 
@@ -1717,12 +1741,20 @@ export function App() {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     const visibleEdges = edges.filter((edge) => !focusedNodeIds || (focusedNodeIds.has(edge.source) && focusedNodeIds.has(edge.target)));
     const laneCounts = new Map<string, number>();
+    const sourceEndpointLaneCounts = new Map<string, number>();
+    const targetEndpointLaneCounts = new Map<string, number>();
 
     return visibleEdges.map((edge) => {
       const sourceNode = nodeMap.get(edge.source);
       const targetNode = nodeMap.get(edge.target);
       if (!sourceNode || !targetNode) return { ...edge, type: 'paramEdge' as const };
       const handles = getPreferredEdgeHandles(sourceNode, targetNode);
+      const sourceEndpointKey = `${edge.source}:${handles.sourceHandle}`;
+      const targetEndpointKey = `${edge.target}:${handles.targetHandle}`;
+      const sourceLaneIndex = sourceEndpointLaneCounts.get(sourceEndpointKey) ?? 0;
+      const targetLaneIndex = targetEndpointLaneCounts.get(targetEndpointKey) ?? 0;
+      sourceEndpointLaneCounts.set(sourceEndpointKey, sourceLaneIndex + 1);
+      targetEndpointLaneCounts.set(targetEndpointKey, targetLaneIndex + 1);
       const laneKey = [
         handles.sourceHandle,
         handles.targetHandle,
@@ -1755,6 +1787,8 @@ export function App() {
           directionLabel: edgeRelation.label,
           relationKind: edgeRelation.kind,
           routeOffset: getEdgeRouteOffset(routeIndex),
+          sourceLaneOffset: getEdgeEndpointOffset(sourceLaneIndex),
+          targetLaneOffset: getEdgeEndpointOffset(targetLaneIndex),
         },
       };
     });
