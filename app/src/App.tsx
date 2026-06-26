@@ -691,8 +691,8 @@ function arrangeCanvasNodesByPlate(nodes: BayesCanvasNode[], edges: Edge[]): Bay
   const layoutScopeByNodeId = new Map(nodes.map((node) => [node.id, getLayoutScopeId(node, edges, nodeById)]));
   const scopeGroups = new Map<string, BayesCanvasNode[]>();
   const baseY = NODE_LAYOUT_ORIGIN_Y;
-  const scopeGapY = 112;
-  const rowGapY = NODE_LAYOUT_HEIGHT + 38;
+  const scopeGapY = 56;
+  const rowGapY = NODE_LAYOUT_HEIGHT + 12;
   const depthStepX = NODE_LAYOUT_COLUMN_STEP + 54;
   const originX = NODE_LAYOUT_ORIGIN_X;
 
@@ -787,6 +787,7 @@ function getScopeFallbackOrder(scopeId: string): number {
 
 function getLayoutScopeId(node: BayesCanvasNode, edges: Edge[], nodeById: Map<string, BayesCanvasNode>): string {
   if (node.data.plate) return node.data.plate;
+  if (shouldKeepUnplatedNodeInGlobalLayout(node)) return GLOBAL_SCOPE_ID;
   const connectedScopeIds = new Set<string>();
 
   for (const edge of edges) {
@@ -797,6 +798,10 @@ function getLayoutScopeId(node: BayesCanvasNode, edges: Edge[], nodeById: Map<st
   }
 
   return connectedScopeIds.size === 1 ? [...connectedScopeIds][0] : GLOBAL_SCOPE_ID;
+}
+
+function shouldKeepUnplatedNodeInGlobalLayout(node: BayesCanvasNode): boolean {
+  return ['data', 'parameter', 'hyperparameter', 'latent', 'likelihood', 'model_block'].includes(node.data.kind);
 }
 
 function getDesiredNodeY(
