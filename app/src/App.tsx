@@ -241,6 +241,8 @@ function getEdgeTone(targetKind: BayesNodeData['kind']): string {
   if (targetKind === 'likelihood') return 'var(--color-success-strong)';
   if (targetKind === 'deterministic' || targetKind === 'derived_quantity') return 'var(--color-chart-5)';
   if (targetKind === 'parameter') return 'color-mix(in srgb, var(--color-chart-2) 54%, var(--color-chart-3))';
+  if (targetKind === 'latent') return 'var(--color-chart-6)';
+  if (targetKind === 'hyperparameter') return 'var(--color-chart-4)';
   if (targetKind === 'data') return 'var(--color-info-strong)';
   if (targetKind === 'model_block') return 'var(--color-text-secondary)';
   return 'var(--color-accent)';
