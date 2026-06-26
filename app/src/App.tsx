@@ -3198,6 +3198,9 @@ export function App() {
                 <button type="button" onClick={handleImport}>
                   読み込み
                 </button>
+                <button type="button" onClick={copyExternalImportPrompt}>
+                  変換プロンプト
+                </button>
                 <button type="button" onClick={handleExport}>
                   書き出し
                 </button>
