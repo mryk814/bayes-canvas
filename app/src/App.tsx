@@ -666,8 +666,8 @@ function arrangeCanvasNodesByPlate(nodes: BayesCanvasNode[], edges: Edge[]): Bay
   const scopeGroups = new Map<string, BayesCanvasNode[]>();
   const scopeOrder = new Map([[GLOBAL_SCOPE_ID, 0], ['group', 1], ['obs', 2], ['observation', 2], ['time', 3]]);
   const baseY = NODE_LAYOUT_ORIGIN_Y;
-  const scopeGapY = NODE_LAYOUT_HEIGHT + 160;
-  const rowGapY = NODE_LAYOUT_HEIGHT + 56;
+  const scopeGapY = 112;
+  const rowGapY = NODE_LAYOUT_HEIGHT + 38;
   const depthStepX = NODE_LAYOUT_COLUMN_STEP + 54;
   const originX = NODE_LAYOUT_ORIGIN_X;
 
