@@ -179,12 +179,15 @@ test('builds a portable package with model and layout separated', () => {
   assert.match(pkg.manifest.fingerprint, /^[0-9a-f]{64}$/u);
   assert.ok(pkg.files['model.json']);
   assert.ok(pkg.files['layout.json']);
+  assert.ok(pkg.files['canvasEdges.json']);
   assert.ok(pkg.files['handoff.json']);
 
   const restoredModel = JSON.parse(pkg.files['model.json']);
   const restoredLayout = JSON.parse(pkg.files['layout.json']);
+  const restoredEdges = JSON.parse(pkg.files['canvasEdges.json']);
   assert.equal(JSON.stringify(restoredModel), JSON.stringify(compiled.document));
   assert.equal(JSON.stringify(restoredLayout), JSON.stringify(compiled.layout));
+  assert.equal(restoredEdges.length, initialEdges.length);
 });
 
 test('previews portable package imports after strict validation', () => {
@@ -193,6 +196,8 @@ test('previews portable package imports after strict validation', () => {
   const preview = previewPortablePackageImport(pkg);
   assert.equal(preview.document.documentId, compiled.document.documentId);
   assert.equal(preview.projected.nodes.length, initialNodes.length);
+  assert.equal(preview.projected.edges.length, initialEdges.length);
+  assert.equal(preview.edgeSummary.source, 'canvasEdges.json');
   assert.ok(preview.summary.includes('diagnostics'));
 
   assert.throws(
@@ -214,6 +219,46 @@ test('previews portable package imports after strict validation', () => {
       },
     }),
     /layout\.json\/typo/u,
+  );
+});
+
+test('reconstructs missing portable visual edges from semantic dependencies with preview warning', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  const packageDocument = {
+    ...compiled.document,
+    extensions: {},
+  };
+  const pkg = buildPortablePackage(packageDocument, compiled.layout, compiled.semantic);
+  const missingEdgePackage = {
+    ...pkg,
+    files: {
+      ...pkg.files,
+      'model.json': JSON.stringify(packageDocument),
+    },
+  };
+  delete missingEdgePackage.files['canvasEdges.json'];
+
+  const preview = previewPortablePackageImport(missingEdgePackage);
+  assert.equal(preview.edgeSummary.source, 'semantic reconstruction');
+  assert.equal(preview.edgeSummary.declared, 0);
+  assert.ok(preview.projected.edges.length > 0);
+  assert.ok(preview.importWarnings.some((warning) => warning.includes('reconstructed')));
+});
+
+test('rejects portable packages with invalid visual edge references', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  const pkg = buildPortablePackage(compiled.document, compiled.layout, compiled.semantic);
+  assert.throws(
+    () => previewPortablePackageImport({
+      ...pkg,
+      files: {
+        ...pkg.files,
+        'canvasEdges.json': JSON.stringify([
+          { id: 'broken-edge', from: 'alpha', to: 'missing_target', role: 'deterministic-input' },
+        ]),
+      },
+    }),
+    /canvasEdges\.json\/0\/to/u,
   );
 });
 

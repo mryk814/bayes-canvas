@@ -3,6 +3,13 @@ import { createStableFingerprint, type FINGERPRINT_ALGORITHM } from './fingerpri
 import type { SemanticModel } from './compiler.js';
 import type { LayoutDocument, ModelDocument } from './model.js';
 
+export interface PortableCanvasEdge {
+  id: string;
+  from: string;
+  to: string;
+  role: string;
+}
+
 export interface PortableBayesCanvasPackage {
   manifest: {
     packageVersion: '1.0.0';
@@ -30,6 +37,7 @@ export function buildPortablePackage(
     'manifest.json': '',
     'model.json': JSON.stringify(document, null, 2),
     'layout.json': JSON.stringify(layout, null, 2),
+    'canvasEdges.json': JSON.stringify(extractCanvasEdges(document), null, 2),
     'diagnostics.json': JSON.stringify(semantic.diagnostics, null, 2),
     'handoff.json': JSON.stringify(handoff, null, 2),
     'decisions.jsonl': Object.values(document.notes).map((note) => JSON.stringify(note)).join('\n'),
@@ -46,4 +54,9 @@ export function buildPortablePackage(
   };
   files['manifest.json'] = JSON.stringify(manifest, null, 2);
   return { manifest, files };
+}
+
+function extractCanvasEdges(document: ModelDocument): PortableCanvasEdge[] {
+  const extension = document.extensions?.['bayes-canvas'] as { annotationEdges?: PortableCanvasEdge[] } | undefined;
+  return extension?.annotationEdges ?? [];
 }
