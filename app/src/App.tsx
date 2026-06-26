@@ -571,14 +571,38 @@ function getEdgeRouteOffset(index: number): number {
   return getSymmetricLaneOffset(index, EDGE_ROUTE_SPACING);
 }
 
-function getEdgeEndpointOffset(index: number): number {
-  return getSymmetricLaneOffset(index, EDGE_ENDPOINT_SPACING);
+function getEdgeEndpointOffset(index: number, total: number): number {
+  if (total <= 1) return 0;
+  return (index - (total - 1) / 2) * EDGE_ENDPOINT_SPACING;
 }
 
 function getSymmetricLaneOffset(index: number, spacing: number): number {
   if (index === 0) return 0;
   const lane = Math.ceil(index / 2) * spacing;
   return index % 2 === 0 ? lane : -lane;
+}
+
+function getEndpointLaneOffsets(entries: Array<{ edgeId: string; sortValue: number; tieBreaker: number }>): Map<string, number> {
+  const offsets = new Map<string, number>();
+  const orderedEntries = [...entries].sort((a, b) => (
+    a.sortValue - b.sortValue
+    || a.tieBreaker - b.tieBreaker
+    || a.edgeId.localeCompare(b.edgeId)
+  ));
+
+  for (const [index, entry] of orderedEntries.entries()) {
+    offsets.set(entry.edgeId, getEdgeEndpointOffset(index, orderedEntries.length));
+  }
+
+  return offsets;
+}
+
+function getEndpointLaneSortValue(handleId: string | null | undefined, node: BayesCanvasNode): number {
+  const rect = getNodeRect(node);
+  if (handleId?.endsWith('-top') || handleId?.endsWith('-bottom')) {
+    return rect.x + rect.width / 2;
+  }
+  return rect.y + rect.height / 2;
 }
 
 function getNodeLayoutDepths(nodes: BayesCanvasNode[], edges: Edge[]): Map<string, number> {
@@ -1799,20 +1823,47 @@ export function App() {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     const visibleEdges = edges.filter((edge) => !focusedNodeIds || (focusedNodeIds.has(edge.source) && focusedNodeIds.has(edge.target)));
     const laneCounts = new Map<string, number>();
-    const sourceEndpointLaneCounts = new Map<string, number>();
-    const targetEndpointLaneCounts = new Map<string, number>();
+    const sourceEndpointGroups = new Map<string, Array<{ edgeId: string; sortValue: number; tieBreaker: number }>>();
+    const targetEndpointGroups = new Map<string, Array<{ edgeId: string; sortValue: number; tieBreaker: number }>>();
+    const edgeHandles = new Map<string, Pick<Edge, 'sourceHandle' | 'targetHandle'>>();
+
+    for (const [edgeIndex, edge] of visibleEdges.entries()) {
+      const sourceNode = nodeMap.get(edge.source);
+      const targetNode = nodeMap.get(edge.target);
+      if (!sourceNode || !targetNode) continue;
+      const handles = getPreferredEdgeHandles(sourceNode, targetNode);
+      edgeHandles.set(edge.id, handles);
+      const sourceEndpointKey = `${edge.source}:${handles.sourceHandle}`;
+      const targetEndpointKey = `${edge.target}:${handles.targetHandle}`;
+      sourceEndpointGroups.set(sourceEndpointKey, [
+        ...(sourceEndpointGroups.get(sourceEndpointKey) ?? []),
+        { edgeId: edge.id, sortValue: getEndpointLaneSortValue(handles.sourceHandle, targetNode), tieBreaker: edgeIndex },
+      ]);
+      targetEndpointGroups.set(targetEndpointKey, [
+        ...(targetEndpointGroups.get(targetEndpointKey) ?? []),
+        { edgeId: edge.id, sortValue: getEndpointLaneSortValue(handles.targetHandle, sourceNode), tieBreaker: edgeIndex },
+      ]);
+    }
+
+    const sourceEndpointOffsets = new Map<string, number>();
+    for (const entries of sourceEndpointGroups.values()) {
+      for (const [edgeId, offset] of getEndpointLaneOffsets(entries)) {
+        sourceEndpointOffsets.set(edgeId, offset);
+      }
+    }
+
+    const targetEndpointOffsets = new Map<string, number>();
+    for (const entries of targetEndpointGroups.values()) {
+      for (const [edgeId, offset] of getEndpointLaneOffsets(entries)) {
+        targetEndpointOffsets.set(edgeId, offset);
+      }
+    }
 
     return visibleEdges.map((edge) => {
       const sourceNode = nodeMap.get(edge.source);
       const targetNode = nodeMap.get(edge.target);
       if (!sourceNode || !targetNode) return { ...edge, type: 'paramEdge' as const };
-      const handles = getPreferredEdgeHandles(sourceNode, targetNode);
-      const sourceEndpointKey = `${edge.source}:${handles.sourceHandle}`;
-      const targetEndpointKey = `${edge.target}:${handles.targetHandle}`;
-      const sourceLaneIndex = sourceEndpointLaneCounts.get(sourceEndpointKey) ?? 0;
-      const targetLaneIndex = targetEndpointLaneCounts.get(targetEndpointKey) ?? 0;
-      sourceEndpointLaneCounts.set(sourceEndpointKey, sourceLaneIndex + 1);
-      targetEndpointLaneCounts.set(targetEndpointKey, targetLaneIndex + 1);
+      const handles = edgeHandles.get(edge.id) ?? getPreferredEdgeHandles(sourceNode, targetNode);
       const laneKey = [
         handles.sourceHandle,
         handles.targetHandle,
@@ -1845,8 +1896,8 @@ export function App() {
           directionLabel: edgeRelation.label,
           relationKind: edgeRelation.kind,
           routeOffset: getEdgeRouteOffset(routeIndex),
-          sourceLaneOffset: getEdgeEndpointOffset(sourceLaneIndex),
-          targetLaneOffset: getEdgeEndpointOffset(targetLaneIndex),
+          sourceLaneOffset: sourceEndpointOffsets.get(edge.id) ?? 0,
+          targetLaneOffset: targetEndpointOffsets.get(edge.id) ?? 0,
         },
       };
     });
