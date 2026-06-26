@@ -68,24 +68,24 @@ test('compiles model templates into canvas documents', () => {
 });
 
 test('preserves event axes for multivariate template nodes', () => {
-  const template = modelTemplates.find((candidate) => candidate.id === 'hierarchical-retail-demand');
+  const template = modelTemplates.find((candidate) => candidate.id === 'correlated-outcome-panel');
   assert.ok(template);
 
   const compiled = compileCanvas(template.nodes, template.edges);
   assert.deepEqual(
-    compiled.document.entities.market_effect.valueType.axes.map((axis) => `${axis.role}:${axis.axisId}`),
-    ['batch:m', 'batch:market', 'event:k'],
+    compiled.document.entities.beta.valueType.axes.map((axis) => `${axis.role}:${axis.axisId}`),
+    ['event:k'],
   );
   assert.deepEqual(
-    compiled.document.entities.channel_weight.valueType.axes.map((axis) => `${axis.role}:${axis.axisId}`),
-    ['event:c'],
+    compiled.document.entities.y.valueType.axes.map((axis) => `${axis.role}:${axis.axisId}`),
+    ['batch:n', 'batch:obs', 'event:k'],
   );
   assert.equal(compiled.semantic.readiness.summary.errors, 0);
 
   const pkg = buildPortablePackage(compiled.document, compiled.layout, compiled.semantic, 'review');
   const preview = previewPortablePackageImport(pkg);
-  const projectedMarketEffect = preview.projected.nodes.find((node) => node.id === 'market_effect');
-  assert.deepEqual(projectedMarketEffect?.data.eventShape, ['K']);
+  const projectedOutcome = preview.projected.nodes.find((node) => node.id === 'y');
+  assert.deepEqual(projectedOutcome?.data.eventShape, ['K']);
 });
 
 test('keeps generated observation data out of the projected canvas', () => {

@@ -91,7 +91,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       eventShape: ['C'],
       observed: true,
       constraints: [{ kind: 'positive' }],
-      notes: 'Prior concentration vector for the channel allocation simplex.',
+      notes: 'チャネル配分 simplex の事前集中度ベクトル。',
     },
   },
   {
@@ -102,7 +102,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       name: 'market_effect_mu',
       eventShape: ['K'],
       observed: true,
-      notes: 'Prior mean vector for market intercept and price-slope deviations.',
+      notes: '市場別の切片と価格傾きのずれに使う事前平均ベクトル。',
     },
   },
   {
@@ -114,7 +114,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       eventShape: ['K'],
       distribution: { id: 'lkj_cholesky', name: 'LKJCholesky', args: { eta: '2' } },
       constraints: [{ kind: 'positive' }],
-      notes: 'Cholesky factor for correlated market intercept and price-slope deviations.',
+      notes: '市場別の切片と価格傾きの相関を表す Cholesky 因子。',
     },
   },
   {
@@ -178,7 +178,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       plate: 'market',
       distribution: { id: 'multivariate_normal', name: 'MultivariateNormal', args: { mu: 'market_effect_mu', chol: 'market_effect_chol' } },
       hints: [{ kind: 'parameterization', value: 'non_centered' }],
-      notes: 'Two market effects: demand intercept and price-slope deviation.',
+      notes: '需要切片と価格傾きのずれをまとめた市場別効果。',
     },
   },
   {
@@ -202,7 +202,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       eventShape: ['C'],
       distribution: { id: 'dirichlet', name: 'Dirichlet', args: { alpha: 'channel_alpha' } },
       constraints: [{ kind: 'simplex' }],
-      notes: 'Simplex allocation across observed sales channels.',
+      notes: '観測された販売チャネル間の simplex 配分。',
     },
   },
   {
@@ -222,7 +222,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       kind: 'parameter',
       name: 'beta_media',
       distribution: { id: 'horseshoe', name: 'Horseshoe', args: { scale: 'tau_media' } },
-      notes: 'Sparse media effect. Expanded local/global shrinkage is left to handoff.',
+      notes: '疎なメディア効果。local/global shrinkage の展開は handoff 側で確認する。',
     },
   },
   {
@@ -232,7 +232,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       kind: 'parameter',
       name: 'beta_price',
       distribution: { id: 'normal', name: 'Normal', args: { mu: '-0.4', sigma: '0.2' } },
-      notes: 'Global price elasticity baseline on the log-demand scale.',
+      notes: 'log 需要スケールでの価格弾力性の全体基準。',
     },
   },
   {
@@ -251,7 +251,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       kind: 'parameter',
       name: 'zi_alpha',
       distribution: { id: 'normal', name: 'Normal', args: { mu: '-2', sigma: '1' } },
-      notes: 'Baseline structural-zero tendency.',
+      notes: '構造的ゼロが出やすい度合いの基準。',
     },
   },
   {
@@ -359,7 +359,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       name: 'posterior_predictive_checks',
       expression: 'sales, demand_mu, zero_prob, market_effect, channel_weight',
       validationLevel: 'structured',
-      notes: 'Check zero counts, tail mass, market-level calibration, and channel lift concentration.',
+      notes: 'ゼロ件数、裾の厚さ、市場別 calibration、チャネル lift の集中を確認する。',
     },
   },
   {
@@ -369,7 +369,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       kind: 'derived_quantity',
       name: 'price_elasticity',
       expression: 'beta_price',
-      notes: 'Global log-demand response to a one-unit price change.',
+      notes: '価格が1単位変わったときの log 需要の全体反応。',
     },
   },
   {
@@ -379,7 +379,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       kind: 'derived_quantity',
       name: 'media_lift_10pct',
       expression: 'exp(beta_media * log(1.1)) - 1',
-      notes: 'Approximate lift from a 10 percent media-spend increase.',
+      notes: 'メディア支出が10%増えたときの lift の近似。',
     },
   },
   {
@@ -389,7 +389,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
       kind: 'derived_quantity',
       name: 'stockout_zero_inflation_effect',
       expression: 'gamma_stockout',
-      notes: 'Shared stockout effect used by demand and structural-zero components.',
+      notes: '需要成分と構造的ゼロ成分で共有する欠品効果。',
     },
   },
 ];
@@ -440,31 +440,775 @@ const retailDemandEdges: Edge[] = [
   { id: 'gamma_stockout-qoi_stockout_zero', source: 'gamma_stockout', target: 'qoi_stockout_zero', data: { role: 'query-source' } },
 ];
 
+const correlatedPanelNodes: Node<BayesNodeData>[] = [
+  {
+    id: 'dose',
+    position: { x: 100, y: 300 },
+    data: { kind: 'data', name: 'dose[i]', shape: ['N'], plate: 'obs', observed: true },
+  },
+  {
+    id: 'zero_vec',
+    position: { x: 320, y: 70 },
+    data: {
+      kind: 'data',
+      name: 'zero_vec',
+      eventShape: ['K'],
+      observed: true,
+      notes: 'アウトカム次元ごとの係数事前分布で共有するゼロベクトル。',
+    },
+  },
+  {
+    id: 'coef_chol',
+    position: { x: 560, y: 70 },
+    data: {
+      kind: 'hyperparameter',
+      name: 'coef_chol',
+      eventShape: ['K'],
+      distribution: { id: 'lkj_cholesky', name: 'LKJCholesky', args: { eta: '2' } },
+      constraints: [{ kind: 'positive' }],
+      notes: '切片と dose 効果の相関を表す Cholesky 因子。',
+    },
+  },
+  {
+    id: 'outcome_chol',
+    position: { x: 820, y: 70 },
+    data: {
+      kind: 'hyperparameter',
+      name: 'outcome_chol',
+      eventShape: ['K'],
+      distribution: { id: 'lkj_cholesky', name: 'LKJCholesky', args: { eta: '3' } },
+      constraints: [{ kind: 'positive' }],
+      notes: '多変量尤度で共有する残差相関の Cholesky 因子。',
+    },
+  },
+  {
+    id: 'alpha',
+    position: { x: 360, y: 230 },
+    data: {
+      kind: 'parameter',
+      name: 'alpha',
+      eventShape: ['K'],
+      distribution: { id: 'multivariate_normal', name: 'MultivariateNormal', args: { mu: 'zero_vec', chol: 'coef_chol' } },
+      hints: [{ kind: 'parameterization', value: 'non_centered' }],
+      notes: 'アウトカムベクトルの相関した基準水準。',
+    },
+  },
+  {
+    id: 'beta',
+    position: { x: 620, y: 230 },
+    data: {
+      kind: 'parameter',
+      name: 'beta',
+      eventShape: ['K'],
+      distribution: { id: 'multivariate_normal', name: 'MultivariateNormal', args: { mu: 'zero_vec', chol: 'coef_chol' } },
+      hints: [{ kind: 'parameterization', value: 'non_centered' }],
+      notes: 'アウトカム次元間で相関する dose 効果。',
+    },
+  },
+  {
+    id: 'mu',
+    position: { x: 500, y: 420 },
+    data: {
+      kind: 'deterministic',
+      name: 'mu[i]',
+      shape: ['N'],
+      eventShape: ['K'],
+      plate: 'obs',
+      expression: 'alpha + beta * dose[i]',
+    },
+  },
+  {
+    id: 'y',
+    position: { x: 500, y: 600 },
+    data: {
+      kind: 'likelihood',
+      name: 'y[i]',
+      shape: ['N'],
+      eventShape: ['K'],
+      plate: 'obs',
+      observed: true,
+      distribution: { id: 'multivariate_normal', name: 'MultivariateNormal', args: { mu: 'mu[i]', chol: 'outcome_chol' } },
+      notes: '残差相関を持つ観測ベクトルアウトカム。',
+    },
+  },
+  {
+    id: 'qoi_beta',
+    position: { x: 780, y: 420 },
+    data: {
+      kind: 'derived_quantity',
+      name: 'dose_effect_vector',
+      expression: 'beta',
+      notes: 'ベクトルアウトカムスケールでの主要な関心量。',
+    },
+  },
+];
+
+const correlatedPanelEdges: Edge[] = [
+  { id: 'zero_vec-alpha', source: 'zero_vec', target: 'alpha', data: { role: 'prior-parameter' } },
+  { id: 'coef_chol-alpha', source: 'coef_chol', target: 'alpha', data: { role: 'prior-parameter' } },
+  { id: 'zero_vec-beta', source: 'zero_vec', target: 'beta', data: { role: 'prior-parameter' } },
+  { id: 'coef_chol-beta', source: 'coef_chol', target: 'beta', data: { role: 'prior-parameter' } },
+  { id: 'dose-mu', source: 'dose', target: 'mu', data: { role: 'data-input' } },
+  { id: 'alpha-mu', source: 'alpha', target: 'mu', data: { role: 'deterministic-input' } },
+  { id: 'beta-mu', source: 'beta', target: 'mu', data: { role: 'deterministic-input' } },
+  { id: 'mu-y', source: 'mu', target: 'y', data: { role: 'likelihood-parameter' } },
+  { id: 'outcome_chol-y', source: 'outcome_chol', target: 'y', data: { role: 'likelihood-parameter' } },
+  { id: 'beta-qoi_beta', source: 'beta', target: 'qoi_beta', data: { role: 'query-source' } },
+];
+
+const unevenBinomialNodes: Node<BayesNodeData>[] = [
+  {
+    id: 'site_id',
+    position: { x: 80, y: 300 },
+    data: { kind: 'data', name: 'site_id[i]', shape: ['N'], plate: 'obs', observed: true },
+  },
+  {
+    id: 'x',
+    position: { x: 80, y: 420 },
+    data: {
+      kind: 'data',
+      name: 'x[i]',
+      shape: ['N'],
+      plate: 'obs',
+      observed: true,
+      observationProcess: { kind: 'missing', strategy: 'note_only' },
+      notes: '調査努力が低い行では predictor が欠測しうる。実装時に補完するか除外するかを決める。',
+    },
+  },
+  {
+    id: 'trials',
+    position: { x: 80, y: 540 },
+    data: {
+      kind: 'data',
+      name: 'trials[i]',
+      shape: ['N'],
+      plate: 'obs',
+      observed: true,
+      notes: '行ごとの分母。観測努力が行によって異なる。',
+    },
+  },
+  {
+    id: 'alpha_bar',
+    position: { x: 320, y: 70 },
+    data: { kind: 'hyperparameter', name: 'alpha_bar', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1.5' } } },
+  },
+  {
+    id: 'tau_site',
+    position: { x: 540, y: 70 },
+    data: {
+      kind: 'hyperparameter',
+      name: 'tau_site',
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
+      constraints: [{ kind: 'positive' }],
+    },
+  },
+  {
+    id: 'alpha_site',
+    position: { x: 430, y: 230 },
+    data: {
+      kind: 'parameter',
+      name: 'alpha_site[s]',
+      shape: ['S'],
+      plate: 'site',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: 'alpha_bar', sigma: 'tau_site' } },
+      hints: [{ kind: 'parameterization', value: 'non_centered' }],
+    },
+  },
+  {
+    id: 'beta',
+    position: { x: 740, y: 230 },
+    data: { kind: 'parameter', name: 'beta', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } } },
+  },
+  {
+    id: 'logit_p',
+    position: { x: 500, y: 430 },
+    data: {
+      kind: 'deterministic',
+      name: 'logit_p[i]',
+      shape: ['N'],
+      plate: 'obs',
+      expression: 'alpha_site[site_id[i]] + beta * x[i]',
+    },
+  },
+  {
+    id: 'successes',
+    position: { x: 500, y: 620 },
+    data: {
+      kind: 'likelihood',
+      name: 'successes[i]',
+      plate: 'obs',
+      observed: true,
+      distribution: { id: 'binomial', name: 'Binomial', args: { n: 'trials[i]', p: 'inv_logit(logit_p[i])' } },
+      notes: '行ごとの試行数で条件づけてから比較できる count。',
+    },
+  },
+  {
+    id: 'qoi_site_spread',
+    position: { x: 760, y: 430 },
+    data: {
+      kind: 'derived_quantity',
+      name: 'site_probability_spread',
+      expression: 'max(inv_logit(alpha_site)) - min(inv_logit(alpha_site))',
+      notes: '不均一な分母を考慮したあとのサイト間の運用上の差。',
+    },
+  },
+];
+
+const unevenBinomialEdges: Edge[] = [
+  { id: 'alpha_bar-alpha_site', source: 'alpha_bar', target: 'alpha_site', data: { role: 'prior-parameter' } },
+  { id: 'tau_site-alpha_site', source: 'tau_site', target: 'alpha_site', data: { role: 'prior-parameter' } },
+  { id: 'site_id-logit_p', source: 'site_id', target: 'logit_p', data: { role: 'index' } },
+  { id: 'x-logit_p', source: 'x', target: 'logit_p', data: { role: 'data-input' } },
+  { id: 'alpha_site-logit_p', source: 'alpha_site', target: 'logit_p', data: { role: 'deterministic-input' } },
+  { id: 'beta-logit_p', source: 'beta', target: 'logit_p', data: { role: 'deterministic-input' } },
+  { id: 'trials-successes', source: 'trials', target: 'successes', data: { role: 'likelihood-parameter' } },
+  { id: 'logit_p-successes', source: 'logit_p', target: 'successes', data: { role: 'likelihood-parameter' } },
+  { id: 'alpha_site-qoi_site_spread', source: 'alpha_site', target: 'qoi_site_spread', data: { role: 'query-source' } },
+];
+
+const censoredAssayNodes: Node<BayesNodeData>[] = [
+  {
+    id: 'batch_id',
+    position: { x: 90, y: 300 },
+    data: { kind: 'data', name: 'batch_id[i]', shape: ['N'], plate: 'obs', observed: true },
+  },
+  {
+    id: 'dilution',
+    position: { x: 90, y: 420 },
+    data: {
+      kind: 'data',
+      name: 'dilution[i]',
+      shape: ['N'],
+      plate: 'obs',
+      observed: true,
+      constraints: [{ kind: 'positive' }],
+      notes: '行ごとの希釈率が、尤度評価前の測定スケールを変える。',
+    },
+  },
+  {
+    id: 'lod',
+    position: { x: 90, y: 540 },
+    data: {
+      kind: 'data',
+      name: 'lod[i]',
+      shape: ['N'],
+      plate: 'obs',
+      observed: true,
+      constraints: [{ kind: 'positive' }],
+      notes: '検出限界は単一定数ではなく行ごとに異なる。',
+    },
+  },
+  {
+    id: 'mu_base',
+    position: { x: 330, y: 70 },
+    data: { kind: 'parameter', name: 'mu_base', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '2' } } },
+  },
+  {
+    id: 'tau_batch',
+    position: { x: 560, y: 70 },
+    data: {
+      kind: 'hyperparameter',
+      name: 'tau_batch',
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.5' } },
+      constraints: [{ kind: 'positive' }],
+    },
+  },
+  {
+    id: 'batch_offset',
+    position: { x: 450, y: 230 },
+    data: {
+      kind: 'parameter',
+      name: 'batch_offset[b]',
+      shape: ['B'],
+      plate: 'batch',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: 'tau_batch' } },
+      hints: [{ kind: 'parameterization', value: 'non_centered' }],
+      notes: '分析対象そのものではなく、測定機器 batch による補正項。',
+    },
+  },
+  {
+    id: 'sigma_assay',
+    position: { x: 760, y: 230 },
+    data: {
+      kind: 'parameter',
+      name: 'sigma_assay',
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.4' } },
+      constraints: [{ kind: 'positive' }],
+    },
+  },
+  {
+    id: 'log_conc_mu',
+    position: { x: 490, y: 430 },
+    data: {
+      kind: 'deterministic',
+      name: 'log_conc_mu[i]',
+      shape: ['N'],
+      plate: 'obs',
+      expression: 'mu_base + batch_offset[batch_id[i]] - log(dilution[i])',
+    },
+  },
+  {
+    id: 'assay_value',
+    position: { x: 490, y: 620 },
+    data: {
+      kind: 'likelihood',
+      name: 'assay_value[i]',
+      plate: 'obs',
+      observed: true,
+      distribution: { id: 'lognormal', name: 'LogNormal', args: { mu: 'log_conc_mu[i]', sigma: 'sigma_assay' } },
+      observationProcess: { kind: 'censored', direction: 'left', boundSymbol: 'lod[i]' },
+      notes: '行ごとの検出限界を下回る値は、ゼロ丸めではなく左打ち切りとして扱う。',
+    },
+  },
+  {
+    id: 'qoi_detection_share',
+    position: { x: 760, y: 430 },
+    data: {
+      kind: 'derived_quantity',
+      name: 'expected_below_lod_share',
+      expression: 'mean(cdf_lognormal(lod[i], log_conc_mu[i], sigma_assay))',
+      notes: '打ち切り行がどの程度情報を持つかを確認する posterior check。',
+    },
+  },
+];
+
+const censoredAssayEdges: Edge[] = [
+  { id: 'tau_batch-batch_offset', source: 'tau_batch', target: 'batch_offset', data: { role: 'prior-parameter' } },
+  { id: 'mu_base-log_conc_mu', source: 'mu_base', target: 'log_conc_mu', data: { role: 'deterministic-input' } },
+  { id: 'batch_offset-log_conc_mu', source: 'batch_offset', target: 'log_conc_mu', data: { role: 'deterministic-input' } },
+  { id: 'batch_id-log_conc_mu', source: 'batch_id', target: 'log_conc_mu', data: { role: 'index' } },
+  { id: 'dilution-log_conc_mu', source: 'dilution', target: 'log_conc_mu', data: { role: 'offset' } },
+  { id: 'log_conc_mu-assay_value', source: 'log_conc_mu', target: 'assay_value', data: { role: 'likelihood-parameter' } },
+  { id: 'sigma_assay-assay_value', source: 'sigma_assay', target: 'assay_value', data: { role: 'likelihood-parameter' } },
+  { id: 'lod-assay_value', source: 'lod', target: 'assay_value', data: { role: 'observed-value' } },
+  { id: 'lod-qoi_detection_share', source: 'lod', target: 'qoi_detection_share', data: { role: 'query-source' } },
+  { id: 'log_conc_mu-qoi_detection_share', source: 'log_conc_mu', target: 'qoi_detection_share', data: { role: 'query-source' } },
+  { id: 'sigma_assay-qoi_detection_share', source: 'sigma_assay', target: 'qoi_detection_share', data: { role: 'query-source' } },
+];
+
+const choiceSetNodes: Node<BayesNodeData>[] = [
+  {
+    id: 'price',
+    position: { x: 90, y: 250 },
+    data: {
+      kind: 'data',
+      name: 'price[i]',
+      shape: ['N'],
+      eventShape: ['C'],
+      plate: 'obs',
+      observed: true,
+      notes: '選択課題ごとの候補行列。利用不可の選択肢もデータ上で明示しておく。',
+    },
+  },
+  {
+    id: 'quality',
+    position: { x: 90, y: 370 },
+    data: { kind: 'data', name: 'quality[i]', shape: ['N'], eventShape: ['C'], plate: 'obs', observed: true },
+  },
+  {
+    id: 'available_logit_offset',
+    position: { x: 90, y: 490 },
+    data: {
+      kind: 'data',
+      name: 'available_logit_offset[i]',
+      shape: ['N'],
+      eventShape: ['C'],
+      plate: 'obs',
+      observed: true,
+      notes: '行ごとに異なる選択肢集合を、利用不可候補の確率をほぼゼロへ寄せる形で表す。',
+    },
+  },
+  {
+    id: 'person_id',
+    position: { x: 90, y: 610 },
+    data: { kind: 'data', name: 'person_id[i]', shape: ['N'], plate: 'obs', observed: true },
+  },
+  {
+    id: 'tau_person',
+    position: { x: 330, y: 70 },
+    data: {
+      kind: 'hyperparameter',
+      name: 'tau_person',
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.8' } },
+      constraints: [{ kind: 'positive' }],
+    },
+  },
+  {
+    id: 'person_bias',
+    position: { x: 330, y: 220 },
+    data: {
+      kind: 'parameter',
+      name: 'person_bias[p]',
+      shape: ['P'],
+      plate: 'person',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: 'tau_person' } },
+      hints: [{ kind: 'parameterization', value: 'non_centered' }],
+      notes: '回答タスク数が異なる回答者ごとの反復課題 heterogeneity。',
+    },
+  },
+  {
+    id: 'beta_price',
+    position: { x: 570, y: 120 },
+    data: { kind: 'parameter', name: 'beta_price', distribution: { id: 'normal', name: 'Normal', args: { mu: '-1', sigma: '0.5' } } },
+  },
+  {
+    id: 'beta_quality',
+    position: { x: 790, y: 120 },
+    data: { kind: 'parameter', name: 'beta_quality', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } } },
+  },
+  {
+    id: 'choice_prob',
+    position: { x: 540, y: 410 },
+    data: {
+      kind: 'deterministic',
+      name: 'choice_prob[i]',
+      shape: ['N'],
+      eventShape: ['C'],
+      plate: 'obs',
+      expression: 'softmax(person_bias[person_id[i]] + beta_quality * quality[i] + beta_price * price[i] + available_logit_offset[i])',
+    },
+  },
+  {
+    id: 'chosen',
+    position: { x: 540, y: 620 },
+    data: {
+      kind: 'likelihood',
+      name: 'chosen[i]',
+      plate: 'obs',
+      observed: true,
+      distribution: { id: 'categorical', name: 'Categorical', args: { p: 'choice_prob[i]' } },
+      notes: '観測値は選ばれた候補の index。候補特徴量は C 次元のデータ行として持つ。',
+    },
+  },
+  {
+    id: 'qoi_price_tradeoff',
+    position: { x: 820, y: 410 },
+    data: {
+      kind: 'derived_quantity',
+      name: 'price_quality_tradeoff',
+      expression: '-beta_quality / beta_price',
+      notes: 'utility スケールでの限界 tradeoff。',
+    },
+  },
+];
+
+const choiceSetEdges: Edge[] = [
+  { id: 'tau_person-person_bias', source: 'tau_person', target: 'person_bias', data: { role: 'prior-parameter' } },
+  { id: 'person_id-choice_prob', source: 'person_id', target: 'choice_prob', data: { role: 'index' } },
+  { id: 'person_bias-choice_prob', source: 'person_bias', target: 'choice_prob', data: { role: 'deterministic-input' } },
+  { id: 'price-choice_prob', source: 'price', target: 'choice_prob', data: { role: 'data-input' } },
+  { id: 'quality-choice_prob', source: 'quality', target: 'choice_prob', data: { role: 'data-input' } },
+  { id: 'available_logit_offset-choice_prob', source: 'available_logit_offset', target: 'choice_prob', data: { role: 'data-input' } },
+  { id: 'beta_price-choice_prob', source: 'beta_price', target: 'choice_prob', data: { role: 'deterministic-input' } },
+  { id: 'beta_quality-choice_prob', source: 'beta_quality', target: 'choice_prob', data: { role: 'deterministic-input' } },
+  { id: 'choice_prob-chosen', source: 'choice_prob', target: 'chosen', data: { role: 'likelihood-parameter' } },
+  { id: 'beta_price-qoi_price_tradeoff', source: 'beta_price', target: 'qoi_price_tradeoff', data: { role: 'query-source' } },
+  { id: 'beta_quality-qoi_price_tradeoff', source: 'beta_quality', target: 'qoi_price_tradeoff', data: { role: 'query-source' } },
+];
+
+const latentClassNodes: Node<BayesNodeData>[] = [
+  {
+    id: 'class_alpha',
+    position: { x: 90, y: 90 },
+    data: {
+      kind: 'data',
+      name: 'class_alpha',
+      eventShape: ['K'],
+      observed: true,
+      constraints: [{ kind: 'positive' }],
+      notes: '潜在クラス比率の事前集中度ベクトル。',
+    },
+  },
+  {
+    id: 'pi',
+    position: { x: 330, y: 90 },
+    data: {
+      kind: 'parameter',
+      name: 'pi',
+      eventShape: ['K'],
+      distribution: { id: 'dirichlet', name: 'Dirichlet', args: { alpha: 'class_alpha' } },
+      constraints: [{ kind: 'simplex' }],
+    },
+  },
+  {
+    id: 'mu_class',
+    position: { x: 570, y: 90 },
+    data: {
+      kind: 'parameter',
+      name: 'mu_class[k]',
+      shape: ['K'],
+      plate: 'class',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '3' } },
+      notes: 'クラス別の位置パラメータ。label switching の扱いを確認する。',
+    },
+  },
+  {
+    id: 'sigma',
+    position: { x: 810, y: 90 },
+    data: {
+      kind: 'parameter',
+      name: 'sigma',
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
+      constraints: [{ kind: 'positive' }],
+    },
+  },
+  {
+    id: 'z',
+    position: { x: 330, y: 300 },
+    data: {
+      kind: 'latent',
+      name: 'z[i]',
+      shape: ['N'],
+      plate: 'obs',
+      distribution: { id: 'categorical', name: 'Categorical', args: { p: 'pi' } },
+      hints: [{ kind: 'implementation', value: 'prefer marginalization for discrete class assignments' }],
+      notes: '離散潜在割当。backend が対応するなら marginalization を優先する。',
+    },
+  },
+  {
+    id: 'y',
+    position: { x: 570, y: 500 },
+    data: {
+      kind: 'likelihood',
+      name: 'y[i]',
+      plate: 'obs',
+      observed: true,
+      distribution: { id: 'normal', name: 'Normal', args: { mu: 'mu_class[z[i]]', sigma: 'sigma' } },
+    },
+  },
+  {
+    id: 'qoi_class_weight',
+    position: { x: 810, y: 300 },
+    data: {
+      kind: 'derived_quantity',
+      name: 'largest_class_share',
+      expression: 'max(pi)',
+      notes: '推定された潜在クラス比率の集中度。',
+    },
+  },
+];
+
+const latentClassEdges: Edge[] = [
+  { id: 'class_alpha-pi', source: 'class_alpha', target: 'pi', data: { role: 'prior-parameter' } },
+  { id: 'pi-z', source: 'pi', target: 'z', data: { role: 'prior-parameter' } },
+  { id: 'z-y', source: 'z', target: 'y', data: { role: 'index' } },
+  { id: 'mu_class-y', source: 'mu_class', target: 'y', data: { role: 'likelihood-parameter' } },
+  { id: 'sigma-y', source: 'sigma', target: 'y', data: { role: 'likelihood-parameter' } },
+  { id: 'pi-qoi_class_weight', source: 'pi', target: 'qoi_class_weight', data: { role: 'query-source' } },
+];
+
+const latentTrajectoryNodes: Node<BayesNodeData>[] = [
+  {
+    id: 'season_flag',
+    position: { x: 100, y: 380 },
+    data: {
+      kind: 'data',
+      name: 'season_flag[t]',
+      shape: ['T'],
+      plate: 'time',
+      observed: true,
+      notes: '既知の時変 covariate。欠けたカレンダー行は time index 上で明示する。',
+    },
+  },
+  {
+    id: 'sigma_state',
+    position: { x: 300, y: 80 },
+    data: {
+      kind: 'hyperparameter',
+      name: 'sigma_state',
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.5' } },
+      constraints: [{ kind: 'positive' }],
+    },
+  },
+  {
+    id: 'sigma_obs',
+    position: { x: 540, y: 80 },
+    data: {
+      kind: 'parameter',
+      name: 'sigma_obs',
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
+      constraints: [{ kind: 'positive' }],
+    },
+  },
+  {
+    id: 'beta_season',
+    position: { x: 780, y: 80 },
+    data: { kind: 'parameter', name: 'beta_season', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } } },
+  },
+  {
+    id: 'level',
+    position: { x: 360, y: 260 },
+    data: {
+      kind: 'latent',
+      name: 'level[t]',
+      shape: ['T'],
+      plate: 'time',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: 'sigma_state' } },
+      notes: '時間で変わる潜在 level。random-walk、AR、独立 innovation のどれにするかは handoff で決める。',
+    },
+  },
+  {
+    id: 'mu',
+    position: { x: 520, y: 440 },
+    data: {
+      kind: 'deterministic',
+      name: 'mu[t]',
+      shape: ['T'],
+      plate: 'time',
+      expression: 'level[t] + beta_season * season_flag[t]',
+    },
+  },
+  {
+    id: 'y',
+    position: { x: 520, y: 620 },
+    data: {
+      kind: 'likelihood',
+      name: 'y[t]',
+      plate: 'time',
+      observed: true,
+      distribution: { id: 'student_t', name: 'StudentT', args: { nu: '4', mu: 'mu[t]', sigma: 'sigma_obs' } },
+      observationProcess: { kind: 'missing', strategy: 'note_only' },
+      notes: '観測系列にはカレンダー欠損や外れ値がありうる。StudentT で頑健性を持たせる。',
+    },
+  },
+  {
+    id: 'qoi_level_change',
+    position: { x: 780, y: 440 },
+    data: {
+      kind: 'derived_quantity',
+      name: 'net_level_change',
+      expression: 'level[T] - level[1]',
+      notes: '潜在軌跡から見る trend 風の要約。',
+    },
+  },
+];
+
+const latentTrajectoryEdges: Edge[] = [
+  { id: 'sigma_state-level', source: 'sigma_state', target: 'level', data: { role: 'prior-parameter' } },
+  { id: 'level-mu', source: 'level', target: 'mu', data: { role: 'latent-input' } },
+  { id: 'season_flag-mu', source: 'season_flag', target: 'mu', data: { role: 'data-input' } },
+  { id: 'beta_season-mu', source: 'beta_season', target: 'mu', data: { role: 'deterministic-input' } },
+  { id: 'mu-y', source: 'mu', target: 'y', data: { role: 'likelihood-parameter' } },
+  { id: 'sigma_obs-y', source: 'sigma_obs', target: 'y', data: { role: 'likelihood-parameter' } },
+  { id: 'level-qoi_level_change', source: 'level', target: 'qoi_level_change', data: { role: 'query-source' } },
+];
+
+const itemResponseNodes: Node<BayesNodeData>[] = [
+  {
+    id: 'person_id',
+    position: { x: 90, y: 360 },
+    data: { kind: 'data', name: 'person_id[i]', shape: ['N'], plate: 'obs', observed: true },
+  },
+  {
+    id: 'item_id',
+    position: { x: 90, y: 480 },
+    data: { kind: 'data', name: 'item_id[i]', shape: ['N'], plate: 'obs', observed: true },
+  },
+  {
+    id: 'theta',
+    position: { x: 330, y: 90 },
+    data: {
+      kind: 'latent',
+      name: 'theta[p]',
+      shape: ['P'],
+      plate: 'person',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
+      notes: '人ごとの潜在能力。標準正規事前分布でスケールを固定する。',
+    },
+  },
+  {
+    id: 'difficulty',
+    position: { x: 570, y: 90 },
+    data: {
+      kind: 'parameter',
+      name: 'difficulty[q]',
+      shape: ['Q'],
+      plate: 'question',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1.5' } },
+    },
+  },
+  {
+    id: 'discrimination',
+    position: { x: 810, y: 90 },
+    data: {
+      kind: 'parameter',
+      name: 'discrimination[q]',
+      shape: ['Q'],
+      plate: 'question',
+      distribution: { id: 'lognormal', name: 'LogNormal', args: { mu: '0', sigma: '0.3' } },
+      constraints: [{ kind: 'positive' }],
+    },
+  },
+  {
+    id: 'logit_p',
+    position: { x: 560, y: 360 },
+    data: {
+      kind: 'deterministic',
+      name: 'logit_p[i]',
+      shape: ['N'],
+      plate: 'obs',
+      expression: 'discrimination[item_id[i]] * (theta[person_id[i]] - difficulty[item_id[i]])',
+    },
+  },
+  {
+    id: 'correct',
+    position: { x: 560, y: 560 },
+    data: {
+      kind: 'likelihood',
+      name: 'correct[i]',
+      plate: 'obs',
+      observed: true,
+      distribution: { id: 'bernoulli', name: 'Bernoulli', args: { p: 'inv_logit(logit_p[i])' } },
+      notes: '疎な person-item 反応行列を、密な表ではなく観測行として表す。',
+    },
+  },
+  {
+    id: 'qoi_item_hardness',
+    position: { x: 820, y: 360 },
+    data: {
+      kind: 'derived_quantity',
+      name: 'hardest_item',
+      expression: 'argmax(difficulty)',
+      notes: '潜在能力を推定した後に確認する item review 対象。',
+    },
+  },
+];
+
+const itemResponseEdges: Edge[] = [
+  { id: 'person_id-logit_p', source: 'person_id', target: 'logit_p', data: { role: 'index' } },
+  { id: 'item_id-logit_p', source: 'item_id', target: 'logit_p', data: { role: 'index' } },
+  { id: 'theta-logit_p', source: 'theta', target: 'logit_p', data: { role: 'latent-input' } },
+  { id: 'difficulty-logit_p', source: 'difficulty', target: 'logit_p', data: { role: 'deterministic-input' } },
+  { id: 'discrimination-logit_p', source: 'discrimination', target: 'logit_p', data: { role: 'deterministic-input' } },
+  { id: 'logit_p-correct', source: 'logit_p', target: 'correct', data: { role: 'likelihood-parameter' } },
+  { id: 'difficulty-qoi_item_hardness', source: 'difficulty', target: 'qoi_item_hardness', data: { role: 'query-source' } },
+];
+
 export const modelTemplates: ModelTemplate[] = [
   {
     id: 'hierarchical-regression',
-    name: 'Hierarchical regression',
-    family: 'Regression',
-    description: 'Group-level intercepts with an observed outcome and QoI-ready slope.',
+    name: '階層回帰',
+    family: '回帰',
+    description: 'グループ別切片、観測アウトカム、関心量として扱いやすい傾きを持つ基本モデル。',
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
-      'Are groups exchangeable for the current study design?',
-      'Is the observation process censored, rounded, or exact?',
+      'この研究設計ではグループを exchangeable と見なせますか？',
+      '観測過程は打ち切り、丸め、完全観測のどれですか？',
     ],
     nodes: initialNodes,
     edges: initialEdges,
   },
   {
     id: 'logistic-regression',
-    name: 'Logistic regression',
-    family: 'Binary outcome',
-    description: 'Binary likelihood with linear predictor and treatment-effect coefficient.',
+    name: 'ロジスティック回帰',
+    family: '二値アウトカム',
+    description: '線形予測子と処置効果係数を持つ二値尤度モデル。',
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
-      'Should the coefficient be reported on log-odds or probability scale?',
-      'Are class imbalance or separation risks expected?',
+      '係数は log-odds スケールと確率スケールのどちらで報告しますか？',
+      'クラス不均衡や separation のリスクはありますか？',
     ],
     nodes: [
       {
@@ -488,7 +1232,7 @@ export const modelTemplates: ModelTemplate[] = [
           kind: 'parameter',
           name: 'beta',
           distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
-          notes: 'Primary log-odds effect. Review scale before handoff.',
+          notes: '主要な log-odds 効果。handoff 前にスケールを確認する。',
         },
       },
       {
@@ -520,7 +1264,7 @@ export const modelTemplates: ModelTemplate[] = [
           kind: 'derived_quantity',
           name: 'treatment_effect',
           expression: 'beta',
-          notes: 'QoI placeholder for implementation handoff.',
+          notes: '実装 handoff 用の QoI placeholder。',
         },
       },
     ],
@@ -534,14 +1278,14 @@ export const modelTemplates: ModelTemplate[] = [
   },
   {
     id: 'poisson-count',
-    name: 'Poisson count model',
-    family: 'Count outcome',
-    description: 'Log-rate model for count data with exposure offset.',
+    name: 'Poisson count モデル',
+    family: 'count アウトカム',
+    description: 'exposure offset を持つ count データ向けの log-rate モデル。',
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
-      'Does the data show overdispersion that needs Negative Binomial?',
-      'Is exposure measured reliably for every observation?',
+      'Negative Binomial が必要なほどの過分散がありますか？',
+      'exposure はすべての観測で信頼できる形で測定されていますか？',
     ],
     nodes: [
       {
@@ -596,16 +1340,121 @@ export const modelTemplates: ModelTemplate[] = [
     ],
   },
   {
-    id: 'hierarchical-retail-demand',
-    name: 'Hierarchical retail demand',
-    family: 'Demand forecasting',
-    description: 'ZINB demand model with market, time, channel, media, measurement-error, and QoI structure.',
+    id: 'uneven-binomial-survey',
+    name: '分母が不均一な Binomial 調査',
+    family: '調査応答',
+    description: '行ごとに分母が異なり、一部 predictor に欠測方針が必要な階層 Binomial モデル。',
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
-      'Are market, channel, and time indices stable across the exported dataset?',
-      'Should stockouts enter demand, zero inflation, or both components?',
-      'Is media carryover better represented by an explicit lagged adstock block before handoff?',
+      '行ごとの試行数はサイト間で比較可能ですか、それとも現場の観測努力に左右されていますか？',
+      '欠測 predictor は補完、除外、明示的な欠測過程のどれで扱いますか？',
+      'サイト差は推定したい対象ですか、それとも補正項ですか？',
+    ],
+    nodes: unevenBinomialNodes,
+    edges: unevenBinomialEdges,
+  },
+  {
+    id: 'censored-lab-assay',
+    name: '打ち切りつき lab assay',
+    family: '測定過程',
+    description: '行ごとの希釈率、batch 効果、検出限界での左打ち切りを持つ LogNormal assay モデル。',
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
+    reviewQuestions: [
+      '検出限界は assay 値と同じスケールで記録されていますか？',
+      'batch 効果は nuisance 補正ですか、それとも報告対象の variation ですか？',
+      '打ち切り行には別途、欠測や選択の仮定が必要ですか？',
+    ],
+    nodes: censoredAssayNodes,
+    edges: censoredAssayEdges,
+  },
+  {
+    id: 'variable-choice-set',
+    name: '可変 choice set',
+    family: '離散選択',
+    description: '候補属性を行列データとして持ち、利用可能な選択肢が課題ごとに変わる Categorical choice モデル。',
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
+    reviewQuestions: [
+      '利用可能候補の mask は選択前に決まりますか、それとも過去の選択に影響されますか？',
+      '回答者ごとの heterogeneity を識別できるだけの反復課題数がありますか？',
+      'utility は outside option や候補別切片で正規化しますか？',
+    ],
+    nodes: choiceSetNodes,
+    edges: choiceSetEdges,
+  },
+  {
+    id: 'latent-class-mixture',
+    name: '潜在クラス混合',
+    family: '潜在混合',
+    description: '潜在クラス割当、simplex のクラス重み、クラス別アウトカムを持つ有限混合モデル。',
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
+    reviewQuestions: [
+      '離散クラス割当は target backend で marginalize しますか？',
+      'label switching は順序制約、事前分布、後処理のどれで扱いますか？',
+      'クラス数は事前知識や model comparison から見て妥当ですか？',
+    ],
+    nodes: latentClassNodes,
+    edges: latentClassEdges,
+  },
+  {
+    id: 'latent-trajectory-series',
+    name: '潜在軌跡の時系列',
+    family: '状態空間',
+    description: '観測欠損、頑健な尤度、時変 covariate を持つ time-indexed latent level モデル。',
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
+    reviewQuestions: [
+      '潜在 level は実装時に独立、random-walk、AR のどれとして扱いますか？',
+      '欠けたカレンダー行は構造的欠測ですか、単に未観測ですか？',
+      'StudentT の頑健性で十分ですか、それとも外れ値に別の観測過程を置きますか？',
+    ],
+    nodes: latentTrajectoryNodes,
+    edges: latentTrajectoryEdges,
+  },
+  {
+    id: 'two-parameter-irt',
+    name: '2パラメータ IRT',
+    family: '潜在特性',
+    description: '潜在能力、item difficulty、正の discrimination を持つ疎な person-item 反応モデル。',
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
+    reviewQuestions: [
+      '能力スケールは theta の事前分布と item parameterization で識別されていますか？',
+      'person-item 観測が疎すぎて、より強い item 事前分布が必要ですか？',
+      'item discrimination は共有、階層、item 別のどれで扱いますか？',
+    ],
+    nodes: itemResponseNodes,
+    edges: itemResponseEdges,
+  },
+  {
+    id: 'correlated-outcome-panel',
+    name: '相関アウトカムパネル',
+    family: '多変量アウトカム',
+    description: 'ベクトル係数、Cholesky 事前分布、多変量尤度を持つコンパクトな MVN モデル。',
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
+    reviewQuestions: [
+      'すべてのアウトカム次元は同じ行と同じスケールで観測されていますか？',
+      '係数相関と残差相関は構造を共有しますか、それとも分けますか？',
+      '尤度は covariance と Cholesky parameterization のどちらで backend に渡しますか？',
+    ],
+    nodes: correlatedPanelNodes,
+    edges: correlatedPanelEdges,
+  },
+  {
+    id: 'hierarchical-retail-demand',
+    name: '階層 retail demand',
+    family: '需要予測',
+    description: '市場、時間、チャネル、メディア、測定誤差、QoI を含む ZINB 需要モデル。',
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
+    reviewQuestions: [
+      '市場、チャネル、時間の index は export データ全体で安定していますか？',
+      '欠品は需要、ゼロ過剰、または両方の成分に入れますか？',
+      'メディア carryover は handoff 前に明示的な lagged adstock block として表しますか？',
     ],
     nodes: retailDemandNodes,
     edges: retailDemandEdges,
