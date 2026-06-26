@@ -63,6 +63,7 @@ import { diffModelDocuments } from './lib/core/semantic-diff.js';
 import { compareReceiptFingerprint, validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
 import { loadLatestAutosave, saveAutosave, type StoredSnapshot } from './lib/storage';
 import { buildModelViewProjections, type ModelViewProjectionId } from './lib/modelViewProjections';
+import { getDynamicEdgeHandles } from './lib/edgeRouting';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   data: 'データ',
@@ -150,7 +151,7 @@ const OBSERVATION_OPTIONS = [
 ] as const;
 
 const EDGE_ROUTE_SPACING = 18;
-const HORIZONTAL_EDGE_THRESHOLD = 90;
+const EDGE_ENDPOINT_SPACING = 12;
 
 interface PlateRow {
   id: string;
@@ -240,6 +241,8 @@ function getEdgeTone(targetKind: BayesNodeData['kind']): string {
   if (targetKind === 'likelihood') return 'var(--color-success-strong)';
   if (targetKind === 'deterministic' || targetKind === 'derived_quantity') return 'var(--color-chart-5)';
   if (targetKind === 'parameter') return 'color-mix(in srgb, var(--color-chart-2) 54%, var(--color-chart-3))';
+  if (targetKind === 'latent') return 'var(--color-chart-6)';
+  if (targetKind === 'hyperparameter') return 'var(--color-chart-4)';
   if (targetKind === 'data') return 'var(--color-info-strong)';
   if (targetKind === 'model_block') return 'var(--color-text-secondary)';
   return 'var(--color-accent)';
@@ -307,8 +310,15 @@ const edgeTypes = {
     markerEnd, style, data,
   }: EdgeProps) {
     const routeOffset = Number(data?.routeOffset ?? 0);
+    const sourceLaneOffset = Number(data?.sourceLaneOffset ?? 0);
+    const targetLaneOffset = Number(data?.targetLaneOffset ?? 0);
+    const adjustedSource = getLaneAdjustedPoint(sourceX, sourceY, sourcePosition, sourceLaneOffset);
+    const adjustedTarget = getLaneAdjustedPoint(targetX, targetY, targetPosition, targetLaneOffset);
     const [edgePath, labelX, labelY] = getSmoothStepPath({
-      sourceX, sourceY, targetX, targetY,
+      sourceX: adjustedSource.x,
+      sourceY: adjustedSource.y,
+      targetX: adjustedTarget.x,
+      targetY: adjustedTarget.y,
       sourcePosition, targetPosition,
       offset: 26 + Math.abs(routeOffset),
     });
@@ -344,6 +354,14 @@ const edgeTypes = {
     );
   }),
 };
+
+function getLaneAdjustedPoint(x: number, y: number, position: Position, laneOffset: number): { x: number; y: number } {
+  if (position === Position.Top || position === Position.Bottom) {
+    return { x: x + laneOffset, y };
+  }
+
+  return { x, y: y + laneOffset };
+}
 
 type BayesCanvasNode = Node<BayesNodeData>;
 
@@ -544,37 +562,49 @@ function countNodeOverlaps(nodes: BayesCanvasNode[]): number {
   return count;
 }
 
-function getNodeCenter(node: BayesCanvasNode): { x: number; y: number } {
-  return {
-    x: node.position.x + NODE_LAYOUT_WIDTH[node.data.kind] / 2,
-    y: node.position.y + NODE_LAYOUT_HEIGHT / 2,
-  };
-}
-
 function getPreferredEdgeHandles(
   sourceNode: BayesCanvasNode,
   targetNode: BayesCanvasNode,
 ): Pick<Edge, 'sourceHandle' | 'targetHandle'> {
-  const sourceCenter = getNodeCenter(sourceNode);
-  const targetCenter = getNodeCenter(targetNode);
-  const dx = targetCenter.x - sourceCenter.x;
-  const dy = targetCenter.y - sourceCenter.y;
-
-  if (Math.abs(dx) > HORIZONTAL_EDGE_THRESHOLD) {
-    return dx > 0
-      ? { sourceHandle: 'source-right', targetHandle: 'target-left' }
-      : { sourceHandle: 'source-left', targetHandle: 'target-right' };
-  }
-
-  return dy >= 0
-    ? { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
-    : { sourceHandle: 'source-top', targetHandle: 'target-bottom' };
+  return getDynamicEdgeHandles(getNodeRect(sourceNode), getNodeRect(targetNode));
 }
 
 function getEdgeRouteOffset(index: number): number {
+  return getSymmetricLaneOffset(index, EDGE_ROUTE_SPACING);
+}
+
+function getEdgeEndpointOffset(index: number, total: number): number {
+  if (total <= 1) return 0;
+  return (index - (total - 1) / 2) * EDGE_ENDPOINT_SPACING;
+}
+
+function getSymmetricLaneOffset(index: number, spacing: number): number {
   if (index === 0) return 0;
-  const lane = Math.ceil(index / 2) * EDGE_ROUTE_SPACING;
+  const lane = Math.ceil(index / 2) * spacing;
   return index % 2 === 0 ? lane : -lane;
+}
+
+function getEndpointLaneOffsets(entries: Array<{ edgeId: string; sortValue: number; tieBreaker: number }>): Map<string, number> {
+  const offsets = new Map<string, number>();
+  const orderedEntries = [...entries].sort((a, b) => (
+    a.sortValue - b.sortValue
+    || a.tieBreaker - b.tieBreaker
+    || a.edgeId.localeCompare(b.edgeId)
+  ));
+
+  for (const [index, entry] of orderedEntries.entries()) {
+    offsets.set(entry.edgeId, getEdgeEndpointOffset(index, orderedEntries.length));
+  }
+
+  return offsets;
+}
+
+function getEndpointLaneSortValue(handleId: string | null | undefined, node: BayesCanvasNode): number {
+  const rect = getNodeRect(node);
+  if (handleId?.endsWith('-top') || handleId?.endsWith('-bottom')) {
+    return rect.x + rect.width / 2;
+  }
+  return rect.y + rect.height / 2;
 }
 
 function getNodeLayoutDepths(nodes: BayesCanvasNode[], edges: Edge[]): Map<string, number> {
@@ -659,53 +689,123 @@ function arrangeCanvasNodes(nodes: BayesCanvasNode[], edges: Edge[]): BayesCanva
 
 function arrangeCanvasNodesByPlate(nodes: BayesCanvasNode[], edges: Edge[]): BayesCanvasNode[] {
   const depths = getNodeLayoutDepths(nodes, edges);
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const layoutScopeByNodeId = new Map(nodes.map((node) => [node.id, getLayoutScopeId(node, edges, nodeById)]));
   const scopeGroups = new Map<string, BayesCanvasNode[]>();
-  const scopeOrder = new Map([[GLOBAL_SCOPE_ID, 0], ['group', 1], ['obs', 2], ['observation', 2], ['time', 3]]);
   const baseY = NODE_LAYOUT_ORIGIN_Y;
-  const scopeGapY = NODE_LAYOUT_HEIGHT + 120;
-  const rowGapY = NODE_LAYOUT_HEIGHT + 30;
-  const depthStepX = NODE_LAYOUT_COLUMN_STEP;
+  const scopeGapY = 56;
+  const rowGapY = NODE_LAYOUT_HEIGHT + 12;
+  const depthStepX = NODE_LAYOUT_COLUMN_STEP + 54;
   const originX = NODE_LAYOUT_ORIGIN_X;
 
   for (const node of nodes) {
-    const scopeId = node.data.plate ?? GLOBAL_SCOPE_ID;
+    const scopeId = layoutScopeByNodeId.get(node.id) ?? GLOBAL_SCOPE_ID;
     scopeGroups.set(scopeId, [...(scopeGroups.get(scopeId) ?? []), node]);
   }
 
   const arrangedById = new Map<string, BayesCanvasNode>();
-  const orderedScopes = [...scopeGroups.entries()].sort(([a], [b]) => (
-    (scopeOrder.get(a) ?? 10) - (scopeOrder.get(b) ?? 10) || a.localeCompare(b)
+  const orderedScopes = [...scopeGroups.entries()].sort(([a, aNodes], [b, bNodes]) => (
+    getScopeLayoutScore(aNodes) - getScopeLayoutScore(bNodes)
+    || getScopeFallbackOrder(a) - getScopeFallbackOrder(b)
+    || a.localeCompare(b)
   ));
 
   let nextScopeTop = baseY;
   for (const [, scopeNodes] of orderedScopes) {
-    const sortedNodes = [...scopeNodes].sort((a, b) => (
-      (depths.get(a.id) ?? 0) - (depths.get(b.id) ?? 0)
-      || getNodeLayoutPriority(a) - getNodeLayoutPriority(b)
-      || a.position.y - b.position.y
-    ));
-    const rowByDepth = new Map<number, number>();
+    const nodesByDepth = new Map<number, BayesCanvasNode[]>();
+    const rowByNodeId = new Map<string, number>();
     let maxRow = 0;
 
-    for (const node of sortedNodes) {
+    for (const node of scopeNodes) {
       const depth = depths.get(node.id) ?? 0;
-      const row = rowByDepth.get(depth) ?? 0;
-      rowByDepth.set(depth, row + 1);
-      maxRow = Math.max(maxRow, row);
-      arrangedById.set(node.id, {
-        ...node,
-        selected: false,
-        position: {
-          x: originX + depth * depthStepX,
-          y: nextScopeTop + row * rowGapY,
-        },
-      });
+      nodesByDepth.set(depth, [...(nodesByDepth.get(depth) ?? []), node]);
+    }
+
+    for (const [depth, columnNodes] of [...nodesByDepth.entries()].sort(([a], [b]) => a - b)) {
+      const orderedColumnNodes = [...columnNodes].sort((a, b) => (
+        a.position.y - b.position.y
+        || getNodeLayoutPriority(a) - getNodeLayoutPriority(b)
+        || a.position.x - b.position.x
+      ));
+      const usedRows = new Set<number>();
+
+      for (const node of orderedColumnNodes) {
+        const preferredRow = getPreferredConnectedRow(node, edges, layoutScopeByNodeId, rowByNodeId);
+        const row = getAvailableLayoutRow(usedRows, preferredRow ?? 0);
+        usedRows.add(row);
+        maxRow = Math.max(maxRow, row);
+        rowByNodeId.set(node.id, row);
+        arrangedById.set(node.id, {
+          ...node,
+          selected: false,
+          position: {
+            x: originX + depth * depthStepX,
+            y: nextScopeTop + row * rowGapY,
+          },
+        });
+      }
     }
 
     nextScopeTop += Math.max(PLATE_GROUP_MIN_HEIGHT, (maxRow + 1) * rowGapY + PLATE_GROUP_PADDING_TOP + PLATE_GROUP_PADDING_BOTTOM) + scopeGapY;
   }
 
   return nodes.map((node) => arrangedById.get(node.id) ?? node);
+}
+
+function getAvailableLayoutRow(usedRows: Set<number>, preferredRow: number): number {
+  let row = Math.max(0, preferredRow);
+  while (usedRows.has(row)) row += 1;
+  return row;
+}
+
+function getPreferredConnectedRow(
+  node: BayesCanvasNode,
+  edges: Edge[],
+  layoutScopeByNodeId: Map<string, string>,
+  rowByNodeId: Map<string, number>,
+): number | null {
+  const nodeScope = layoutScopeByNodeId.get(node.id);
+  if (!nodeScope) return null;
+
+  const connectedRows = edges
+    .filter((edge) => edge.source === node.id || edge.target === node.id)
+    .map((edge) => (edge.source === node.id ? edge.target : edge.source))
+    .filter((connectedId) => layoutScopeByNodeId.get(connectedId) === nodeScope)
+    .map((connectedId) => rowByNodeId.get(connectedId))
+    .filter((row): row is number => row !== undefined);
+
+  return connectedRows.length === 1 ? connectedRows[0] : null;
+}
+
+function getScopeLayoutScore(nodes: BayesCanvasNode[]): number {
+  if (!nodes.length) return Number.POSITIVE_INFINITY;
+  return nodes.reduce((total, node) => total + node.position.y, 0) / nodes.length;
+}
+
+function getScopeFallbackOrder(scopeId: string): number {
+  const order = new Map([[GLOBAL_SCOPE_ID, 0], ['group', 1], ['obs', 2], ['observation', 2], ['time', 3]]);
+  return order.get(scopeId) ?? 10;
+}
+
+function getLayoutScopeId(node: BayesCanvasNode, edges: Edge[], nodeById: Map<string, BayesCanvasNode>): string {
+  if (node.data.plate) return node.data.plate;
+  if (shouldKeepUnplatedNodeInGlobalLayout(node)) return GLOBAL_SCOPE_ID;
+  const connectedNodeIds = new Set<string>();
+  const connectedScopeIds = new Set<string>();
+
+  for (const edge of edges) {
+    if (edge.source !== node.id && edge.target !== node.id) continue;
+    const otherNodeId = edge.source === node.id ? edge.target : edge.source;
+    connectedNodeIds.add(otherNodeId);
+    const otherScopeId = nodeById.get(otherNodeId)?.data.plate;
+    if (otherScopeId) connectedScopeIds.add(otherScopeId);
+  }
+
+  return connectedNodeIds.size === 1 && connectedScopeIds.size === 1 ? [...connectedScopeIds][0] : GLOBAL_SCOPE_ID;
+}
+
+function shouldKeepUnplatedNodeInGlobalLayout(node: BayesCanvasNode): boolean {
+  return ['data', 'parameter', 'hyperparameter', 'latent', 'likelihood', 'model_block'].includes(node.data.kind);
 }
 
 function getDesiredNodeY(
@@ -764,10 +864,10 @@ async function layoutCanvasNodesWithElk(nodes: BayesCanvasNode[], edges: Edge[])
       'elk.algorithm': 'layered',
       'elk.direction': 'RIGHT',
       'elk.edgeRouting': 'ORTHOGONAL',
-      'elk.spacing.nodeNode': '54',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '96',
-      'elk.layered.spacing.edgeNodeBetweenLayers': '42',
-      'elk.layered.spacing.edgeEdgeBetweenLayers': '18',
+      'elk.spacing.nodeNode': '76',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '132',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '56',
+      'elk.layered.spacing.edgeEdgeBetweenLayers': '24',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
       'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
       'elk.layered.cycleBreaking.strategy': 'GREEDY',
@@ -1732,12 +1832,47 @@ export function App() {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     const visibleEdges = edges.filter((edge) => !focusedNodeIds || (focusedNodeIds.has(edge.source) && focusedNodeIds.has(edge.target)));
     const laneCounts = new Map<string, number>();
+    const sourceEndpointGroups = new Map<string, Array<{ edgeId: string; sortValue: number; tieBreaker: number }>>();
+    const targetEndpointGroups = new Map<string, Array<{ edgeId: string; sortValue: number; tieBreaker: number }>>();
+    const edgeHandles = new Map<string, Pick<Edge, 'sourceHandle' | 'targetHandle'>>();
+
+    for (const [edgeIndex, edge] of visibleEdges.entries()) {
+      const sourceNode = nodeMap.get(edge.source);
+      const targetNode = nodeMap.get(edge.target);
+      if (!sourceNode || !targetNode) continue;
+      const handles = getPreferredEdgeHandles(sourceNode, targetNode);
+      edgeHandles.set(edge.id, handles);
+      const sourceEndpointKey = `${edge.source}:${handles.sourceHandle}`;
+      const targetEndpointKey = `${edge.target}:${handles.targetHandle}`;
+      sourceEndpointGroups.set(sourceEndpointKey, [
+        ...(sourceEndpointGroups.get(sourceEndpointKey) ?? []),
+        { edgeId: edge.id, sortValue: getEndpointLaneSortValue(handles.sourceHandle, targetNode), tieBreaker: edgeIndex },
+      ]);
+      targetEndpointGroups.set(targetEndpointKey, [
+        ...(targetEndpointGroups.get(targetEndpointKey) ?? []),
+        { edgeId: edge.id, sortValue: getEndpointLaneSortValue(handles.targetHandle, sourceNode), tieBreaker: edgeIndex },
+      ]);
+    }
+
+    const sourceEndpointOffsets = new Map<string, number>();
+    for (const entries of sourceEndpointGroups.values()) {
+      for (const [edgeId, offset] of getEndpointLaneOffsets(entries)) {
+        sourceEndpointOffsets.set(edgeId, offset);
+      }
+    }
+
+    const targetEndpointOffsets = new Map<string, number>();
+    for (const entries of targetEndpointGroups.values()) {
+      for (const [edgeId, offset] of getEndpointLaneOffsets(entries)) {
+        targetEndpointOffsets.set(edgeId, offset);
+      }
+    }
 
     return visibleEdges.map((edge) => {
       const sourceNode = nodeMap.get(edge.source);
       const targetNode = nodeMap.get(edge.target);
       if (!sourceNode || !targetNode) return { ...edge, type: 'paramEdge' as const };
-      const handles = getPreferredEdgeHandles(sourceNode, targetNode);
+      const handles = edgeHandles.get(edge.id) ?? getPreferredEdgeHandles(sourceNode, targetNode);
       const laneKey = [
         handles.sourceHandle,
         handles.targetHandle,
@@ -1770,6 +1905,8 @@ export function App() {
           directionLabel: edgeRelation.label,
           relationKind: edgeRelation.kind,
           routeOffset: getEdgeRouteOffset(routeIndex),
+          sourceLaneOffset: sourceEndpointOffsets.get(edge.id) ?? 0,
+          targetLaneOffset: targetEndpointOffsets.get(edge.id) ?? 0,
         },
       };
     });
@@ -2438,10 +2575,20 @@ export function App() {
   const resolveCanvasOverlaps = useCallback(async () => {
     if (nodes.length < 2) return;
     const previousPositions = new Map(nodes.map((node) => [node.id, node.position]));
-    const arrangedNodes = arrangeCanvasNodesByPlate(nodes, edges);
-    const undoMessage = 'プレートを考慮してノード配置を整理しました。';
+    const undoMessage = '依存関係とプレートを考慮してノード配置を整理しました。';
 
     setImportError(null);
+
+    let arrangedNodes: BayesCanvasNode[];
+    try {
+      arrangedNodes = arrangeCanvasNodesByPlate(await layoutCanvasNodesWithElk(nodes, edges), edges);
+    } catch (error) {
+      setImportError({
+        title: '配置整理に失敗しました',
+        detail: error instanceof Error ? error.message : '依存関係のレイアウトを計算できませんでした。現在の配置は変更していません。',
+      });
+      return;
+    }
 
     const movedCount = arrangedNodes.filter((node) => {
       const previous = previousPositions.get(node.id);

@@ -7,5 +7,5 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["src/lib/core/**/*.ts", "src/lib/documentAdapter.ts", "src/lib/distributionRegistry.ts", "src/lib/modelIr.ts", "src/lib/modelViewProjections.ts", "src/samples/**/*.ts"]
+  "include": ["src/lib/core/**/*.ts", "src/lib/documentAdapter.ts", "src/lib/distributionRegistry.ts", "src/lib/edgeRouting.ts", "src/lib/modelIr.ts", "src/lib/modelViewProjections.ts", "src/samples/**/*.ts"]
 }

@@ -690,9 +690,9 @@ button:disabled {
 
 .palette-derived_quantity,
 .bayes-node-derived_quantity {
-  --node-color: var(--color-chart-3);
-  --node-bg: var(--color-success-bg);
-  --node-border: var(--color-success-bd);
+  --node-color: var(--color-chart-5);
+  --node-bg: var(--color-status-review-bg);
+  --node-border: var(--color-status-review-bd);
 }
 
 .canvas {
@@ -2567,7 +2567,7 @@ pre {
 .math-line-deterministic { border-left-color: var(--color-chart-5); }
 .math-line-likelihood { border-left-color: var(--color-chart-3); }
 .math-line-observation { border-left-color: var(--color-info-strong); }
-.math-line-query { border-left-color: var(--color-chart-3); }
+.math-line-query { border-left-color: var(--color-chart-5); }
 
 @media (max-width: 980px) {
   body {
