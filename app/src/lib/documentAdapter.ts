@@ -5,7 +5,7 @@ import { compileModel } from './core/compiler.js';
 import { buildHandoffBundle, type BackendCapabilityItem, type HandoffTarget } from './core/handoff.js';
 import { createMacroInstance } from './core/macros.js';
 import { previewPatchProposal, type AiPatchProposal } from './core/patch-proposal.js';
-import { buildPortablePackage } from './core/portable.js';
+import { buildPortablePackage, type PortableCanvasEdge } from './core/portable.js';
 import { InMemoryDistributionRegistry } from './core/registry.js';
 import {
   validateLayoutDocumentEnvelope,
@@ -46,6 +46,12 @@ export interface PortablePackageImportPreview {
   semantic: ReturnType<typeof compileModel>;
   projected: { nodes: Node<BayesNodeData>[]; edges: Edge[] };
   summary: string;
+  importWarnings: string[];
+  edgeSummary: {
+    source: 'canvasEdges.json' | 'model extension' | 'semantic reconstruction';
+    declared: number;
+    projected: number;
+  };
 }
 
 const SOURCE_LANGUAGE = 'bayes-expr@1' as const;
@@ -199,23 +205,32 @@ export function previewPortablePackageImport(packageData: unknown): PortablePack
   const semantic = compileModel(document, compilerDistributionRegistry, {
     compilerVersion: '0.2.0',
   });
-  const projected = projectToReactFlow({ document, layout });
+  const edgeResolution = resolveImportEdges(document, layout, semantic, packageData.files['canvasEdges.json']);
+  const projected = projectToReactFlow({ document, layout }, { annotationEdges: edgeResolution.edges });
   return {
     document,
     layout,
     semantic,
     projected,
     summary: `${projected.nodes.length} nodes / ${projected.edges.length} links / ${semantic.diagnostics.length} diagnostics`,
+    importWarnings: edgeResolution.warnings,
+    edgeSummary: {
+      source: edgeResolution.source,
+      declared: edgeResolution.declared,
+      projected: projected.edges.length,
+    },
   };
 }
 
-export function projectToReactFlow(snapshot: AuthoringSnapshot): { nodes: Node<BayesNodeData>[]; edges: Edge[] } {
-  const extension = snapshot.document.extensions?.['bayes-canvas'] as { annotationEdges?: Array<{ id: string; from: string; to: string; role: string }> } | undefined;
+export function projectToReactFlow(
+  snapshot: AuthoringSnapshot,
+  options: { annotationEdges?: PortableCanvasEdge[] } = {},
+): { nodes: Node<BayesNodeData>[]; edges: Edge[] } {
+  const extension = snapshot.document.extensions?.['bayes-canvas'] as { annotationEdges?: PortableCanvasEdge[] } | undefined;
+  const visibleEntityIds = new Set(projectableEntityIds(snapshot.document, snapshot.layout));
   return {
-    nodes: snapshot.document.entityOrder
+    nodes: [...visibleEntityIds]
       .filter((entityId) => snapshot.document.entities[entityId])
-      .filter((entityId) => snapshot.document.entities[entityId].authorship !== 'generated')
-      .filter((entityId) => !snapshot.layout.hiddenEntityIds?.includes(entityId))
       .map((entityId) => {
         const entity = snapshot.document.entities[entityId];
         const layout = snapshot.layout.nodes[entityId];
@@ -226,13 +241,146 @@ export function projectToReactFlow(snapshot: AuthoringSnapshot): { nodes: Node<B
           data: entityToNodeData(entity),
         };
       }),
-    edges: (extension?.annotationEdges ?? []).map((edge) => ({
-      id: edge.id,
-      source: edge.from,
-      target: edge.to,
-      data: { role: edge.role },
-    })),
+    edges: (options.annotationEdges ?? extension?.annotationEdges ?? [])
+      .filter((edge) => visibleEntityIds.has(edge.from) && visibleEntityIds.has(edge.to))
+      .map((edge) => ({
+        id: edge.id,
+        source: edge.from,
+        target: edge.to,
+        data: { role: edge.role },
+      })),
   };
+}
+
+function resolveImportEdges(
+  document: ModelDocument,
+  layout: LayoutDocument,
+  semantic: ReturnType<typeof compileModel>,
+  canvasEdgesFile: unknown,
+): {
+  source: PortablePackageImportPreview['edgeSummary']['source'];
+  declared: number;
+  edges: PortableCanvasEdge[];
+  warnings: string[];
+} {
+  if (canvasEdgesFile !== undefined) {
+    const edges = parseCanvasEdgesJsonFile(canvasEdgesFile);
+    validateCanvasEdges(edges, document, 'canvasEdges.json');
+    if (!edges.length) {
+      const reconstructed = reconstructSemanticEdges(document, layout, semantic);
+      if (reconstructed.length) {
+        return {
+          source: 'semantic reconstruction',
+          declared: 0,
+          edges: reconstructed,
+          warnings: [
+            `canvasEdges.json declared 0 visual links, so ${reconstructed.length} links were reconstructed from semantic dependencies.`,
+          ],
+        };
+      }
+    }
+    return { source: 'canvasEdges.json', declared: edges.length, edges, warnings: [] };
+  }
+
+  const extension = document.extensions?.['bayes-canvas'] as { annotationEdges?: PortableCanvasEdge[] } | undefined;
+  if (extension?.annotationEdges) {
+    validateCanvasEdges(extension.annotationEdges, document, 'model.json/extensions/bayes-canvas/annotationEdges');
+    if (!extension.annotationEdges.length) {
+      const reconstructed = reconstructSemanticEdges(document, layout, semantic);
+      if (reconstructed.length) {
+        return {
+          source: 'semantic reconstruction',
+          declared: 0,
+          edges: reconstructed,
+          warnings: [
+            `bayes-canvas.annotationEdges declared 0 visual links, so ${reconstructed.length} links were reconstructed from semantic dependencies.`,
+          ],
+        };
+      }
+    }
+    return {
+      source: 'model extension',
+      declared: extension.annotationEdges.length,
+      edges: extension.annotationEdges,
+      warnings: [],
+    };
+  }
+
+  const edges = reconstructSemanticEdges(document, layout, semantic);
+  return {
+    source: 'semantic reconstruction',
+    declared: 0,
+    edges,
+    warnings: [
+      `canvasEdges.json and bayes-canvas.annotationEdges were missing, so ${edges.length} visual links were reconstructed from semantic dependencies.`,
+    ],
+  };
+}
+
+function reconstructSemanticEdges(
+  document: ModelDocument,
+  layout: LayoutDocument,
+  semantic: ReturnType<typeof compileModel>,
+): PortableCanvasEdge[] {
+  const visibleEntityIds = new Set(projectableEntityIds(document, layout));
+  return semantic.dependencyEdges
+    .filter((edge) => visibleEntityIds.has(edge.from) && visibleEntityIds.has(edge.to))
+    .map((edge) => ({
+      id: `semantic-${edge.from}-${edge.to}`,
+      from: edge.from,
+      to: edge.to,
+      role: `semantic-${edge.role}`,
+    }));
+}
+
+function parseCanvasEdgesJsonFile(value: unknown): PortableCanvasEdge[] {
+  if (typeof value !== 'string') {
+    throw new Error('Portable package canvasEdges.json must be a stringified JSON array.');
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      throw new Error('canvasEdges.json must contain a JSON array.');
+    }
+    return parsed.map((edge, index) => {
+      if (!isRecord(edge)) {
+        throw new Error(`canvasEdges.json/${index}: Edge must be an object.`);
+      }
+      if (typeof edge.id !== 'string' || typeof edge.from !== 'string' || typeof edge.to !== 'string') {
+        throw new Error(`canvasEdges.json/${index}: Edge id, from, and to must be strings.`);
+      }
+      return {
+        id: edge.id,
+        from: edge.from,
+        to: edge.to,
+        role: typeof edge.role === 'string' && edge.role.trim() ? edge.role : 'dependency',
+      };
+    });
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    throw new Error('canvasEdges.json is not valid JSON.');
+  }
+}
+
+function validateCanvasEdges(edges: PortableCanvasEdge[], document: ModelDocument, scope: string): void {
+  const ids = new Set<string>();
+  const issues: string[] = [];
+  edges.forEach((edge, index) => {
+    if (ids.has(edge.id)) issues.push(`${scope}/${index}/id: Duplicate edge id "${edge.id}".`);
+    ids.add(edge.id);
+    if (!document.entities[edge.from]) issues.push(`${scope}/${index}/from: Unknown entity "${edge.from}".`);
+    if (!document.entities[edge.to]) issues.push(`${scope}/${index}/to: Unknown entity "${edge.to}".`);
+  });
+  if (issues.length) {
+    throw new Error(`Portable package validation failed: ${issues.join(' / ')}`);
+  }
+}
+
+function projectableEntityIds(document: ModelDocument, layout: LayoutDocument): string[] {
+  return document.entityOrder
+    .filter((entityId) => document.entities[entityId])
+    .filter((entityId) => document.entities[entityId].authorship !== 'generated')
+    .filter((entityId) => !layout.hiddenEntityIds?.includes(entityId));
 }
 
 function parsePackageJsonFile<T>(value: unknown, fileName: string): T {

@@ -376,6 +376,7 @@ interface PendingImportState {
   nodes: BayesCanvasNode[];
   edges: Edge[];
   summary: string;
+  importWarnings: string[];
   diagnostics: number;
   blockingDiagnostics: number;
   preview?: PortablePackageImportPreview;
@@ -957,6 +958,7 @@ function parseCanvasFile(file: File): Promise<PendingImportState> {
               markerEnd: { type: MarkerType.ArrowClosed },
             })),
             summary: preview.summary,
+            importWarnings: preview.importWarnings,
             diagnostics: preview.semantic.diagnostics.length,
             blockingDiagnostics: preview.semantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff).length,
             preview,
@@ -977,6 +979,7 @@ function parseCanvasFile(file: File): Promise<PendingImportState> {
             markerEnd: { type: MarkerType.ArrowClosed },
           })),
           summary: `${modelFile.nodes.length} nodes / ${modelFile.edges.length} links`,
+          importWarnings: [],
           diagnostics: compileCanvas(modelFile.nodes.map(prepareCanvasNode), modelFile.edges).semantic.diagnostics.length,
           blockingDiagnostics: compileCanvas(modelFile.nodes.map(prepareCanvasNode), modelFile.edges).semantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff).length,
         });
@@ -1016,12 +1019,13 @@ Return only JSON with this shape:
     "createdAt": "ISO-8601 timestamp",
     "fingerprintAlgorithm": "sha256",
     "fingerprint": "sha256 of { model, layout } if available",
-    "files": ["manifest.json", "model.json", "layout.json", "diagnostics.json", "handoff.json", "decisions.jsonl"]
+    "files": ["manifest.json", "model.json", "layout.json", "canvasEdges.json", "diagnostics.json", "handoff.json", "decisions.jsonl"]
   },
   "files": {
     "manifest.json": "stringified manifest JSON",
     "model.json": "stringified Bayes Canvas ModelDocument JSON",
     "layout.json": "stringified Bayes Canvas LayoutDocument JSON",
+    "canvasEdges.json": "stringified array of { id, from, to, role } visual links",
     "diagnostics.json": "[]",
     "handoff.json": "{}",
     "decisions.jsonl": "one JSON object per provenance, assumption, warning, or review question"
@@ -1031,6 +1035,10 @@ Return only JSON with this shape:
 Rules:
 - Preserve source provenance in ModelDocument notes or decisions.jsonl.
 - Use stable entity IDs and put layout.modelDocumentId equal to model.documentId.
+- Preserve every canvas link in files["canvasEdges.json"]. Each edge must use entity IDs from model.json: { "id": "alpha-mu", "from": "alpha", "to": "mu", "role": "deterministic-input" }.
+- Also mirror the same edge array in model.extensions["bayes-canvas"].annotationEdges for older importers.
+- Keep layout.nodes entries for every visible entity so imported nodes do not collapse to one position.
+- If visual links are unknown, derive them from semantic dependencies and add a warning note explaining that reconstruction was needed.
 - Keep ambiguous modeling choices as open review_question notes instead of inventing assumptions.
 - Do not omit model.json or layout.json.`;
 
@@ -2730,7 +2738,11 @@ export function App() {
             <strong>読み込みプレビュー: {pendingImport.sourceName}</strong>
             <span>
               {pendingImport.sourceKind} / {pendingImport.summary} / 停止 {pendingImport.blockingDiagnostics}件
+              {pendingImport.preview ? ` / edge: ${pendingImport.preview.edgeSummary.source}` : ''}
             </span>
+            {pendingImport.importWarnings.length ? (
+              <span>{pendingImport.importWarnings.join(' ')}</span>
+            ) : null}
             <button type="button" onClick={applyPendingImport}>
               適用
             </button>
