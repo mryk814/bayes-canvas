@@ -17,7 +17,7 @@ function copyText(value: string) {
 }
 
 const VISIBLE_SECTION_TITLES = new Set([
-  'Indices / Plates',
+  'Index Ranges',
   'Index Mappings',
   'Data',
   'Priors',
@@ -25,6 +25,15 @@ const VISIBLE_SECTION_TITLES = new Set([
   'Likelihood',
   'Observation Process',
 ]);
+
+const SECTION_KIND_CLASS: Record<string, string> = {
+  Data: 'math-line-data',
+  Priors: 'math-line-prior',
+  Deterministic: 'math-line-deterministic',
+  Likelihood: 'math-line-likelihood',
+  'Observation Process': 'math-line-observation',
+  'Derived Quantities': 'math-line-query',
+};
 
 export function MathView({ model, onSelectNode }: MathViewProps) {
   const sections = useMemo(() => generateModelTexSections(model), [model]);
@@ -51,34 +60,40 @@ export function MathView({ model, onSelectNode }: MathViewProps) {
           Markdownをコピー
         </button>
       </div>
-      {visibleSections.map((section) => (
-        <div className="math-section" key={section.title}>
-          <h3 className="math-section-title">{section.title}</h3>
-          <div className="math-section-lines">
-            {section.lines.map((line, index) => {
-              const key = `${section.title}-${index}`;
-              if (line.nodeId && onSelectNode) {
+      {visibleSections.map((section) => {
+        const kindClass = SECTION_KIND_CLASS[section.title] ?? '';
+        return (
+          <div className="math-section" key={section.title}>
+            <h3 className="math-section-title">
+              <span>{section.title}</span>
+              <span className="math-section-count">{section.lines.length}</span>
+            </h3>
+            <div className="math-section-lines">
+              {section.lines.map((line, index) => {
+                const key = `${section.title}-${index}`;
+                if (line.nodeId && onSelectNode) {
+                  return (
+                    <button
+                      aria-label={`${line.tex} のノードを選択`}
+                      className={`math-line math-line-clickable ${kindClass}`}
+                      key={key}
+                      type="button"
+                      onClick={() => onSelectNode(line.nodeId!)}
+                    >
+                      <TexMath tex={line.tex} />
+                    </button>
+                  );
+                }
                 return (
-                  <button
-                    aria-label={`${line.tex} のノードを選択`}
-                    className="math-line math-line-clickable"
-                    key={key}
-                    type="button"
-                    onClick={() => onSelectNode(line.nodeId!)}
-                  >
-                    <TexMath tex={line.tex} />
-                  </button>
+                  <div className="math-line" key={key}>
+                    <TexMath tex={line.tex} block />
+                  </div>
                 );
-              }
-              return (
-                <div className="math-line" key={key}>
-                  <TexMath tex={line.tex} block />
-                </div>
-              );
-            })}
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

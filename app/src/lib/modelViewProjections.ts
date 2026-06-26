@@ -168,7 +168,7 @@ function buildCanvasProjection(
     metrics: [
       { label: '要素', value: String(visibleEntities.length) },
       { label: '依存', value: String(semantic.dependencyEdges.length) },
-      { label: 'plate', value: String(Object.keys(document.plates).length) },
+      { label: '反復範囲', value: String(Object.keys(document.plates).length) },
     ],
     entityIds: visibleEntities.map((entity) => entity.id),
     sections: [
@@ -179,7 +179,7 @@ function buildCanvasProjection(
         rows: visibleEntities.map((entity) => ({
           id: `canvas-${entity.id}`,
           text: `${entity.symbol} (${formatEntityKind(entity)})`,
-          detail: entity.plateIds.length ? `plates: ${entity.plateIds.join(', ')}` : 'global',
+          detail: entity.plateIds.length ? `反復範囲: ${entity.plateIds.join(', ')}` : '全体',
           entityId: entity.id,
           monospace: true,
         })),
@@ -330,12 +330,12 @@ function buildStructureProjection(
     },
     {
       id: 'structure-plates',
-      title: 'プレート',
-      summary: `${Object.keys(document.plates).length}個のplate`,
+      title: '反復範囲（plate）',
+      summary: `${Object.keys(document.plates).length}件の反復範囲`,
       rows: Object.values(document.plates).map((plate) => ({
         id: `plate-${plate.id}`,
         text: formatPlateLine(document, plate),
-        detail: `axis: ${plate.axisId}; parents: ${plate.parentPlateIds.join(', ') || 'none'}; ${plate.assumption}`,
+        detail: `軸: ${plate.axisId}; 上位: ${plate.parentPlateIds.join(', ') || 'なし'}; 仮定: ${formatPlateAssumption(plate.assumption)}`,
         monospace: true,
       })),
     },
@@ -346,7 +346,7 @@ function buildStructureProjection(
       rows: entities.map((entity) => ({
         id: `dims-${entity.id}`,
         text: `${entity.symbol}: ${formatAxisUses(entity.valueType.axes)}`,
-        detail: entity.plateIds.length ? `plates: ${entity.plateIds.join(', ')}` : 'global',
+        detail: entity.plateIds.length ? `反復範囲: ${entity.plateIds.join(', ')}` : '全体',
         entityId: entity.id,
         monospace: true,
       })),
@@ -380,7 +380,7 @@ function buildStructureProjection(
   return {
     id: 'structure',
     title: '構造',
-    purpose: '軸、plate、shape、入れ子、index対応、意味的な依存関係を確認するビュー。',
+    purpose: '軸、反復範囲、shape、入れ子、index対応、意味的な依存関係を確認するビュー。',
     source,
     consumes: [
       { source: 'ModelDocument', fields: ['axes', 'plates', 'entities.*.valueType', 'entities.*.plateIds'] },
@@ -388,7 +388,7 @@ function buildStructureProjection(
     ],
     metrics: [
       { label: '軸', value: String(Object.keys(document.axes).length) },
-      { label: 'plate', value: String(Object.keys(document.plates).length) },
+      { label: '反復範囲', value: String(Object.keys(document.plates).length) },
       { label: '対応', value: String(indexMappings.length) },
     ],
     entityIds: entities.map((entity) => entity.id),
@@ -607,7 +607,7 @@ function inferIndexMappings(document: ModelDocument): ProjectionLine[] {
     mappings.push({
       id: `index-${entity.id}`,
       text: `${entity.symbol}: index data`,
-      detail: '対応先のplateがまだ宣言されていません。',
+      detail: '対応先の反復範囲がまだ宣言されていません。',
         entityId: entity.id,
         tone: 'warning',
         monospace: true,
@@ -618,7 +618,7 @@ function inferIndexMappings(document: ModelDocument): ProjectionLine[] {
     mappings.push({
       id: `index-${entity.id}`,
       text: `${entity.symbol}[${fromPlate.indexSymbol}]: ${fromPlateId} -> ${targetPlateId}`,
-      detail: `${fromPlate.label}のindexを${targetPlate.label}へ対応付け`,
+      detail: `${fromPlate.label}の添字を${targetPlate.label}へ対応付け`,
       entityId: entity.id,
       monospace: true,
     });
@@ -699,7 +699,13 @@ function formatDistributionCall(distributionId: string, args: Record<string, Sou
 
 function formatPlateLine(document: ModelDocument, plate: PlateDefinition): string {
   const axis = document.axes[plate.axisId];
-  return `${plate.indexSymbol} in 1..${axis?.size.source ?? plate.axisId}`;
+  return `${plate.label}: ${plate.indexSymbol} = 1..${axis?.size.source ?? plate.axisId}`;
+}
+
+function formatPlateAssumption(assumption: PlateDefinition['assumption']): string {
+  if (assumption === 'conditionally_independent') return '条件付き独立';
+  if (assumption === 'exchangeable') return '交換可能';
+  return '宣言のみ';
 }
 
 function formatValueType(entityValueType: ModelEntity['valueType']): string {

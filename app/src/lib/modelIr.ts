@@ -230,7 +230,7 @@ const PROMPT_TARGETS: Record<PromptTarget, { label: string; instruction: string;
     label: 'PyMC implementation',
     instruction: 'Implement the following Bayesian model specification in PyMC.',
     preferences: [
-      'Use named coordinates and dimensions for plates and shaped variables where possible.',
+      'Use named coordinates and dimensions for repeated scopes (plates) and shaped variables where possible.',
       'Return a runnable model construction snippet, but do not invent data values.',
     ],
   },
@@ -354,7 +354,7 @@ export function generateAiPrompt(model: ModelIr, target: PromptTarget = 'generic
     'Latent variables and parameters:',
     formatNodeList(sections.latent),
     '',
-    'Indices / plates / shapes:',
+    'Indices / repeated scopes (plates) / shapes:',
     formatPlateList(model),
     '',
     'Index mapping:',
@@ -402,7 +402,7 @@ export function generateAiPrompt(model: ModelIr, target: PromptTarget = 'generic
       : '- Structured blocks are expanded or linted where possible.',
     '- Distribution names are backend-neutral Model IR names.',
     '- Edges describe declared dependencies and should be used to preserve graph structure.',
-    '- Shapes and plates are part of the contract; do not silently broadcast without checking them.',
+    '- Shapes and repeated scopes (plates) are part of the contract; do not silently broadcast without checking them.',
     '',
     'TeX math block:',
     '```tex',
@@ -427,7 +427,7 @@ export function generateModelTexSections(model: ModelIr): MathViewSection[] {
 
   if (model.plates.length) {
     sections.push({
-      title: 'Indices / Plates',
+      title: 'Index Ranges',
       lines: model.plates.map((plate) => ({
         tex: `${plate.index} \\in \\{1, \\dots, ${plate.size}\\}`,
       })),
@@ -487,7 +487,7 @@ export function generateModelTexSections(model: ModelIr): MathViewSection[] {
     .filter((node) => node.observationProcess)
     .map((node) => ({
       nodeId: node.id,
-      tex: `${formatTexExpression(node.name)} \\;\\text{ observed as ${formatObservationProcess(node.observationProcess!)}}`,
+      tex: `${formatTexExpression(node.name)} \\;\\text{observed as } ${formatObservationProcessTex(node.observationProcess!)}`,
     }));
 
   if (observationLines.length) {
@@ -1139,7 +1139,7 @@ function formatNodeSummary(node: ModelIr['nodes'][number]): string {
   const parts = [
     `${node.name} (${node.kind})`,
     `shape: ${formatNodeShape(node)}`,
-    node.plate ? `plate: ${node.plate}` : undefined,
+    node.plate ? `repeated scope (plate): ${node.plate}` : undefined,
     node.observed ? 'observed' : undefined,
     node.distribution ? `distribution: ${formatDistributionText(node.distribution)}` : undefined,
     node.expression ? `expression: ${node.expression}` : undefined,
@@ -1150,8 +1150,8 @@ function formatNodeSummary(node: ModelIr['nodes'][number]): string {
 
 function formatPlateList(model: ModelIr): string {
   const plateLines = model.plates.length
-    ? model.plates.map((plate) => `- ${plate.id}: ${plate.label}; index ${plate.index}; size ${plate.size}`)
-    : ['- No plates declared'];
+    ? model.plates.map((plate) => `- ${plate.id}: repeated scope ${plate.label}; index ${plate.index}; size ${plate.size}`)
+    : ['- No repeated scopes declared'];
   const shapeLines = model.nodes
     .filter((node) => node.shape?.length || node.eventShape?.length)
     .map((node) => `- ${node.name}: ${formatNodeShape(node)}`);
@@ -1210,6 +1210,27 @@ function formatObservationProcess(process: ObservationProcess): string {
   if (process.kind === 'rounded') return `rounded${process.unit ? ` to ${process.unit}` : ''}`;
   if (process.kind === 'custom') return process.description;
   return 'exact';
+}
+
+function formatObservationProcessTex(process: ObservationProcess): string {
+  const sym = (s: string) => formatTexExpression(s);
+  if (process.kind === 'missing') return `\\text{missing (${process.strategy})}`;
+  if (process.kind === 'measurement_error') {
+    const scale = process.errorScaleSymbol ? `,\\; \\text{scale } ${sym(process.errorScaleSymbol)}` : '';
+    return `\\text{measurement error; latent } ${sym(process.latentTrueSymbol)}${scale}`;
+  }
+  if (process.kind === 'censored') {
+    const bound = process.boundSymbol ? `\\text{ at } ${sym(process.boundSymbol)}` : '';
+    return `\\text{${process.direction} censored}${bound}`;
+  }
+  if (process.kind === 'truncated') {
+    const lower = process.lower ? `\\text{ lower } ${sym(process.lower)}` : '';
+    const upper = process.upper ? `\\text{ upper } ${sym(process.upper)}` : '';
+    return `\\text{truncated}${lower}${upper}`;
+  }
+  if (process.kind === 'rounded') return `\\text{rounded${process.unit ? ` to ${process.unit}` : ''}}`;
+  if (process.kind === 'custom') return `\\text{${process.description.replace(/[{}\\]/g, '\\$&')}}`;
+  return '\\text{exact}';
 }
 
 function formatConstraintsAndHints(nodes: ModelIr['nodes']): string {
@@ -1273,7 +1294,7 @@ function formatQuantitiesOfInterest(quantities: QuantityOfInterest[]): string {
       const parts = [
         `${quantity.name} = ${quantity.expression}`,
         quantity.scale ? `scale ${quantity.scale}` : undefined,
-        quantity.targetPlateId ? `target plate ${quantity.targetPlateId}` : undefined,
+        quantity.targetPlateId ? `target repeated scope ${quantity.targetPlateId}` : undefined,
         quantity.description,
       ].filter(Boolean);
       return `- ${parts.join('; ')}`;
@@ -1286,7 +1307,7 @@ function formatSymbolTable(symbolTable: SymbolTable): string {
     const parts = [
       `${symbol.baseSymbol}: ${symbol.displayName}`,
       symbol.kind,
-      symbol.plateId ? `plate ${symbol.plateId}` : undefined,
+      symbol.plateId ? `repeated scope ${symbol.plateId}` : undefined,
       symbol.declaredIndex ? `index ${symbol.declaredIndex}` : undefined,
       symbol.shape.length ? `shape ${symbol.shape.join(' x ')}` : 'scalar',
     ].filter(Boolean);
@@ -1294,7 +1315,7 @@ function formatSymbolTable(symbolTable: SymbolTable): string {
     return `- ${parts.join('; ')}`;
   });
   const indexLines = Object.values(symbolTable.indices).map(
-    (symbol) => `- ${symbol.index}: ${symbol.label}; size ${symbol.size}; plate ${symbol.plateId}`,
+    (symbol) => `- ${symbol.index}: ${symbol.label}; size ${symbol.size}; repeated scope ${symbol.plateId}`,
   );
   const functionNames = Object.keys(symbolTable.functions).join(', ');
   const distributionNames = Object.values(symbolTable.distributions).map((distribution) => distribution.name).join(', ');

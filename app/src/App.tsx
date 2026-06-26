@@ -14,10 +14,12 @@ import {
   MiniMap,
   Position,
   ReactFlow,
+  SelectionMode,
   type Edge,
   type Node,
   type NodeProps,
   type OnSelectionChangeParams,
+  type Viewport,
   useEdgesState,
   useNodesState,
 } from '@xyflow/react';
@@ -31,8 +33,10 @@ import {
   generateAiPrompt,
   generateModelTex,
   getPromptTargetLabel,
+  parseSymbolName,
   type BayesNodeData,
   type Constraint,
+  type IndexMapping,
   type ModelHint,
   type ObservationProcess,
   type PromptTarget,
@@ -150,9 +154,42 @@ const HORIZONTAL_EDGE_THRESHOLD = 90;
 
 interface PlateRow {
   id: string;
+  label: string;
   index: string;
   size: string;
   nodeCount: number;
+  nodeNames: string[];
+  tone: PlateTone;
+  isGlobal: boolean;
+}
+
+type PlateTone = 'global' | 'default' | 'group' | 'obs' | 'time';
+
+interface NodePlateContext {
+  id: string;
+  label: string;
+  index: string;
+  size: string;
+  tone: PlateTone;
+  isGlobal: boolean;
+}
+
+interface IndexAccessContext {
+  label: string;
+  fromPlateId: string;
+  toPlateId: string;
+  tone: PlateTone;
+}
+
+interface PlateGroupData extends Record<string, unknown> {
+  id: string;
+  label: string;
+  index: string;
+  size: string;
+  nodeCount: number;
+  nodeNames: string[];
+  tone: PlateTone;
+  isGlobal: boolean;
 }
 
 const GREEK_UNICODE: Record<string, string> = {
@@ -191,9 +228,18 @@ function resolveEdgeParam(
   return undefined;
 }
 
+type EdgeRelationKind = 'dependency' | 'indexed-reference' | 'mapping';
+
+interface EdgeRelation {
+  kind: EdgeRelationKind;
+  label: string;
+  tone: string;
+}
+
 function getEdgeTone(targetKind: BayesNodeData['kind']): string {
   if (targetKind === 'likelihood') return 'var(--color-success-strong)';
   if (targetKind === 'deterministic' || targetKind === 'derived_quantity') return 'var(--color-chart-5)';
+  if (targetKind === 'parameter') return 'color-mix(in srgb, var(--color-chart-2) 54%, var(--color-chart-3))';
   if (targetKind === 'data') return 'var(--color-info-strong)';
   if (targetKind === 'model_block') return 'var(--color-text-secondary)';
   return 'var(--color-accent)';
@@ -201,6 +247,57 @@ function getEdgeTone(targetKind: BayesNodeData['kind']): string {
 
 function getEdgeDirectionLabel(paramLabel: string | undefined): string {
   return paramLabel ? `-> ${paramLabel}` : '->';
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getNodeReferenceText(data: BayesNodeData): string {
+  return [
+    data.expression,
+    ...Object.values(data.distribution?.args ?? {}),
+  ].filter((value): value is string => Boolean(value)).join(' ');
+}
+
+function getEdgeRelation(
+  edge: Edge,
+  sourceNode: BayesCanvasNode,
+  targetNode: BayesCanvasNode,
+  mappings: IndexMapping[],
+  paramLabel: string | undefined,
+): EdgeRelation {
+  const role = String(edge.data?.role ?? '');
+  const sourceSymbol = parseSymbolName(sourceNode.data.name).baseSymbol;
+  const referenceText = getNodeReferenceText(targetNode.data);
+  const sourceMapping = mappings.find((mapping) => mapping.symbol === sourceSymbol);
+
+  if (role === 'index' || (sourceMapping && referenceText.includes(`${sourceSymbol}[`))) {
+    return {
+      kind: 'mapping',
+      label: sourceMapping ? `${sourceMapping.fromPlateId}->${sourceMapping.toPlateId}` : 'index',
+      tone: 'var(--color-chart-5)',
+    };
+  }
+
+  const indexedReference = mappings.find((mapping) => (
+    referenceText.includes(`${sourceSymbol}[${mapping.symbol}[${mapping.inputIndex}]]`)
+    || referenceText.includes(`${sourceSymbol}[${mapping.symbol}[`)
+  ));
+
+  if (indexedReference) {
+    return {
+      kind: 'indexed-reference',
+      label: `${sourceSymbol}[${indexedReference.symbol}]`,
+      tone: 'var(--color-chart-5)',
+    };
+  }
+
+  return {
+    kind: 'dependency',
+    label: getEdgeDirectionLabel(paramLabel),
+    tone: getEdgeTone(targetNode.data.kind),
+  };
 }
 
 const edgeTypes = {
@@ -218,6 +315,7 @@ const edgeTypes = {
 
     const paramLabel = data?.paramLabel as string | undefined;
     const directionLabel = data?.directionLabel as string | undefined;
+    const relationKind = data?.relationKind as EdgeRelationKind | undefined;
 
     return (
       <>
@@ -232,7 +330,7 @@ const edgeTypes = {
         {directionLabel ? (
           <EdgeLabelRenderer>
             <div
-              className="edge-direction-label"
+              className={['edge-direction-label', relationKind ? `edge-relation-${relationKind}` : undefined].filter(Boolean).join(' ')}
               style={{
                 position: 'absolute',
                 transform: `translate(-50%, -50%) translate(${labelX + routeOffset}px, ${labelY}px)`,
@@ -302,17 +400,23 @@ interface FlowViewportControls {
 }
 
 const NODE_LAYOUT_WIDTH: Record<BayesNodeData['kind'], number> = {
-  data: 170,
+  data: 190,
   deterministic: 190,
   derived_quantity: 190,
-  hyperparameter: 198,
-  latent: 198,
-  likelihood: 208,
-  model_block: 220,
-  parameter: 198,
+  hyperparameter: 190,
+  latent: 190,
+  likelihood: 210,
+  model_block: 210,
+  parameter: 190,
 };
 
 const NODE_LAYOUT_HEIGHT = 156;
+const GLOBAL_SCOPE_ID = 'global';
+const PLATE_GROUP_PADDING_X = 44;
+const PLATE_GROUP_PADDING_TOP = 58;
+const PLATE_GROUP_PADDING_BOTTOM = 36;
+const PLATE_GROUP_MIN_WIDTH = 310;
+const PLATE_GROUP_MIN_HEIGHT = 230;
 const NODE_LAYOUT_GAP_X = 72;
 const NODE_LAYOUT_GAP_Y = 34;
 const NODE_LAYOUT_ORIGIN_X = 96;
@@ -375,6 +479,47 @@ function getNodeRect(node: BayesCanvasNode): CanvasRect {
     width: NODE_LAYOUT_WIDTH[node.data.kind],
     height: NODE_LAYOUT_HEIGHT,
   };
+}
+
+interface PlateOverlayRect {
+  id: string;
+  data: PlateGroupData;
+  nodeIds: string[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function buildPlateOverlays(nodes: BayesCanvasNode[]): PlateOverlayRect[] {
+  const grouped = new Map<string, BayesCanvasNode[]>();
+  for (const node of nodes) {
+    const scopeId = node.data.plate ?? GLOBAL_SCOPE_ID;
+    grouped.set(scopeId, [...(grouped.get(scopeId) ?? []), node]);
+  }
+
+  const scopeOrder = new Map([[GLOBAL_SCOPE_ID, 0], ['group', 1], ['obs', 2], ['observation', 2]]);
+  return [...grouped.entries()].sort(([a], [b]) => (
+    (scopeOrder.get(a) ?? 10) - (scopeOrder.get(b) ?? 10) || a.localeCompare(b)
+  )).map(([plateId, plateNodes]) => {
+    const rects = plateNodes.map(getNodeRect);
+    const minX = Math.min(...rects.map((rect) => rect.x));
+    const minY = Math.min(...rects.map((rect) => rect.y));
+    const maxX = Math.max(...rects.map((rect) => rect.x + rect.width));
+    const maxY = Math.max(...rects.map((rect) => rect.y + rect.height));
+    const size = getPlateSizeFromNodes(plateId, plateNodes);
+    const width = Math.max(PLATE_GROUP_MIN_WIDTH, maxX - minX + PLATE_GROUP_PADDING_X * 2);
+    const height = Math.max(PLATE_GROUP_MIN_HEIGHT, maxY - minY + PLATE_GROUP_PADDING_TOP + PLATE_GROUP_PADDING_BOTTOM);
+    return {
+      id: `plate-overlay-${plateId}`,
+      x: minX - PLATE_GROUP_PADDING_X,
+      y: minY - PLATE_GROUP_PADDING_TOP,
+      width,
+      height,
+      data: getPlateGroupData(plateId, size, plateNodes),
+      nodeIds: plateNodes.map((node) => node.id),
+    };
+  });
 }
 
 function rectsOverlap(a: CanvasRect, b: CanvasRect, padding = 12): boolean {
@@ -506,6 +651,57 @@ function arrangeCanvasNodes(nodes: BayesCanvasNode[], edges: Edge[]): BayesCanva
         },
       });
     }
+  }
+
+  return nodes.map((node) => arrangedById.get(node.id) ?? node);
+}
+
+function arrangeCanvasNodesByPlate(nodes: BayesCanvasNode[], edges: Edge[]): BayesCanvasNode[] {
+  const depths = getNodeLayoutDepths(nodes, edges);
+  const scopeGroups = new Map<string, BayesCanvasNode[]>();
+  const scopeOrder = new Map([[GLOBAL_SCOPE_ID, 0], ['group', 1], ['obs', 2], ['observation', 2], ['time', 3]]);
+  const baseY = NODE_LAYOUT_ORIGIN_Y;
+  const scopeGapY = NODE_LAYOUT_HEIGHT + 120;
+  const rowGapY = NODE_LAYOUT_HEIGHT + 30;
+  const depthStepX = NODE_LAYOUT_COLUMN_STEP;
+  const originX = NODE_LAYOUT_ORIGIN_X;
+
+  for (const node of nodes) {
+    const scopeId = node.data.plate ?? GLOBAL_SCOPE_ID;
+    scopeGroups.set(scopeId, [...(scopeGroups.get(scopeId) ?? []), node]);
+  }
+
+  const arrangedById = new Map<string, BayesCanvasNode>();
+  const orderedScopes = [...scopeGroups.entries()].sort(([a], [b]) => (
+    (scopeOrder.get(a) ?? 10) - (scopeOrder.get(b) ?? 10) || a.localeCompare(b)
+  ));
+
+  let nextScopeTop = baseY;
+  for (const [, scopeNodes] of orderedScopes) {
+    const sortedNodes = [...scopeNodes].sort((a, b) => (
+      (depths.get(a.id) ?? 0) - (depths.get(b.id) ?? 0)
+      || getNodeLayoutPriority(a) - getNodeLayoutPriority(b)
+      || a.position.y - b.position.y
+    ));
+    const rowByDepth = new Map<number, number>();
+    let maxRow = 0;
+
+    for (const node of sortedNodes) {
+      const depth = depths.get(node.id) ?? 0;
+      const row = rowByDepth.get(depth) ?? 0;
+      rowByDepth.set(depth, row + 1);
+      maxRow = Math.max(maxRow, row);
+      arrangedById.set(node.id, {
+        ...node,
+        selected: false,
+        position: {
+          x: originX + depth * depthStepX,
+          y: nextScopeTop + row * rowGapY,
+        },
+      });
+    }
+
+    nextScopeTop += Math.max(PLATE_GROUP_MIN_HEIGHT, (maxRow + 1) * rowGapY + PLATE_GROUP_PADDING_TOP + PLATE_GROUP_PADDING_BOTTOM) + scopeGapY;
   }
 
   return nodes.map((node) => arrangedById.get(node.id) ?? node);
@@ -974,33 +1170,66 @@ function createObservationProcess(kind: string): ObservationProcess | undefined 
 
 
 const nodeTypes = {
+  plateGroup: memo(function PlateGroupNode({ data }: NodeProps<Node<PlateGroupData>>) {
+    return (
+      <div className={`plate-group-node plate-tone-${data.tone}`}>
+        <div className="plate-group-label">
+          <strong>{data.label}</strong>
+          {data.isGlobal ? null : <span>{data.index}</span>}
+          <small>{data.isGlobal ? '反復なし' : `${data.index}=1..${data.size}`} / {data.nodeCount}要素</small>
+        </div>
+      </div>
+    );
+  }),
   bayesNode: memo(function BayesNode({ data }: NodeProps<Node<BayesNodeData>>) {
     const distributionText = data.distribution ? formatDistributionText(data.distribution) : data.expression;
     const distributionTex = data.distribution ? formatDistributionTex(data.distribution) : undefined;
     const diagnosticCount = Number(data.diagnosticCount ?? 0);
+    const plateContext = data.plateContext as NodePlateContext | undefined;
+    const mappingSource = data.mappingSourceContext as IndexAccessContext | undefined;
+    const indexAccesses = data.indexAccesses as IndexAccessContext[] | undefined;
+    const nodeClassName = [
+      'bayes-node',
+      `bayes-node-${data.kind}`,
+      plateContext ? 'has-plate' : undefined,
+      plateContext ? `plate-tone-${plateContext.tone}` : undefined,
+    ].filter(Boolean).join(' ');
 
     return (
-      <div className={`bayes-node bayes-node-${data.kind}`}>
+      <div className={nodeClassName}>
         <Handle className="node-handle node-handle-top" id="target-top" type="target" position={Position.Top} />
         <Handle className="node-handle node-handle-right" id="target-right" type="target" position={Position.Right} />
         <Handle className="node-handle node-handle-bottom" id="target-bottom" type="target" position={Position.Bottom} />
         <Handle className="node-handle node-handle-left" id="target-left" type="target" position={Position.Left} />
         <div className="node-heading">
           <span className="node-kind">{NODE_KIND_LABELS[data.kind]}</span>
-          {data.observed ? <span className="node-chip">Observed</span> : null}
-          {diagnosticCount ? <span className="node-chip node-chip-warning">{diagnosticCount}件</span> : null}
+          <span className="node-heading-badges">
+            {data.observed ? <span className="node-chip">観測済み</span> : null}
+            {diagnosticCount ? <span className="node-chip node-chip-warning">!{diagnosticCount}</span> : null}
+          </span>
         </div>
-        <div className="node-name">{data.name}</div>
+        <div className="node-name">{renderIndexedNodeName(data.name, plateContext)}</div>
         {distributionText ? <div className="node-formula">{distributionText}</div> : null}
         {distributionTex ? (
           <div className="node-tex">
             <TexMath tex={distributionTex} />
           </div>
         ) : null}
+        {mappingSource ? (
+          <div className="node-mapping-note">
+            <span>map</span>
+            <strong>{mappingSource.fromPlateId} → {mappingSource.toPlateId}</strong>
+          </div>
+        ) : null}
+        {indexAccesses?.length ? (
+          <div className="node-mapping-note">
+            <span>uses</span>
+            <strong>{indexAccesses.map((access) => access.label).join(', ')}</strong>
+          </div>
+        ) : null}
         <div className="node-meta">
-          {data.shape?.length ? <span>{data.shape.join(' x ')}</span> : <span>scalar</span>}
-          {data.eventShape?.length ? <span>event: {data.eventShape.join(' x ')}</span> : null}
-          {data.plate ? <span>plate: {data.plate}</span> : null}
+          {data.shape?.length ? <span className="node-meta-chip">{data.shape.join(' x ')}</span> : <span className="node-meta-chip">scalar</span>}
+          {data.eventShape?.length ? <span className="node-meta-chip">event: {data.eventShape.join(' x ')}</span> : null}
         </div>
         <Handle className="node-handle node-handle-top" id="source-top" type="source" position={Position.Top} />
         <Handle className="node-handle node-handle-right" id="source-right" type="source" position={Position.Right} />
@@ -1016,10 +1245,98 @@ function copyText(value: string) {
 }
 
 function inferPlateIndexForUi(plateId: string): string {
+  if (plateId === GLOBAL_SCOPE_ID) return '';
   if (plateId === 'obs' || plateId === 'observation') return 'i';
   if (plateId === 'group') return 'j';
   if (plateId === 'time') return 't';
   return plateId.slice(0, 1).toLowerCase() || 'i';
+}
+
+function getPlateTone(plateId: string): PlateTone {
+  const normalizedId = plateId.trim().toLowerCase();
+  if (normalizedId === GLOBAL_SCOPE_ID) return 'global';
+  if (normalizedId === 'group') return 'group';
+  if (normalizedId === 'obs' || normalizedId === 'observation') return 'obs';
+  if (normalizedId === 'time') return 'time';
+  return 'default';
+}
+
+function getPlateSizeFromNodes(plateId: string, plateNodes: BayesCanvasNode[]): string {
+  if (plateId === GLOBAL_SCOPE_ID) return '1';
+  return plateNodes.find((node) => node.data.shape?.length)?.data.shape?.[0] ?? plateId.toUpperCase();
+}
+
+function getPlateGroupData(plateId: string, size: string, plateNodes: BayesCanvasNode[]): PlateGroupData {
+  const normalizedId = plateId.trim().toLowerCase();
+  const labels: Record<string, string> = {
+    channel: 'チャネル',
+    global: 'グローバル',
+    group: 'グループ',
+    market: '市場',
+    obs: '観測',
+    observation: '観測',
+    time: '時点',
+  };
+  return {
+    id: plateId,
+    label: labels[normalizedId] ?? plateId,
+    index: inferPlateIndexForUi(normalizedId),
+    size,
+    nodeCount: plateNodes.length,
+    nodeNames: plateNodes.map((node) => node.data.name),
+    tone: getPlateTone(normalizedId),
+    isGlobal: normalizedId === GLOBAL_SCOPE_ID,
+  };
+}
+
+function getPlateContextForNode(node: BayesCanvasNode, groupedNodes: Map<string, BayesCanvasNode[]>): NodePlateContext | undefined {
+  const scopeId = node.data.plate ?? GLOBAL_SCOPE_ID;
+  const plateNodes = groupedNodes.get(scopeId) ?? [node];
+  const plateData = getPlateGroupData(scopeId, getPlateSizeFromNodes(scopeId, plateNodes), plateNodes);
+  return {
+    id: plateData.id,
+    label: plateData.label,
+    index: plateData.index,
+    size: plateData.size,
+    tone: plateData.tone,
+    isGlobal: plateData.isGlobal,
+  };
+}
+
+function getMappingSourceContext(data: BayesNodeData, mappings: IndexMapping[]): IndexAccessContext | undefined {
+  const symbol = parseSymbolName(data.name).baseSymbol;
+  const mapping = mappings.find((candidate) => candidate.symbol === symbol);
+  if (!mapping) return undefined;
+  return {
+    label: `${mapping.symbol}[${mapping.inputIndex}]`,
+    fromPlateId: mapping.fromPlateId,
+    toPlateId: mapping.toPlateId,
+    tone: getPlateTone(mapping.fromPlateId),
+  };
+}
+
+function getIndexAccessContexts(data: BayesNodeData, mappings: IndexMapping[]): IndexAccessContext[] {
+  const referenceText = getNodeReferenceText(data);
+  return mappings.flatMap((mapping) => {
+    const pattern = new RegExp(`\\b([A-Za-z][A-Za-z0-9_]*)\\[${escapeRegex(mapping.symbol)}\\[${escapeRegex(mapping.inputIndex)}\\]\\]`, 'g');
+    return [...referenceText.matchAll(pattern)].map((match) => ({
+      label: `${match[1]}[${mapping.symbol}[${mapping.inputIndex}]]`,
+      fromPlateId: mapping.fromPlateId,
+      toPlateId: mapping.toPlateId,
+      tone: getPlateTone(mapping.fromPlateId),
+    }));
+  });
+}
+
+function renderIndexedNodeName(name: string, plateContext?: NodePlateContext) {
+  const match = /^(.*?)(\[[^\]]+\])$/.exec(name);
+  if (!match || !plateContext) return name;
+  return (
+    <>
+      {match[1]}
+      <span className="node-name-index">{match[2]}</span>
+    </>
+  );
 }
 
 function renameIndexedSymbol(name: string, nextIndex: string): string {
@@ -1158,6 +1475,7 @@ export function App() {
   const [schemaInput, setSchemaInput] = useState('x, real, N\ny, real, N');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ImplementationReceipt | null>(null);
+  const [flowViewport, setFlowViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   const receiptFingerprintStatus = useMemo(
     () => receipt
       ? compareReceiptFingerprint(
@@ -1265,12 +1583,19 @@ export function App() {
       if (!node.data.plate) continue;
       byPlate.set(node.data.plate, [...(byPlate.get(node.data.plate) ?? []), node]);
     }
-    return [...byPlate.entries()].map(([id, plateNodes]) => ({
-      id,
-      index: inferPlateIndexForUi(id),
-      size: plateNodes.find((node) => node.data.shape?.length)?.data.shape?.[0] ?? id.toUpperCase(),
-      nodeCount: plateNodes.length,
-    }));
+    return [...byPlate.entries()].map(([id, plateNodes]) => {
+      const plateData = getPlateGroupData(id, getPlateSizeFromNodes(id, plateNodes), plateNodes);
+      return {
+        id: plateData.id,
+        label: plateData.label,
+        index: plateData.index,
+        size: plateData.size,
+        nodeCount: plateData.nodeCount,
+        nodeNames: plateData.nodeNames,
+        tone: plateData.tone,
+        isGlobal: false,
+      };
+    });
   }, [nodes]);
   const [savedModels, setSavedModels] = useState<SavedModelEntry[]>(loadSavedModelsList);
   const diagnosticCounts = useMemo(() => {
@@ -1337,18 +1662,30 @@ export function App() {
     }
     return related;
   }, [edges, focusNodeId]);
-  const flowNodes = useMemo(
-    () => nodes
-      .filter((node) => !focusedNodeIds || focusedNodeIds.has(node.id))
-      .map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          diagnosticCount: diagnosticCounts.get(node.id) ?? 0,
-        },
-      })),
-    [diagnosticCounts, focusedNodeIds, nodes],
+  const visibleFlowNodes = useMemo(
+    () => {
+      const groupedByPlate = new Map<string, BayesCanvasNode[]>();
+      for (const node of nodes) {
+        const scopeId = node.data.plate ?? GLOBAL_SCOPE_ID;
+        groupedByPlate.set(scopeId, [...(groupedByPlate.get(scopeId) ?? []), node]);
+      }
+
+      return nodes
+        .filter((node) => !focusedNodeIds || focusedNodeIds.has(node.id))
+        .map((node) => ({
+          ...node,
+          data: {
+            ...node.data,
+            diagnosticCount: diagnosticCounts.get(node.id) ?? 0,
+            plateContext: getPlateContextForNode(node, groupedByPlate),
+            mappingSourceContext: getMappingSourceContext(node.data, modelIr.indexMappings),
+            indexAccesses: getIndexAccessContexts(node.data, modelIr.indexMappings),
+          },
+        }));
+    },
+    [diagnosticCounts, focusedNodeIds, modelIr.indexMappings, nodes],
   );
+  const plateOverlays = useMemo(() => buildPlateOverlays(visibleFlowNodes), [visibleFlowNodes]);
   const selectedDiagnostics = useMemo(
     () => modelIr.diagnostics.filter((diagnostic) => diagnostic.target.nodeId === selectedNodeId || diagnostic.target.expressionId === selectedNodeId),
     [modelIr.diagnostics, selectedNodeId],
@@ -1402,7 +1739,8 @@ export function App() {
       const routeIndex = laneCounts.get(laneKey) ?? 0;
       laneCounts.set(laneKey, routeIndex + 1);
       const paramLabel = resolveEdgeParam(edge.source, targetNode.data);
-      const edgeTone = getEdgeTone(targetNode.data.kind);
+      const edgeRelation = getEdgeRelation(edge, sourceNode, targetNode, modelIr.indexMappings, paramLabel);
+      const edgeTone = edgeRelation.tone;
       return {
         ...edge,
         ...handles,
@@ -1416,16 +1754,18 @@ export function App() {
         style: {
           ...edge.style,
           stroke: edgeTone,
+          strokeDasharray: edgeRelation.kind === 'dependency' ? undefined : edgeRelation.kind === 'mapping' ? '3 5' : '8 6',
         },
         data: {
           ...edge.data,
           paramLabel,
-          directionLabel: getEdgeDirectionLabel(paramLabel),
+          directionLabel: edgeRelation.label,
+          relationKind: edgeRelation.kind,
           routeOffset: getEdgeRouteOffset(routeIndex),
         },
       };
     });
-  }, [nodes, edges, focusedNodeIds]);
+  }, [nodes, edges, focusedNodeIds, modelIr.indexMappings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1549,6 +1889,24 @@ export function App() {
     },
     [focusEditorHeading, nodes, setEdges, setNodes],
   );
+
+  const selectPlateNodes = useCallback((nodeIds: string[], additive: boolean) => {
+    const nodeIdSet = new Set(nodeIds);
+    let firstSelectedId: string | null = null;
+    setNodes((currentNodes) =>
+      currentNodes.map((node) => {
+        const nextSelected = nodeIdSet.has(node.id)
+          ? (additive ? !node.selected : true)
+          : (additive ? Boolean(node.selected) : false);
+        if (nextSelected && !firstSelectedId) firstSelectedId = node.id;
+        return { ...node, selected: nextSelected };
+      }),
+    );
+    setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
+    setSelectedNodeId(firstSelectedId);
+    setSelectedEdgeId(null);
+    setActiveLeftPanel('inspector');
+  }, [setEdges, setNodes]);
 
   const selectProjectionEntity = useCallback(
     (entityId: string) => {
@@ -2072,22 +2430,10 @@ export function App() {
   const resolveCanvasOverlaps = useCallback(async () => {
     if (nodes.length < 2) return;
     const previousPositions = new Map(nodes.map((node) => [node.id, node.position]));
-    let arrangedNodes: BayesCanvasNode[];
-    let undoMessage = 'ELKでノード配置を整理しました。';
+    const arrangedNodes = arrangeCanvasNodesByPlate(nodes, edges);
+    const undoMessage = 'プレートを考慮してノード配置を整理しました。';
 
-    try {
-      arrangedNodes = (await layoutCanvasNodesWithElk(nodes, edges)).map((node) => ({ ...node, selected: false }));
-      setImportError(null);
-    } catch (error) {
-      arrangedNodes = arrangeCanvasNodes(nodes, edges).map((node) => ({ ...node, selected: false }));
-      undoMessage = 'ノード配置を整理しました。';
-      setImportError({
-        title: '自動レイアウトに失敗しました',
-        detail: error instanceof Error
-          ? `${error.message}。簡易レイアウトへ切り替えました。`
-          : '簡易レイアウトへ切り替えました。',
-      });
-    }
+    setImportError(null);
 
     const movedCount = arrangedNodes.filter((node) => {
       const previous = previousPositions.get(node.id);
@@ -2203,16 +2549,83 @@ export function App() {
       group: 'ファイル',
       run: copyExternalImportPrompt,
     },
+    {
+      id: 'copy-ir',
+      label: 'IR をコピー',
+      group: '高度',
+      run: () => copyText(JSON.stringify(modelIr, null, 2)),
+    },
+    {
+      id: 'save-model',
+      label: 'モデルを保存',
+      group: 'ファイル',
+      run: handleSave,
+    },
+    {
+      id: 'export-file',
+      label: 'キャンバスを書き出し',
+      group: 'ファイル',
+      run: handleExport,
+    },
+    {
+      id: 'reset-sample',
+      label: '初期サンプルへ戻す',
+      group: '高度',
+      run: resetSample,
+    },
+    {
+      id: 'import-receipt',
+      label: '実装対応表を読み込み',
+      group: '高度',
+      run: handleReceiptImport,
+    },
+    {
+      id: 'horseshoe-prior',
+      label: 'Horseshoe事前分布を適用',
+      group: '補助',
+      run: applyHorseshoePrior,
+    },
+    {
+      id: 'schema-import',
+      label: 'スキーマ取り込みを開く',
+      group: '補助',
+      run: () => setActiveLeftPanel('structure'),
+    },
+    {
+      id: 'focus-dependencies',
+      label: '選択ノードの依存関係だけ表示',
+      group: 'キャンバス',
+      run: () => setFocusNodeId(selectedNodeId),
+    },
+    {
+      id: 'clear-focus',
+      label: '絞り込み解除',
+      group: 'キャンバス',
+      run: () => setFocusNodeId(null),
+    },
+    {
+      id: 'go-advanced',
+      label: '詳細出力を開く',
+      group: '移動',
+      run: () => setActiveOutput('advanced'),
+    },
   ], [
     addModelBlock,
     addNodeFromPalette,
     addQoIFromSelection,
+    applyHorseshoePrior,
     applyModelTemplate,
     copyExternalImportPrompt,
+    handleExport,
     handleImport,
+    handleReceiptImport,
+    handleSave,
+    modelIr,
     modelViewProjections,
     portablePackage,
+    resetSample,
     resolveCanvasOverlaps,
+    selectedNodeId,
   ]);
 
   const filteredCommands = useMemo(() => {
@@ -2253,23 +2666,23 @@ export function App() {
           <p>ベイズモデルを図で組み、実装へ渡すためのキャンバス。</p>
         </div>
         <div className="model-summary" aria-label="モデル概要">
-          <div>
+          <div className="summary-secondary">
             <span className="summary-value">{nodes.length}</span>
             <span className="summary-label">ノード</span>
           </div>
-          <div>
+          <div className="summary-secondary">
             <span className="summary-value">{edges.length}</span>
             <span className="summary-label">リンク</span>
           </div>
-          <div>
+          <div className="summary-secondary">
             <span className="summary-value">{plateCount}</span>
-            <span className="summary-label">プレート</span>
+            <span className="summary-label">反復範囲</span>
           </div>
-          <div>
+          <div className={compiledCanvas.semantic.readiness.summary.errors ? 'summary-danger' : 'summary-quiet'}>
             <span className="summary-value">{compiledCanvas.semantic.readiness.summary.errors}</span>
             <span className="summary-label">エラー</span>
           </div>
-          <div>
+          <div className={modelIr.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length + compiledCanvas.semantic.readiness.summary.warnings ? 'summary-warning' : 'summary-quiet'}>
             <span className="summary-value">{modelIr.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length + compiledCanvas.semantic.readiness.summary.warnings}</span>
             <span className="summary-label">確認</span>
           </div>
@@ -2373,7 +2786,7 @@ export function App() {
               {activeLeftPanel === 'add'
                 ? 'モデル要素'
                 : activeLeftPanel === 'structure'
-                  ? `${plateRows.length}件のplate`
+                  ? `${plateRows.length}件の反復範囲`
                   : activeLeftPanel === 'library'
                     ? `${savedModels.length}件のsnapshot`
                     : selectedKindLabel}
@@ -2395,21 +2808,6 @@ export function App() {
           </div>
           {activeLeftPanel === 'add' ? (
             <div className="add-panel">
-              <div className="template-panel">
-                <div className="panel-title compact">
-                  <h2>テンプレート</h2>
-                  <span>{modelTemplates.length}</span>
-                </div>
-                <div className="template-list">
-                  {modelTemplates.map((template) => (
-                    <button key={template.id} type="button" onClick={() => applyModelTemplate(template)}>
-                      <strong>{template.name}</strong>
-                      <span>{template.family} / {template.status}</span>
-                      <small>{template.description}</small>
-                    </button>
-                  ))}
-                </div>
-              </div>
               <div className="palette-groups">
                 {PALETTE_GROUPS.map((group) => (
                   <div className="palette-group" key={group.title}>
@@ -2435,47 +2833,56 @@ export function App() {
           {activeLeftPanel === 'structure' ? (
             <div className="plate-panel">
               <div className="panel-title compact">
-                <h2>プレート</h2>
+                <h2>反復範囲</h2>
                 <span>{plateRows.length}</span>
               </div>
               <div className="plate-list">
                 {plateRows.map((plate) => (
-                  <div className="plate-row" key={plate.id}>
+                  <div className={`plate-row plate-tone-${plate.tone}`} key={plate.id}>
+                    <div className="plate-row-heading">
+                      <strong>{plate.label}</strong>
+                      <span>{plate.index}=1..{plate.size}</span>
+                    </div>
                     <label>
-                      id
+                      範囲ID
                       <input
                         defaultValue={plate.id}
                         onBlur={(event) => renamePlate(plate.id, event.target.value)}
                       />
                     </label>
                     <label>
-                      index
+                      添字
                       <input
                         defaultValue={plate.index}
                         onBlur={(event) => updatePlateIndex(plate.id, event.target.value)}
                       />
                     </label>
                     <label>
-                      size
+                      サイズ
                       <input
                         defaultValue={plate.size}
                         onBlur={(event) => updatePlateSize(plate.id, event.target.value)}
                       />
                     </label>
-                    <span>{plate.nodeCount}ノード</span>
+                    <span>{plate.nodeCount}ノード: {plate.nodeNames.join(', ')}</span>
                   </div>
                 ))}
-                {!plateRows.length ? <p className="empty-note">plateを持つノードはまだありません。</p> : null}
+                {!plateRows.length ? <p className="empty-note">反復範囲を持つノードはまだありません。</p> : null}
               </div>
               <button disabled={!selectedNodeId} type="button" onClick={addPlateToSelection}>
-                選択ノードにtime plateを追加
+                選択ノードをtimeの反復範囲に入れる
               </button>
               {modelIr.indexMappings.length ? (
                 <div className="mapping-list">
+                  <div className="panel-title compact">
+                    <h2>インデックス対応</h2>
+                    <span>{modelIr.indexMappings.length}</span>
+                  </div>
                   {modelIr.indexMappings.map((mapping) => (
-                    <div className="mapping-row" key={mapping.id}>
+                    <div className={`mapping-row plate-tone-${getPlateTone(mapping.fromPlateId)}`} key={mapping.id}>
                       <span>{mapping.symbol}[{mapping.inputIndex}]</span>
-                      <small>{mapping.fromPlateId} → {mapping.toPlateId}</small>
+                      <strong>{mapping.fromPlateId} → {mapping.toPlateId}</strong>
+                      {mapping.outputIndex ? <small>target index {mapping.outputIndex}</small> : null}
                     </div>
                   ))}
                 </div>
@@ -2554,7 +2961,7 @@ export function App() {
                   <span className={`kind-pill palette-${selectedData.kind}`}>{NODE_KIND_LABELS[selectedData.kind]}</span>
                 </div>
                 <div className="inspector-section">
-                  <div className="inspector-section-title">Shape / Plate</div>
+                  <div className="inspector-section-title">次元と反復範囲</div>
                   <label>
                     Batch shape
                     <input
@@ -2572,7 +2979,7 @@ export function App() {
                     />
                   </label>
                   <label>
-                    繰り返し
+                    反復範囲
                     <input
                       placeholder="obs"
                       value={selectedData.plate ?? ''}
@@ -2604,7 +3011,7 @@ export function App() {
                         ))}
                       </div>
                       <label>
-                        和を0にする単位
+                        和を0にする反復範囲
                         <input
                           placeholder="group"
                           value={getSumToZeroPlate(selectedData.constraints)}
@@ -2721,8 +3128,8 @@ export function App() {
                 <label>
                   関係
                   <input
-                    placeholder="dependency"
-                    value={String(selectedEdge.data?.role ?? 'dependency')}
+                    placeholder="依存"
+                    value={String(selectedEdge.data?.role ?? '依存')}
                     onChange={(event) => updateSelectedEdgeRole(event.target.value)}
                   />
                 </label>
@@ -2779,9 +3186,6 @@ export function App() {
                 <button type="button" onClick={handleImport}>
                   読み込み
                 </button>
-                <button type="button" onClick={copyExternalImportPrompt}>
-                  外部変換
-                </button>
                 <button type="button" onClick={handleExport}>
                   書き出し
                 </button>
@@ -2794,30 +3198,17 @@ export function App() {
                     void resolveCanvasOverlaps();
                   }}
                 >
-                  重なり解消
+                  配置整理
                 </button>
                 <button disabled={!selectedNode && !selectedEdge} type="button" onClick={deleteSelectedItem}>
                   削除
-                </button>
-              </div>
-              <div className="toolbar-group" aria-label="高度な操作">
-                <button type="button" onClick={() => exportPortablePackageToFile(portablePackage)}>
-                  Package
-                </button>
-                <button type="button" onClick={() => copyText(JSON.stringify(modelIr, null, 2))}>
-                  IRコピー
-                </button>
-              </div>
-              <div className="toolbar-group toolbar-danger" aria-label="危険な操作">
-                <button type="button" onClick={resetSample}>
-                  初期化
                 </button>
               </div>
             </div>
           </div>
           {activeModelView === 'canvas' ? (
             <ReactFlow
-              nodes={flowNodes}
+              nodes={visibleFlowNodes}
               edges={labeledEdges}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
@@ -2829,12 +3220,72 @@ export function App() {
                 reactFlowRef.current = {
                   fitView: (options) => instance.fitView(options),
                 };
+                setFlowViewport(instance.getViewport());
               }}
+              onMove={(_, viewport) => setFlowViewport(viewport)}
+              multiSelectionKeyCode={['Control', 'Meta']}
+              selectionKeyCode={null}
+              selectionMode={SelectionMode.Partial}
+              selectionOnDrag
+              panOnDrag={[1, 2]}
               deleteKeyCode={['Backspace', 'Delete']}
               fitView
               fitViewOptions={{ padding: 0.18 }}
             >
               <Background color="var(--color-border)" gap={24} />
+              <div
+                className="plate-overlay-layer plate-overlay-frame-layer"
+                aria-hidden="true"
+                style={{
+                  transform: `translate(${flowViewport.x}px, ${flowViewport.y}px) scale(${flowViewport.zoom})`,
+                }}
+              >
+                {plateOverlays.map((plate) => (
+                  <div
+                    className={`plate-overlay-box plate-tone-${plate.data.tone}`}
+                    key={plate.id}
+                    style={{
+                      left: plate.x,
+                      top: plate.y,
+                      width: plate.width,
+                      height: plate.height,
+                    }}
+                  >
+                  </div>
+                ))}
+              </div>
+              <div
+                className="plate-overlay-layer plate-overlay-label-layer"
+                style={{
+                  transform: `translate(${flowViewport.x}px, ${flowViewport.y}px) scale(${flowViewport.zoom})`,
+                }}
+              >
+                {plateOverlays.map((plate) => (
+                  <button
+                    className={`plate-group-label plate-overlay-label plate-tone-${plate.data.tone}`}
+                    key={`${plate.id}-label`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      selectPlateNodes(plate.nodeIds, event.ctrlKey || event.metaKey);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      selectPlateNodes(plate.nodeIds, event.ctrlKey || event.metaKey);
+                    }}
+                    style={{
+                      left: plate.x + 18,
+                      top: plate.y - 16,
+                    }}
+                    type="button"
+                  >
+                    <strong>{plate.data.label}</strong>
+                    {plate.data.isGlobal ? null : <span>{plate.data.index}</span>}
+                    <small>{plate.data.isGlobal ? '反復なし' : `${plate.data.index}=1..${plate.data.size}`} / {plate.data.nodeCount}要素</small>
+                  </button>
+                ))}
+              </div>
               <MiniMap />
               <Controls />
             </ReactFlow>
@@ -2966,35 +3417,10 @@ export function App() {
               <div className="empty-note">handoffを止める診断はありません。</div>
             )}
           </div>
-          <div className="assistant-panel">
+          <div className="checklist-panel">
             <div className="panel-title compact">
-              <h2>設計補助</h2>
+              <h2>チェックリスト</h2>
               <span>{reviewChecklist.filter((item) => item.done).length}/{reviewChecklist.length}</span>
-            </div>
-            <div className="assistant-grid">
-              <button type="button" onClick={() => setActiveLeftPanel('library')}>
-                <strong>聞き取り / テンプレート</strong>
-                <span>{modelTemplates.length}個の出発点</span>
-              </button>
-              <button type="button" onClick={addQoIFromSelection}>
-                <strong>確認量ビルダー</strong>
-                <span>{queryNodes.length}個の確認量</span>
-              </button>
-              <button type="button" onClick={addModelBlock}>
-                <strong>ブロック確認</strong>
-                <span>{blockNodes.length}個のブロック</span>
-              </button>
-              <button type="button" onClick={applyHorseshoePrior}>
-                <strong>事前分布補助</strong>
-                <span>{selectedData ? selectedData.name : '選択または作成'}</span>
-              </button>
-            </div>
-            <div className="schema-assistant">
-              <label>
-                スキーマ取り込み
-                <textarea value={schemaInput} onChange={(event) => setSchemaInput(event.target.value)} />
-              </label>
-              <button type="button" onClick={importSchemaColumns}>列をDataノード化</button>
             </div>
             <div className="checklist-list">
               {reviewChecklist.map((item) => (
@@ -3004,29 +3430,6 @@ export function App() {
                   <small>{item.detail}</small>
                 </div>
               ))}
-            </div>
-            <div className="decision-list">
-              <div className="assistant-subtitle">
-                <span>判断メモ</span>
-                <strong>{decisionNotes.length}</strong>
-              </div>
-              {decisionNotes.slice(0, 4).map((note) => (
-                <button key={note.id} type="button" onClick={() => selectNodeForEditing(note.id, { focusEditor: true })}>
-                  <span>{note.name}</span>
-                  <small>{note.text}</small>
-                </button>
-              ))}
-              {!decisionNotes.length ? <p className="empty-note">ノートや事前分布の理由はまだありません。</p> : null}
-            </div>
-            <div className="assistant-grid">
-              <button disabled={!selectedNodeId} type="button" onClick={() => setFocusNodeId(selectedNodeId)}>
-                <strong>依存関係だけ表示</strong>
-                <span>{focusNodeId ? '絞り込み中' : '選択ノード'}</span>
-              </button>
-              <button disabled={!focusNodeId} type="button" onClick={() => setFocusNodeId(null)}>
-                <strong>絞り込み解除</strong>
-                <span>{focusedNodeIds ? `${focusedNodeIds.size}件表示` : 'すべて表示'}</span>
-              </button>
             </div>
           </div>
           <div className="output-tabs" role="tablist" aria-label="出力">
@@ -3183,64 +3586,6 @@ export function App() {
               <pre>{outputText}</pre>
               </>
             )}
-          </div>
-          <div className="receipt-panel">
-            <div className="panel-title compact">
-              <h2>実装対応表</h2>
-              <button type="button" onClick={handleReceiptImport}>読込</button>
-            </div>
-            {receipt ? (
-              <div className="receipt-summary">
-                <strong>{receipt.backend}</strong>
-                <span>{receipt.mappings.length}件の対応</span>
-                <span>{receipt.deviations.length + receipt.addedAssumptions.length + receipt.approximations.length}件の確認項目</span>
-                {receiptFingerprintStatus ? (
-                  <span className={receiptFingerprintStatus.matches ? 'receipt-match' : 'receipt-mismatch'}>
-                    {receiptFingerprintStatus.message}
-                  </span>
-                ) : null}
-              </div>
-            ) : (
-              <p className="empty-note">外部実装の対応表を読み込めます。</p>
-            )}
-          </div>
-          <div className="patch-panel">
-            <div className="panel-title compact">
-              <h2>Patch</h2>
-              <div className="mini-actions">
-                <button type="button" onClick={insertPatchTemplate}>雛形</button>
-                <button disabled={!patchInput.trim()} type="button" onClick={savePatchToInbox}>保存</button>
-              </div>
-            </div>
-            {patchInbox.length ? (
-              <div className="patch-inbox">
-                {patchInbox.map((item) => (
-                  <button key={item.id} type="button" onClick={() => setPatchInput(item.value)}>
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <textarea
-              aria-label="JSON Patch proposal"
-              placeholder="AI patch proposal JSONを貼り付け"
-              value={patchInput}
-              onChange={(event) => setPatchInput(event.target.value)}
-            />
-            <div className="patch-actions">
-              <button disabled={!patchInput.trim()} type="button" onClick={previewPatch}>
-                プレビュー
-              </button>
-              <button disabled={!pendingPatch} type="button" onClick={applyPendingPatch}>
-                適用
-              </button>
-            </div>
-            {pendingPatch ? (
-              <div className="patch-summary">
-                <strong>{pendingPatch.summary}</strong>
-                <span>{pendingPatch.preview.semanticDiff.map((item) => item.label).join(' / ') || 'semantic diffなし'}</span>
-              </div>
-            ) : null}
           </div>
         </aside>
       </section>
