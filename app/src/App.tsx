@@ -642,9 +642,9 @@ function arrangeCanvasNodesByPlate(nodes: BayesCanvasNode[], edges: Edge[]): Bay
   const scopeGroups = new Map<string, BayesCanvasNode[]>();
   const scopeOrder = new Map([[GLOBAL_SCOPE_ID, 0], ['group', 1], ['obs', 2], ['observation', 2], ['time', 3]]);
   const baseY = NODE_LAYOUT_ORIGIN_Y;
-  const scopeGapY = NODE_LAYOUT_HEIGHT + 120;
-  const rowGapY = NODE_LAYOUT_HEIGHT + 30;
-  const depthStepX = NODE_LAYOUT_COLUMN_STEP;
+  const scopeGapY = NODE_LAYOUT_HEIGHT + 160;
+  const rowGapY = NODE_LAYOUT_HEIGHT + 56;
+  const depthStepX = NODE_LAYOUT_COLUMN_STEP + 54;
   const originX = NODE_LAYOUT_ORIGIN_X;
 
   for (const node of nodes) {
@@ -659,27 +659,32 @@ function arrangeCanvasNodesByPlate(nodes: BayesCanvasNode[], edges: Edge[]): Bay
 
   let nextScopeTop = baseY;
   for (const [, scopeNodes] of orderedScopes) {
-    const sortedNodes = [...scopeNodes].sort((a, b) => (
-      (depths.get(a.id) ?? 0) - (depths.get(b.id) ?? 0)
-      || getNodeLayoutPriority(a) - getNodeLayoutPriority(b)
-      || a.position.y - b.position.y
-    ));
-    const rowByDepth = new Map<number, number>();
+    const nodesByDepth = new Map<number, BayesCanvasNode[]>();
     let maxRow = 0;
 
-    for (const node of sortedNodes) {
+    for (const node of scopeNodes) {
       const depth = depths.get(node.id) ?? 0;
-      const row = rowByDepth.get(depth) ?? 0;
-      rowByDepth.set(depth, row + 1);
-      maxRow = Math.max(maxRow, row);
-      arrangedById.set(node.id, {
-        ...node,
-        selected: false,
-        position: {
-          x: originX + depth * depthStepX,
-          y: nextScopeTop + row * rowGapY,
-        },
-      });
+      nodesByDepth.set(depth, [...(nodesByDepth.get(depth) ?? []), node]);
+    }
+
+    for (const [depth, columnNodes] of [...nodesByDepth.entries()].sort(([a], [b]) => a - b)) {
+      const orderedColumnNodes = [...columnNodes].sort((a, b) => (
+        a.position.y - b.position.y
+        || getNodeLayoutPriority(a) - getNodeLayoutPriority(b)
+        || a.position.x - b.position.x
+      ));
+
+      for (const [row, node] of orderedColumnNodes.entries()) {
+        maxRow = Math.max(maxRow, row);
+        arrangedById.set(node.id, {
+          ...node,
+          selected: false,
+          position: {
+            x: originX + depth * depthStepX,
+            y: nextScopeTop + row * rowGapY,
+          },
+        });
+      }
     }
 
     nextScopeTop += Math.max(PLATE_GROUP_MIN_HEIGHT, (maxRow + 1) * rowGapY + PLATE_GROUP_PADDING_TOP + PLATE_GROUP_PADDING_BOTTOM) + scopeGapY;
@@ -744,10 +749,10 @@ async function layoutCanvasNodesWithElk(nodes: BayesCanvasNode[], edges: Edge[])
       'elk.algorithm': 'layered',
       'elk.direction': 'RIGHT',
       'elk.edgeRouting': 'ORTHOGONAL',
-      'elk.spacing.nodeNode': '54',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '96',
-      'elk.layered.spacing.edgeNodeBetweenLayers': '42',
-      'elk.layered.spacing.edgeEdgeBetweenLayers': '18',
+      'elk.spacing.nodeNode': '76',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '132',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '56',
+      'elk.layered.spacing.edgeEdgeBetweenLayers': '24',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
       'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
       'elk.layered.cycleBreaking.strategy': 'GREEDY',
@@ -2418,10 +2423,20 @@ export function App() {
   const resolveCanvasOverlaps = useCallback(async () => {
     if (nodes.length < 2) return;
     const previousPositions = new Map(nodes.map((node) => [node.id, node.position]));
-    const arrangedNodes = arrangeCanvasNodesByPlate(nodes, edges);
-    const undoMessage = 'プレートを考慮してノード配置を整理しました。';
+    const undoMessage = '依存関係とプレートを考慮してノード配置を整理しました。';
 
     setImportError(null);
+
+    let arrangedNodes: BayesCanvasNode[];
+    try {
+      arrangedNodes = arrangeCanvasNodesByPlate(await layoutCanvasNodesWithElk(nodes, edges), edges);
+    } catch (error) {
+      setImportError({
+        title: '配置整理に失敗しました',
+        detail: error instanceof Error ? error.message : '依存関係のレイアウトを計算できませんでした。現在の配置は変更していません。',
+      });
+      return;
+    }
 
     const movedCount = arrangedNodes.filter((node) => {
       const previous = previousPositions.get(node.id);
