@@ -4,6 +4,7 @@ import {
   compileCanvas,
   buildCanvasHandoff,
   buildCapabilityReport,
+  isPortablePackageImportCandidate,
   previewPortablePackageImport,
   projectToReactFlow,
 } from '../dist-test/lib/documentAdapter.js';
@@ -40,6 +41,8 @@ test('parses extended expression syntax used by model blocks', () => {
     'beta[1:K]',
     'dot(X[i,], beta)',
     'math.log(exposure[i])',
+    'X @ beta + alpha',
+    'normal_lpdf(y | mu, sigma)',
   ]) {
     const parsed = parseExpression(expression);
     assert.equal(parsed.ok, true, expression);
@@ -245,6 +248,230 @@ test('previews portable package imports after strict validation', () => {
     }),
     /layout\.json\/typo/u,
   );
+});
+
+test('previews natural AI import packages with nested JSON values', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  const pkg = buildPortablePackage(compiled.document, compiled.layout, compiled.semantic);
+  const naturalPackage = {
+    packageVersion: 'bayes-canvas-ai-import@1',
+    model: compiled.document,
+    canvasEdges: JSON.parse(pkg.files['canvasEdges.json']),
+    decisions: [
+      {
+        id: 'note_source',
+        kind: 'implementation_note',
+        text: 'Converted from an external AI response.',
+        status: 'open',
+        relatedEntityIds: [],
+        author: 'ai',
+      },
+    ],
+  };
+
+  assert.equal(isPortablePackageImportCandidate(naturalPackage), true);
+  const preview = previewPortablePackageImport(naturalPackage);
+  assert.equal(preview.projected.nodes.length, initialNodes.length);
+  assert.equal(preview.projected.edges.length, initialEdges.length);
+  assert.equal(preview.edgeSummary.source, 'canvasEdges.json');
+  assert.ok(preview.importWarnings.some((warning) => warning.includes('layout.json was missing')));
+});
+
+test('previews raw ModelDocument imports by deriving layout and links', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  assert.equal(isPortablePackageImportCandidate(compiled.document), true);
+
+  const preview = previewPortablePackageImport(compiled.document);
+  assert.equal(preview.document.documentId, compiled.document.documentId);
+  assert.equal(preview.projected.nodes.length, initialNodes.length);
+  assert.equal(preview.projected.edges.length, initialEdges.length);
+  assert.equal(preview.edgeSummary.source, 'model extension');
+  assert.ok(preview.importWarnings.some((warning) => warning.includes('raw ModelDocument')));
+});
+
+test('previews file-entry portable packages without stringified nested JSON', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  const pkg = buildPortablePackage(compiled.document, compiled.layout, compiled.semantic);
+  const fileEntryPackage = {
+    files: [
+      { path: 'model.bayescanvas/model.json', content: compiled.document },
+      { path: 'model.bayescanvas/layout.json', content: compiled.layout },
+      { path: 'model.bayescanvas/canvasEdges.json', content: JSON.parse(pkg.files['canvasEdges.json']) },
+    ],
+  };
+
+  const preview = previewPortablePackageImport(fileEntryPackage);
+  assert.equal(preview.projected.nodes.length, initialNodes.length);
+  assert.equal(preview.projected.edges.length, initialEdges.length);
+  assert.equal(preview.edgeSummary.source, 'canvasEdges.json');
+});
+
+test('normalizes common AI-authored ModelDocument aliases before previewing imports', () => {
+  const preview = previewPortablePackageImport({
+    packageVersion: 'bayes-canvas-ai-import@1',
+    model: {
+      schemaVersion: '1.0.0',
+      documentId: 'model_ai_alias_regression',
+      revision: 1,
+      model: { id: 'ai_alias_regression', name: 'AI alias regression' },
+      axes: {
+        obs: { id: 'obs', name: 'Observations', symbol: 'i', description: 'Rows.' },
+      },
+      plates: {
+        obs: { id: 'obs', name: 'Observation plate', axisIds: ['obs'], indexSymbol: 'i', sizeSymbol: 'N' },
+      },
+      entities: {
+        x: {
+          id: 'x',
+          symbol: 'x',
+          kind: 'data',
+          valueType: 'vector',
+          plateIds: ['obs'],
+          description: 'Predictor.',
+        },
+        y: {
+          id: 'y',
+          symbol: 'y',
+          kind: 'data',
+          valueType: 'vector',
+          plateIds: ['obs'],
+          description: 'Observed response.',
+        },
+        alpha: {
+          id: 'alpha',
+          symbol: 'alpha',
+          kind: 'random_variable',
+          valueType: 'scalar',
+          plateIds: [],
+          role: 'parameter',
+          distribution: { distributionId: 'normal', args: { mu: 0, sigma: 1 } },
+        },
+        beta: {
+          id: 'beta',
+          symbol: 'beta',
+          kind: 'random_variable',
+          valueType: 'scalar',
+          plateIds: [],
+          role: 'parameter',
+          distribution: { distributionId: 'normal', args: { mu: 0, sigma: 1 } },
+        },
+        sigma: {
+          id: 'sigma',
+          symbol: 'sigma',
+          kind: 'random_variable',
+          valueType: 'positive_scalar',
+          plateIds: [],
+          role: 'parameter',
+          distribution: { distributionId: 'exponential', args: { rate: 1 } },
+        },
+        mu: {
+          id: 'mu',
+          symbol: 'mu',
+          kind: 'deterministic',
+          valueType: 'vector',
+          plateIds: ['obs'],
+          expression: { language: 'bayes-expr@1', source: 'x @ beta + alpha' },
+        },
+        y_likelihood: {
+          id: 'y_likelihood',
+          symbol: 'y_likelihood',
+          kind: 'factor',
+          valueType: 'log_density',
+          plateIds: [],
+          logDensity: { language: 'bayes-expr@1', source: 'normal_lpdf(y | mu, sigma)' },
+        },
+      },
+      entityOrder: ['x', 'y', 'alpha', 'beta', 'sigma', 'mu', 'y_likelihood'],
+      notes: {},
+      noteOrder: [],
+    },
+    canvasEdges: [
+      { id: 'x-to-mu', from: 'x', to: 'mu', role: 'expression' },
+      { id: 'beta-to-mu', from: 'beta', to: 'mu', role: 'expression' },
+      { id: 'mu-to-y-likelihood', from: 'mu', to: 'y_likelihood', role: 'expression' },
+    ],
+  });
+
+  assert.equal(preview.projected.nodes.length, 7);
+  assert.equal(preview.edgeSummary.source, 'canvasEdges.json');
+  assert.equal(preview.semantic.diagnostics.some((diagnostic) => diagnostic.blocksHandoff), false);
+  const likelihoodNode = preview.projected.nodes.find((node) => node.id === 'y_likelihood');
+  assert.equal(likelihoodNode?.data.kind, 'likelihood');
+  assert.equal(likelihoodNode?.data.distribution.id, 'normal');
+  assert.equal(likelihoodNode?.data.distribution.args.mu, 'mu');
+});
+
+test('projects standard factor log densities as editable likelihood nodes', () => {
+  const preview = previewPortablePackageImport({
+    packageVersion: 'bayes-canvas-ai-import@1',
+    model: {
+      schemaVersion: '1.0.0',
+      documentId: 'model_factor_student_t',
+      revision: 1,
+      model: { id: 'factor_student_t', name: 'Factor Student-t' },
+      axes: {
+        obs: { id: 'obs', symbol: 'i', label: 'Rows', size: { language: 'bayes-expr@1', source: 'N' } },
+      },
+      plates: {
+        obs: { id: 'obs', label: 'Rows', axisId: 'obs', indexSymbol: 'i', parentPlateIds: [], assumption: 'conditionally_independent' },
+      },
+      entities: {
+        y: {
+          id: 'y',
+          symbol: 'y',
+          kind: 'data',
+          dataRole: 'observed_value',
+          valueType: { scalar: 'real', axes: [{ axisId: 'obs', role: 'batch' }] },
+          plateIds: ['obs'],
+        },
+        nu_y: {
+          id: 'nu_y',
+          symbol: 'nu_y',
+          kind: 'random_variable',
+          role: 'parameter',
+          valueType: { scalar: 'real', axes: [], domain: { kind: 'positive' } },
+          plateIds: [],
+          distribution: { distributionId: 'exponential', args: { rate: { language: 'bayes-expr@1', source: '0.1' } } },
+        },
+        mu_y: {
+          id: 'mu_y',
+          symbol: 'mu_y',
+          kind: 'deterministic',
+          valueType: { scalar: 'real', axes: [{ axisId: 'obs', role: 'batch' }] },
+          plateIds: ['obs'],
+          expression: { language: 'bayes-expr@1', source: '0' },
+        },
+        sigma_y: {
+          id: 'sigma_y',
+          symbol: 'sigma_y',
+          kind: 'random_variable',
+          role: 'parameter',
+          valueType: { scalar: 'real', axes: [], domain: { kind: 'positive' } },
+          plateIds: [],
+          distribution: { distributionId: 'halfnormal', args: { sigma: { language: 'bayes-expr@1', source: '1' } } },
+        },
+        y_likelihood: {
+          id: 'y_likelihood',
+          symbol: 'y_likelihood',
+          kind: 'factor',
+          valueType: { scalar: 'real', axes: [] },
+          plateIds: [],
+          logDensity: { language: 'bayes-expr@1', source: 'student_t_lpdf(y | nu_y + 2, mu_y, sigma_y)' },
+          normalization: 'not_required',
+        },
+      },
+      entityOrder: ['y', 'nu_y', 'mu_y', 'sigma_y', 'y_likelihood'],
+      notes: {},
+      noteOrder: [],
+    },
+  });
+
+  const likelihoodNode = preview.projected.nodes.find((node) => node.id === 'y_likelihood');
+  assert.equal(likelihoodNode?.data.kind, 'likelihood');
+  assert.equal(likelihoodNode?.data.distribution.id, 'student_t');
+  assert.equal(likelihoodNode?.data.distribution.args.nu, 'nu_y + 2');
+  assert.equal(likelihoodNode?.data.distribution.args.mu, 'mu_y');
+  assert.equal(likelihoodNode?.data.distribution.args.sigma, 'sigma_y');
 });
 
 test('reconstructs missing portable visual edges from semantic dependencies with preview warning', () => {

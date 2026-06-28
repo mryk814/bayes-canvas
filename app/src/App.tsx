@@ -51,6 +51,7 @@ import {
   buildCanvasHandoff,
   buildCanvasPortablePackage,
   compileCanvas,
+  isPortablePackageImportCandidate,
   previewPortablePackageImport,
   projectToReactFlow,
   previewCanvasPatch,
@@ -133,11 +134,11 @@ const MAX_IMPORT_BYTES = 1024 * 1024;
 const MAX_IMPORT_DEPTH = 32;
 const PROMPT_TARGETS: PromptTarget[] = ['generic', 'pymc', 'numpyro', 'stan', 'review'];
 const CONSTRAINT_OPTIONS: Array<{ kind: Exclude<Constraint['kind'], 'sum_to_zero' | 'custom'>; label: string; note: string }> = [
-  { kind: 'positive', label: '正の値', note: '> 0' },
-  { kind: 'unit_interval', label: '0から1', note: '[0, 1]' },
-  { kind: 'simplex', label: '合計1', note: 'simplex' },
-  { kind: 'ordered', label: '順序あり', note: 'ordered' },
-  { kind: 'correlation_matrix', label: '相関行列', note: 'corr' },
+  { kind: 'positive', label: '正の値', note: '0より大きい' },
+  { kind: 'unit_interval', label: '0から1', note: '範囲内' },
+  { kind: 'simplex', label: '合計1', note: '比率' },
+  { kind: 'ordered', label: '順序あり', note: '小から大' },
+  { kind: 'correlation_matrix', label: '相関行列', note: '行列' },
 ];
 
 const OBSERVATION_OPTIONS = [
@@ -1024,6 +1025,40 @@ function exportPortablePackageToFile(packageData: ReturnType<typeof buildCanvasP
   URL.revokeObjectURL(url);
 }
 
+function parseImportJsonText(input: string): unknown {
+  try {
+    return assertJsonComplexity(input, {
+      maxBytes: MAX_IMPORT_BYTES,
+      maxDepth: MAX_IMPORT_DEPTH,
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.message.includes('too large') || error.message.includes('nesting'))) {
+      throw error;
+    }
+    const extracted = extractImportJsonPayload(input);
+    if (extracted === input.trim()) throw error;
+    return assertJsonComplexity(extracted, {
+      maxBytes: MAX_IMPORT_BYTES,
+      maxDepth: MAX_IMPORT_DEPTH,
+    });
+  }
+}
+
+function extractImportJsonPayload(input: string): string {
+  const trimmed = input.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed);
+  if (fenced) return fenced[1].trim();
+
+  const firstObject = trimmed.indexOf('{');
+  const firstArray = trimmed.indexOf('[');
+  const first = [firstObject, firstArray].filter((index) => index >= 0).sort((a, b) => a - b)[0];
+  if (first === undefined) return trimmed;
+  const opener = trimmed[first];
+  const closer = opener === '{' ? '}' : ']';
+  const last = trimmed.lastIndexOf(closer);
+  return last > first ? trimmed.slice(first, last + 1).trim() : trimmed;
+}
+
 function parseCanvasFile(file: File): Promise<PendingImportState> {
   return new Promise((resolve, reject) => {
     if (file.size > MAX_IMPORT_BYTES) {
@@ -1034,20 +1069,14 @@ function parseCanvasFile(file: File): Promise<PendingImportState> {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const parsed = assertJsonComplexity(String(reader.result), {
-          maxBytes: MAX_IMPORT_BYTES,
-          maxDepth: MAX_IMPORT_DEPTH,
-        });
+        const parsed = parseImportJsonText(String(reader.result));
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
           reject(new Error('Bayes CanvasのJSONオブジェクトではありません。'));
           return;
         }
         const modelFile = parsed as Partial<CanvasState>;
-        const portableFile = parsed as {
-          files?: Record<string, string>;
-        };
-        if (portableFile.files?.['model.json'] && portableFile.files?.['layout.json']) {
-          const preview = previewPortablePackageImport(portableFile);
+        if (isPortablePackageImportCandidate(parsed)) {
+          const preview = previewPortablePackageImport(parsed);
           resolve({
             sourceName: file.name,
             sourceKind: 'portable package',
@@ -1066,13 +1095,15 @@ function parseCanvasFile(file: File): Promise<PendingImportState> {
           return;
         }
         if (!Array.isArray(modelFile.nodes) || !Array.isArray(modelFile.edges)) {
-          reject(new Error('必須field `nodes` / `edges` または portable package の `files.model.json` / `files.layout.json` がありません。'));
+          reject(new Error('必須field `nodes` / `edges` または portable package の `model` / `files.model.json` がありません。'));
           return;
         }
+        const legacyNodes = modelFile.nodes.map(prepareCanvasNode);
+        const legacySemantic = compileCanvas(legacyNodes, modelFile.edges).semantic;
         resolve({
           sourceName: file.name,
           sourceKind: 'legacy canvas',
-          nodes: modelFile.nodes.map(prepareCanvasNode),
+          nodes: legacyNodes,
           edges: modelFile.edges.map((edge: Edge) => ({
             ...edge,
             type: 'smoothstep',
@@ -1080,8 +1111,8 @@ function parseCanvasFile(file: File): Promise<PendingImportState> {
           })),
           summary: `${modelFile.nodes.length} nodes / ${modelFile.edges.length} links`,
           importWarnings: [],
-          diagnostics: compileCanvas(modelFile.nodes.map(prepareCanvasNode), modelFile.edges).semantic.diagnostics.length,
-          blockingDiagnostics: compileCanvas(modelFile.nodes.map(prepareCanvasNode), modelFile.edges).semantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff).length,
+          diagnostics: legacySemantic.diagnostics.length,
+          blockingDiagnostics: legacySemantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff).length,
         });
       } catch (error) {
         reject(error instanceof Error ? error : new Error('JSON形式が正しくありません。'));
@@ -1107,40 +1138,104 @@ function addImportProvenance(nodes: BayesCanvasNode[], sourceName: string): Baye
   });
 }
 
-const EXTERNAL_MODEL_IMPORT_PROMPT = `Convert the following external Bayesian model into a Bayes Canvas portable package.
+const EXTERNAL_MODEL_IMPORT_PROMPT = `Convert the following external Bayesian model into a Bayes Canvas import package.
 
-Return only JSON with this shape:
+You may include a brief explanation or caveats, but make the import JSON easy to copy or download.
+Use real nested JSON values, not stringified JSON inside strings. If your environment can create downloadable files, provide the JSON as a downloadable file named "bayes-canvas-import.bayescanvas.json".
+If you print the JSON in chat, put the complete JSON in one clearly labeled code block so it can be copied into a .bayescanvas.json file.
+
+Preferred shape:
 {
-  "manifest": {
-    "packageVersion": "1.0.0",
-    "modelDocumentId": "model_imported",
-    "sourceRevision": 1,
-    "schemaVersion": "1.0.0",
-    "createdAt": "ISO-8601 timestamp",
-    "fingerprintAlgorithm": "sha256",
-    "fingerprint": "sha256 of { model, layout } if available",
-    "files": ["manifest.json", "model.json", "layout.json", "canvasEdges.json", "diagnostics.json", "handoff.json", "decisions.jsonl"]
-  },
-  "files": {
-    "manifest.json": "stringified manifest JSON",
-    "model.json": "stringified Bayes Canvas ModelDocument JSON",
-    "layout.json": "stringified Bayes Canvas LayoutDocument JSON",
-    "canvasEdges.json": "stringified array of { id, from, to, role } visual links",
-    "diagnostics.json": "[]",
-    "handoff.json": "{}",
-    "decisions.jsonl": "one JSON object per provenance, assumption, warning, or review question"
-  }
+  "packageVersion": "bayes-canvas-ai-import@1",
+  "model": { "schemaVersion": "1.0.0", "documentId": "model_example", "revision": 1, "model": { "id": "example", "name": "Example" }, "axes": {}, "plates": {}, "entities": {}, "entityOrder": [], "notes": {}, "noteOrder": [] },
+  "canvasEdges": [],
+  "decisions": []
 }
 
-Rules:
-- Preserve source provenance in ModelDocument notes or decisions.jsonl.
-- Use stable entity IDs and put layout.modelDocumentId equal to model.documentId.
-- Preserve every canvas link in files["canvasEdges.json"]. Each edge must use entity IDs from model.json: { "id": "alpha-mu", "from": "alpha", "to": "mu", "role": "deterministic-input" }.
-- Also mirror the same edge array in model.extensions["bayes-canvas"].annotationEdges for older importers.
-- Keep layout.nodes entries for every visible entity so imported nodes do not collapse to one position.
-- If visual links are unknown, derive them from semantic dependencies and add a warning note explaining that reconstruction was needed.
+Few-shot example:
+External model:
+y_i ~ Normal(mu_i, sigma)
+mu_i = alpha + beta * x_i
+alpha ~ Normal(0, 1)
+beta ~ Normal(0, 1)
+sigma ~ HalfNormal(1)
+
+Output file content:
+{
+  "packageVersion": "bayes-canvas-ai-import@1",
+  "model": {
+    "schemaVersion": "1.0.0",
+    "documentId": "model_linear_regression",
+    "revision": 1,
+    "model": { "id": "linear_regression", "name": "Linear regression", "description": "Minimal Bayesian linear regression." },
+    "axes": {
+      "obs": { "id": "obs", "symbol": "i", "label": "Observations", "size": { "language": "bayes-expr@1", "source": "N" } }
+    },
+    "plates": {
+      "obs": { "id": "obs", "label": "Observation plate", "axisId": "obs", "indexSymbol": "i", "parentPlateIds": [], "assumption": "conditionally_independent" }
+    },
+    "entities": {
+      "x": { "id": "x", "symbol": "x", "kind": "data", "dataRole": "predictor", "valueType": { "scalar": "real", "axes": [{ "axisId": "obs", "role": "batch" }] }, "plateIds": ["obs"], "notes": "Observed predictor." },
+      "y": { "id": "y", "symbol": "y", "kind": "data", "dataRole": "observed_value", "valueType": { "scalar": "real", "axes": [{ "axisId": "obs", "role": "batch" }] }, "plateIds": ["obs"], "notes": "Observed response." },
+      "alpha": { "id": "alpha", "symbol": "alpha", "kind": "random_variable", "role": "parameter", "valueType": { "scalar": "real", "axes": [] }, "plateIds": [], "distribution": { "distributionId": "normal", "args": { "mu": { "language": "bayes-expr@1", "source": "0" }, "sigma": { "language": "bayes-expr@1", "source": "1" } } } },
+      "beta": { "id": "beta", "symbol": "beta", "kind": "random_variable", "role": "parameter", "valueType": { "scalar": "real", "axes": [] }, "plateIds": [], "distribution": { "distributionId": "normal", "args": { "mu": { "language": "bayes-expr@1", "source": "0" }, "sigma": { "language": "bayes-expr@1", "source": "1" } } } },
+      "sigma": { "id": "sigma", "symbol": "sigma", "kind": "random_variable", "role": "parameter", "valueType": { "scalar": "real", "axes": [], "domain": { "kind": "positive" } }, "plateIds": [], "distribution": { "distributionId": "halfnormal", "args": { "sigma": { "language": "bayes-expr@1", "source": "1" } } } },
+      "mu": { "id": "mu", "symbol": "mu", "kind": "deterministic", "valueType": { "scalar": "real", "axes": [{ "axisId": "obs", "role": "batch" }] }, "plateIds": ["obs"], "expression": { "language": "bayes-expr@1", "source": "alpha + beta * x" } },
+      "y_likelihood": { "id": "y_likelihood", "symbol": "y_likelihood", "label": "y likelihood", "kind": "random_variable", "role": "observation", "observedDataId": "y", "valueType": { "scalar": "real", "axes": [{ "axisId": "obs", "role": "batch" }] }, "plateIds": ["obs"], "distribution": { "distributionId": "normal", "args": { "mu": { "language": "bayes-expr@1", "source": "mu" }, "sigma": { "language": "bayes-expr@1", "source": "sigma" } } }, "observationProcess": { "kind": "exact" }, "notes": "Editable likelihood block for the observed response y." }
+    },
+    "entityOrder": ["x", "y", "alpha", "beta", "sigma", "mu", "y_likelihood"],
+    "notes": {
+      "source_note": { "id": "source_note", "kind": "implementation_note", "text": "Converted from a simple regression specification.", "status": "open", "relatedEntityIds": ["x", "y"], "author": "ai" }
+    },
+    "noteOrder": ["source_note"],
+    "extensions": {
+      "bayes-canvas": {
+        "annotationEdges": [
+          { "id": "x-to-mu", "from": "x", "to": "mu", "role": "expression" },
+          { "id": "beta-to-mu", "from": "beta", "to": "mu", "role": "expression" },
+          { "id": "y-to-y-likelihood", "from": "y", "to": "y_likelihood", "role": "observed_value" },
+          { "id": "mu-to-y-likelihood", "from": "mu", "to": "y_likelihood", "role": "likelihood" }
+        ]
+      }
+    }
+  },
+  "canvasEdges": [
+    { "id": "x-to-mu", "from": "x", "to": "mu", "role": "expression" },
+    { "id": "beta-to-mu", "from": "beta", "to": "mu", "role": "expression" },
+    { "id": "y-to-y-likelihood", "from": "y", "to": "y_likelihood", "role": "observed_value" },
+    { "id": "mu-to-y-likelihood", "from": "mu", "to": "y_likelihood", "role": "likelihood" }
+  ],
+  "decisions": []
+}
+
+ModelDocument requirements:
+- model.schemaVersion must be "1.0.0".
+- model.documentId must be stable, for example "model_imported_regression".
+- model.revision must be 1.
+- model.model must contain { "id", "name", "description" }.
+- model.axes, model.plates, model.entities, model.notes must be objects.
+- model.entityOrder and model.noteOrder must be arrays.
+- every expression must be { "language": "bayes-expr@1", "source": "..." }.
+- every entity must have id, symbol, kind, valueType, and plateIds.
+- entity kind must be one of "data", "random_variable", "deterministic", "factor", "block_instance", or "query".
+- random_variable entities need role and distribution: { "distributionId": "...", "args": { "mu": { "language": "bayes-expr@1", "source": "0" } } }.
+- For ordinary observed likelihoods, prefer a random_variable entity with role "observation", observedDataId pointing to the observed data entity, and a distribution. Use an id like "y_likelihood" so Bayes Canvas imports it as an editable likelihood block.
+- Use factor only for custom potentials or log-density terms that cannot be represented as an observed distribution. If you must use factor with a standard distribution, write logDensity as e.g. "normal_lpdf(y | mu, sigma)" so Bayes Canvas can infer a likelihood block.
+- deterministic and query entities need expression. factor entities need logDensity.
+- use stable entity IDs and make every reference use those symbols/IDs consistently.
+
+Layout and visual links:
+- If you can create layout, set layout.schemaVersion to "1.0.0", layout.modelDocumentId equal to model.documentId, layout.nodes keyed by visible entity id, and layout.view to { "x": 0, "y": 0, "zoom": 1 }.
+- If layout is uncertain, omit it. Bayes Canvas will generate display positions.
+- If visual links are known, put them in canvasEdges using entity IDs from model.entities.
+- Also mirror the same edge array in model.extensions["bayes-canvas"].annotationEdges when possible.
+- If links are uncertain, omit canvasEdges. Bayes Canvas will reconstruct links from semantic dependencies and show a warning.
+
+Modeling discipline:
+- Preserve source provenance in notes or decisions.
 - Keep ambiguous modeling choices as open review_question notes instead of inventing assumptions.
-- Do not omit model.json or layout.json.`;
+- Use "@" for matrix products or reductions over feature/latent dimensions when "*" would be ambiguous, and add a note naming the intended reduction axis.
+- Do not output explanatory prose, comments, trailing commas, or placeholder keys like "...".`;
 
 function createNodeData(kind: BayesNodeData['kind'], count: number): BayesNodeData {
   const baseName = `${kind}_${count}`;
@@ -2460,7 +2555,7 @@ export function App() {
   const handleImport = useCallback(() => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json';
+    input.accept = '.json,.bayescanvas,.bayescanvas.json,application/json';
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
@@ -3120,30 +3215,33 @@ export function App() {
                   <span className={`kind-pill palette-${selectedData.kind}`}>{NODE_KIND_LABELS[selectedData.kind]}</span>
                 </div>
                 <div className="inspector-section">
-                  <div className="inspector-section-title">次元と反復範囲</div>
+                  <div className="inspector-section-title">サイズと繰り返し</div>
                   <label>
-                    Batch shape
+                    並ぶ数
                     <input
                       placeholder="N, J"
                       value={selectedData.shape?.join(', ') ?? ''}
                       onChange={(event) => updateSelectedNodeData({ shape: parseList(event.target.value) })}
                     />
+                    <span className="field-note">観測数やグループ数など、外側に並ぶ単位。</span>
                   </label>
                   <label>
-                    Event shape
+                    1つの値の形
                     <input
                       placeholder="K"
                       value={selectedData.eventShape?.join(', ') ?? ''}
                       onChange={(event) => updateSelectedNodeData({ eventShape: parseList(event.target.value) })}
                     />
+                    <span className="field-note">各セルがベクトルや行列になるときの内側サイズ。</span>
                   </label>
                   <label>
-                    反復範囲
+                    繰り返す単位
                     <input
                       placeholder="obs"
                       value={selectedData.plate ?? ''}
                       onChange={(event) => updateSelectedNodeData({ plate: event.target.value || undefined })}
                     />
+                    <span className="field-note">同じ式をどの単位ごとに繰り返すか。</span>
                   </label>
                   {showsConstraintsEditor ? (
                     <div className="field-group">
@@ -3170,7 +3268,7 @@ export function App() {
                         ))}
                       </div>
                       <label>
-                        和を0にする反復範囲
+                        合計0にする単位
                         <input
                           placeholder="group"
                           value={getSumToZeroPlate(selectedData.constraints)}

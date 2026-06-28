@@ -44,9 +44,23 @@ model.bayescanvas/
 
 `model.json` is the strict `ModelDocument`. `layout.json` is the `LayoutDocument`; changing coordinates must not create semantic diff. `canvasEdges.json` is a first-class visual projection file so external converters cannot accidentally drop the canvas graph. It contains an array of `{ id, from, to, role }` records where `from` and `to` are stable entity IDs from `model.json`. The same array should also be mirrored in `model.extensions["bayes-canvas"].annotationEdges` for older importers. `decisions.jsonl` stores assumptions, warnings, review questions, and implementation notes as append-friendly records.
 
-Package import is a preview flow. The app validates `model.json`, `layout.json`, and `canvasEdges.json`, checks that `layout.modelDocumentId` matches `model.documentId`, runs compiler diagnostics, and only replaces the current canvas after the user applies the preview. Invalid packages must leave the current canvas unchanged. The preview shows node count, link count, diagnostics, and whether links came from `canvasEdges.json`, the legacy model extension, or semantic reconstruction.
+Package import is a preview flow. The app validates `model.json`, `layout.json` when present, and `canvasEdges.json` when present, checks that `layout.modelDocumentId` matches `model.documentId`, runs compiler diagnostics, and only replaces the current canvas after the user applies the preview. Invalid packages must leave the current canvas unchanged. The preview shows node count, link count, diagnostics, and whether links came from `canvasEdges.json`, the legacy model extension, or semantic reconstruction.
 
-External AI conversion should output the same portable package shape and preserve source provenance in ModelDocument notes or `decisions.jsonl`. A converter must preserve semantic dependencies in the model expressions, visual links in `canvasEdges.json`, layout positions in `layout.json`, observed bindings through `observedDataId`, and index mappings through plates/axes. If visual links cannot be recovered from the source model, the converter should derive them from semantic dependencies and add a warning note instead of returning an edge-free package.
+For AI-generated imports, the app also accepts a single JSON object with nested values instead of stringified virtual files:
+
+```json
+{
+  "packageVersion": "bayes-canvas-ai-import@1",
+  "model": { "schemaVersion": "1.0.0" },
+  "layout": { "schemaVersion": "1.0.0" },
+  "canvasEdges": [{ "id": "a-to-b", "from": "a", "to": "b", "role": "expression" }],
+  "decisions": []
+}
+```
+
+`layout` is optional for AI imports. When it is missing, Bayes Canvas generates display positions from `entityOrder`. `canvasEdges` is also optional; when it is missing, the app first uses `model.extensions["bayes-canvas"].annotationEdges`, then reconstructs visual links from semantic dependencies. The importer also accepts `files` as either a map or an array of `{ path, content }` entries, and `model.json` / `layout.json` values may be real nested JSON values rather than escaped JSON strings.
+
+External AI conversion should preserve source provenance in ModelDocument notes or `decisions`. A converter must preserve semantic dependencies in the model expressions, observed bindings through `observedDataId`, and index mappings through plates/axes. Ordinary observed likelihoods should be represented as `random_variable` entities with `role: "observation"` and a distribution so they import as editable likelihood blocks. `factor` is reserved for custom potentials or log-density terms that cannot be represented as a standard observed distribution; when a standard `*_lpdf(...)` factor is imported, Bayes Canvas will try to infer an editable likelihood node. Visual links and layout positions are useful when known, but uncertain layout or links should be omitted instead of fabricated; the preview will show generated layout and reconstructed-link warnings.
 
 ## CLI Contract
 

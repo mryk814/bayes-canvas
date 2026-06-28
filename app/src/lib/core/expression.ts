@@ -9,7 +9,7 @@ export type ExprNode =
   | { kind: 'number'; value: number; raw: string; span: SourceSpan }
   | { kind: 'reference'; symbol: string; span: SourceSpan }
   | { kind: 'unary'; operator: '+' | '-'; operand: ExprNode; span: SourceSpan }
-  | { kind: 'binary'; operator: '+' | '-' | '*' | '/' | '^' | '=' | '<' | '<=' | '>' | '>=' | '=='; left: ExprNode; right: ExprNode; span: SourceSpan }
+  | { kind: 'binary'; operator: '+' | '-' | '*' | '/' | '@' | '^' | '=' | '<' | '<=' | '>' | '>=' | '=='; left: ExprNode; right: ExprNode; span: SourceSpan }
   | { kind: 'call'; functionName: string; args: ExprNode[]; span: SourceSpan }
   | { kind: 'index'; target: ExprNode; indices: ExprNode[]; span: SourceSpan }
   | { kind: 'slice'; start?: ExprNode; end?: ExprNode; span: SourceSpan };
@@ -31,6 +31,7 @@ type TokenKind =
   | 'minus'
   | 'star'
   | 'slash'
+  | 'at'
   | 'caret'
   | 'equal'
   | 'double_equal'
@@ -44,6 +45,7 @@ type TokenKind =
   | 'rbracket'
   | 'comma'
   | 'semicolon'
+  | 'pipe'
   | 'colon'
   | 'dot'
   | 'eof';
@@ -73,6 +75,7 @@ class Tokenizer {
       '-': 'minus',
       '*': 'star',
       '/': 'slash',
+      '@': 'at',
       '^': 'caret',
       '=': 'equal',
       '<': 'lt',
@@ -83,6 +86,7 @@ class Tokenizer {
       ']': 'rbracket',
       ',': 'comma',
       ';': 'semicolon',
+      '|': 'pipe',
       ':': 'colon',
       '.': 'dot',
     };
@@ -230,12 +234,12 @@ class Parser {
 
   private parseMultiplicative(): ExprNode {
     let node = this.parsePower();
-    while (this.current.kind === 'star' || this.current.kind === 'slash') {
+    while (this.current.kind === 'star' || this.current.kind === 'slash' || this.current.kind === 'at') {
       const operator = this.advance();
       const right = this.parsePower();
       node = {
         kind: 'binary',
-        operator: operator.text as '*' | '/',
+        operator: operator.text as '*' | '/' | '@',
         left: node,
         right,
         span: { start: node.span.start, end: right.span.end },
@@ -290,7 +294,7 @@ class Parser {
         if (!this.isCurrent('rparen')) {
           do {
             args.push(this.parseComparison());
-          } while (this.accept('comma') || this.accept('semicolon'));
+          } while (this.accept('comma') || this.accept('semicolon') || this.accept('pipe'));
         }
         const end = this.expect('rparen', 'Expected ")" after function arguments.');
         node = {
