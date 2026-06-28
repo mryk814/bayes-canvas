@@ -441,6 +441,7 @@ const NODE_LAYOUT_GAP_X = 72;
 const NODE_LAYOUT_GAP_Y = 34;
 const NODE_LAYOUT_ORIGIN_X = 96;
 const NODE_LAYOUT_ORIGIN_Y = 110;
+const CANVAS_MIN_ZOOM = 0.08;
 const NODE_LAYOUT_COLUMN_STEP = Math.max(...Object.values(NODE_LAYOUT_WIDTH)) + NODE_LAYOUT_GAP_X;
 const NODE_LAYOUT_ROW_STEP = NODE_LAYOUT_HEIGHT + NODE_LAYOUT_GAP_Y;
 const NODE_LAYOUT_SINK_BASE_ROW = 1;
@@ -3489,6 +3490,7 @@ export function App() {
               selectionOnDrag
               panOnDrag={[1, 2]}
               deleteKeyCode={['Backspace', 'Delete']}
+              minZoom={CANVAS_MIN_ZOOM}
               fitView
               fitViewOptions={{ padding: 0.18 }}
             >
