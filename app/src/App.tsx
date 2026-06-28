@@ -77,6 +77,17 @@ const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   parameter: 'パラメータ',
 };
 
+const NODE_KIND_OPTIONS: BayesNodeData['kind'][] = [
+  'data',
+  'parameter',
+  'hyperparameter',
+  'latent',
+  'deterministic',
+  'likelihood',
+  'model_block',
+  'derived_quantity',
+];
+
 type PaletteItem =
   | { type: 'node'; kind: BayesNodeData['kind']; label: string; note: string }
   | { type: 'preset'; preset: 'horseshoe_prior' | 'linear_term' | 'group_effect' | 'interaction_term'; label: string; note: string };
@@ -1220,6 +1231,9 @@ ModelDocument requirements:
 - every entity must have id, symbol, kind, valueType, and plateIds.
 - entity kind must be one of "data", "random_variable", "deterministic", "factor", "block_instance", or "query".
 - random_variable entities need role and distribution: { "distributionId": "...", "args": { "mu": { "language": "bayes-expr@1", "source": "0" } } }.
+- Distinguish primary model parameters from hyperparameters. Use role "parameter" for both because ModelDocument has no separate hyperparameter role, but add tags: ["hyperparameter"] to random variables that tune a prior, hierarchy, concentration, scale, lengthscale, amplitude, cutpoint prior, or shrinkage strength rather than directly entering the likelihood or deterministic predictor of the outcome.
+- Do not tag coefficients, intercepts, group effects, latent states, or likelihood scales as hyperparameters when they are substantive unknowns to estimate or directly enter the outcome model.
+- When a hyperparameter feeds another parameter's prior, keep it as a separate random_variable with tags: ["hyperparameter"] and connect it with a canvas edge role like "prior-parameter" when canvasEdges are provided.
 - For ordinary observed likelihoods, prefer a random_variable entity with role "observation", observedDataId pointing to the observed data entity, and a distribution. Use an id like "y_likelihood" so Bayes Canvas imports it as an editable likelihood block.
 - Use factor only for custom potentials or log-density terms that cannot be represented as an observed distribution. If you must use factor with a standard distribution, write logDensity as e.g. "normal_lpdf(y | mu, sigma)" so Bayes Canvas can infer a likelihood block.
 - deterministic and query entities need expression. factor entities need logDensity.
@@ -3212,6 +3226,20 @@ export function App() {
                       value={selectedData.name}
                       onChange={(event) => updateSelectedNodeData({ name: event.target.value })}
                     />
+                  </label>
+                  <label>
+                    種類
+                    <select
+                      value={selectedData.kind}
+                      onChange={(event) =>
+                        updateSelectedNodeData({ kind: event.target.value as BayesNodeData['kind'] })
+                      }
+                    >
+                      {NODE_KIND_OPTIONS.map((kind) => (
+                        <option key={kind} value={kind}>{NODE_KIND_LABELS[kind]}</option>
+                      ))}
+                    </select>
+                    <span className="field-note">読み込み後の分類違いを直せます。分布やサイズは残ります。</span>
                   </label>
                   <span className={`kind-pill palette-${selectedData.kind}`}>{NODE_KIND_LABELS[selectedData.kind]}</span>
                 </div>

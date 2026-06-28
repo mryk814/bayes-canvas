@@ -1197,9 +1197,16 @@ function entityToNodeData(entity: ModelEntity): BayesNodeData {
     }
     return { ...base, kind: 'model_block', expression: entity.logDensity.source, validationLevel: 'structured' };
   }
+  const kind = entity.role === 'observation'
+    ? 'likelihood'
+    : entity.role === 'latent'
+      ? 'latent'
+      : entity.tags?.includes('hyperparameter')
+        ? 'hyperparameter'
+        : 'parameter';
   return {
     ...base,
-    kind: entity.role === 'observation' ? 'likelihood' : entity.role === 'latent' ? 'latent' : 'parameter',
+    kind,
     observed: entity.role === 'observation',
     distribution: {
       id: entity.distribution.distributionId,

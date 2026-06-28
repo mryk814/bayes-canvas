@@ -277,6 +277,72 @@ test('previews natural AI import packages with nested JSON values', () => {
   assert.ok(preview.importWarnings.some((warning) => warning.includes('layout.json was missing')));
 });
 
+test('projects tagged AI import hyperparameters as hyperparameter nodes', () => {
+  const preview = previewPortablePackageImport({
+    packageVersion: 'bayes-canvas-ai-import@1',
+    model: {
+      schemaVersion: '1.0.0',
+      documentId: 'model_tagged_hierarchy',
+      revision: 1,
+      model: { id: 'tagged_hierarchy', name: 'Tagged hierarchy' },
+      axes: {
+        group: { id: 'group', symbol: 'j', label: 'Groups', size: { language: 'bayes-expr@1', source: 'J' } },
+      },
+      plates: {
+        group: { id: 'group', label: 'Groups', axisId: 'group', indexSymbol: 'j', parentPlateIds: [], assumption: 'exchangeable' },
+      },
+      entities: {
+        alpha_bar: {
+          id: 'alpha_bar',
+          symbol: 'alpha_bar',
+          kind: 'random_variable',
+          role: 'parameter',
+          tags: ['hyperparameter'],
+          valueType: { scalar: 'real', axes: [] },
+          plateIds: [],
+          distribution: { distributionId: 'normal', args: { mu: 0, sigma: 2 } },
+        },
+        tau_alpha: {
+          id: 'tau_alpha',
+          symbol: 'tau_alpha',
+          kind: 'random_variable',
+          role: 'parameter',
+          tags: ['hyperparameter'],
+          valueType: { scalar: 'real', axes: [], domain: { kind: 'positive' } },
+          plateIds: [],
+          distribution: { distributionId: 'halfnormal', args: { sigma: 1 } },
+        },
+        alpha: {
+          id: 'alpha',
+          symbol: 'alpha',
+          kind: 'random_variable',
+          role: 'parameter',
+          valueType: { scalar: 'real', axes: [{ axisId: 'group', role: 'batch' }] },
+          plateIds: ['group'],
+          distribution: {
+            distributionId: 'normal',
+            args: {
+              mu: { language: 'bayes-expr@1', source: 'alpha_bar' },
+              sigma: { language: 'bayes-expr@1', source: 'tau_alpha' },
+            },
+          },
+        },
+      },
+      entityOrder: ['alpha_bar', 'tau_alpha', 'alpha'],
+      notes: {},
+      noteOrder: [],
+    },
+    canvasEdges: [
+      { id: 'alpha-bar-to-alpha', from: 'alpha_bar', to: 'alpha', role: 'prior-parameter' },
+      { id: 'tau-alpha-to-alpha', from: 'tau_alpha', to: 'alpha', role: 'prior-parameter' },
+    ],
+  });
+
+  assert.equal(preview.projected.nodes.find((node) => node.id === 'alpha_bar')?.data.kind, 'hyperparameter');
+  assert.equal(preview.projected.nodes.find((node) => node.id === 'tau_alpha')?.data.kind, 'hyperparameter');
+  assert.equal(preview.projected.nodes.find((node) => node.id === 'alpha')?.data.kind, 'parameter');
+});
+
 test('previews raw ModelDocument imports by deriving layout and links', () => {
   const compiled = compileCanvas(initialNodes, initialEdges);
   assert.equal(isPortablePackageImportCandidate(compiled.document), true);
