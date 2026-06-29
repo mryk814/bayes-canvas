@@ -5,15 +5,15 @@ const srcDir = new URL('../src/', import.meta.url);
 const files = (await collect(srcDir)).filter((file) => /\.(tsx?|jsx?)$/u.test(file));
 const failures = [];
 const complexityGrandfathered = new Set([
-  'src\\App.tsx',
-  'src\\lib\\documentAdapter.ts',
-  'src\\lib\\modelIr.ts',
+  'src/App.tsx',
+  'src/lib/documentAdapter.ts',
+  'src/lib/modelIr.ts',
 ]);
 
 for (const file of files) {
   if (file.includes('/dist-test/') || file.includes('/dist-cli/')) continue;
   const text = await readFile(file, 'utf8');
-  const rel = path.relative(process.cwd(), file);
+  const rel = path.relative(process.cwd(), file).replaceAll(path.sep, '/');
   checkHooks(rel, text);
   checkUnusedSimpleImports(rel, text);
   checkComplexity(rel, text);
