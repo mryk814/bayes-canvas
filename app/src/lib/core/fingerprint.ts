@@ -8,8 +8,12 @@ export interface StableFingerprint {
 export function createStableFingerprint(value: unknown): StableFingerprint {
   return {
     algorithm: FINGERPRINT_ALGORITHM,
-    value: sha256Hex(stableFingerprintInput(value)),
+    value: sha256Hex(stableFingerprintInput(canonicalJsonValue(value))),
   };
+}
+
+export function canonicalJsonValue(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value));
 }
 
 export function stableFingerprintInput(value: unknown): string {

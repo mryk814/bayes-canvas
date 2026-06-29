@@ -19,16 +19,26 @@ export interface TransactionLogEntry {
 
 const DB_NAME = 'bayes-canvas';
 const DB_VERSION = 1;
+const MAX_AUTOSAVE_TRANSACTIONS = 120;
 
 export async function saveAutosave(document: ModelDocument, layout: LayoutDocument): Promise<void> {
   const db = await openDatabase();
   await put(db, 'autosave', { id: document.documentId, document, layout, savedAt: new Date().toISOString() });
-  await addTransaction(db, {
-    kind: 'autosave',
-    summary: 'Autosaved current model.',
-    modelDocumentId: document.documentId,
-    revision: document.revision,
-  });
+  try {
+    await addTransaction(db, {
+      kind: 'autosave',
+      summary: 'Autosaved current model.',
+      modelDocumentId: document.documentId,
+      revision: document.revision,
+    });
+    await pruneAutosaveTransactions(db);
+  } catch (error) {
+    if (isQuotaError(error)) {
+      await pruneAutosaveTransactions(db, Math.floor(MAX_AUTOSAVE_TRANSACTIONS / 2));
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function saveSnapshot(snapshot: StoredSnapshot): Promise<void> {
@@ -71,6 +81,19 @@ async function addTransaction(
   });
 }
 
+async function pruneAutosaveTransactions(db: IDBDatabase, limit = MAX_AUTOSAVE_TRANSACTIONS): Promise<void> {
+  const rows = (await getAll<TransactionLogEntry>(db, 'transactions'))
+    .filter((entry) => entry.kind === 'autosave')
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const stale = rows.slice(limit);
+  if (!stale.length) return;
+  await deleteMany(db, 'transactions', stale.map((entry) => entry.id));
+}
+
+function isQuotaError(error: unknown): boolean {
+  return error instanceof DOMException && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -109,5 +132,17 @@ function getAll<T>(db: IDBDatabase, storeName: string): Promise<T[]> {
     const request = tx.objectStore(storeName).getAll();
     request.onsuccess = () => resolve(request.result as T[]);
     request.onerror = () => reject(request.error);
+  });
+}
+
+function deleteMany(db: IDBDatabase, storeName: string, keys: readonly string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    for (const key of keys) {
+      store.delete(key);
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
   });
 }

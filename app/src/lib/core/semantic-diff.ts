@@ -4,8 +4,16 @@ export type SemanticDiffKind =
   | 'entity_added'
   | 'entity_removed'
   | 'entity_symbol_changed'
+  | 'entity_value_type_changed'
+  | 'entity_plate_scope_changed'
   | 'entity_distribution_changed'
   | 'entity_expression_changed'
+  | 'observation_binding_changed'
+  | 'observation_process_changed'
+  | 'constraint_changed'
+  | 'hint_changed'
+  | 'query_contract_changed'
+  | 'block_contract_changed'
   | 'axis_changed'
   | 'plate_changed'
   | 'note_changed'
@@ -18,6 +26,7 @@ export interface SemanticDiffItem {
   before?: unknown;
   after?: unknown;
   entityId?: string;
+  severity?: 'info' | 'warning' | 'critical';
 }
 
 export function diffModelDocuments(before: ModelDocument, after: ModelDocument): SemanticDiffItem[] {
@@ -48,16 +57,78 @@ function diffEntities(before: Record<string, ModelEntity>, after: Record<string,
     if (left.symbol !== right.symbol) {
       output.push({ kind: 'entity_symbol_changed', path: `/entities/${id}/symbol`, label: `Renamed ${left.symbol} to ${right.symbol}`, before: left.symbol, after: right.symbol, entityId: id });
     }
+    if (JSON.stringify(left.valueType) !== JSON.stringify(right.valueType)) {
+      output.push(change('entity_value_type_changed', id, '/valueType', `Changed value type for ${right.symbol}`, left.valueType, right.valueType, 'critical'));
+    }
+    if (JSON.stringify(left.plateIds) !== JSON.stringify(right.plateIds)) {
+      output.push(change('entity_plate_scope_changed', id, '/plateIds', `Changed plate scope for ${right.symbol}`, left.plateIds, right.plateIds, 'critical'));
+    }
     if (left.kind === 'random_variable' && right.kind === 'random_variable') {
       if (JSON.stringify(left.distribution) !== JSON.stringify(right.distribution)) {
         output.push({ kind: 'entity_distribution_changed', path: `/entities/${id}/distribution`, label: `Changed distribution for ${right.symbol}`, before: left.distribution, after: right.distribution, entityId: id });
+      }
+      if (left.observedDataId !== right.observedDataId) {
+        output.push(change('observation_binding_changed', id, '/observedDataId', `Changed observation binding for ${right.symbol}`, left.observedDataId, right.observedDataId, 'critical'));
+      }
+      if (JSON.stringify(left.observationProcess) !== JSON.stringify(right.observationProcess)) {
+        output.push(change('observation_process_changed', id, '/observationProcess', `Changed observation process for ${right.symbol}`, left.observationProcess, right.observationProcess, 'critical'));
+      }
+      if (JSON.stringify(left.constraints) !== JSON.stringify(right.constraints)) {
+        output.push(change('constraint_changed', id, '/constraints', `Changed constraints for ${right.symbol}`, left.constraints, right.constraints, 'warning'));
+      }
+      if (JSON.stringify(left.hints) !== JSON.stringify(right.hints)) {
+        output.push(change('hint_changed', id, '/hints', `Changed implementation hints for ${right.symbol}`, left.hints, right.hints, 'info'));
       }
     }
     if ('expression' in left && 'expression' in right && JSON.stringify(left.expression) !== JSON.stringify(right.expression)) {
       output.push({ kind: 'entity_expression_changed', path: `/entities/${id}/expression`, label: `Changed expression for ${right.symbol}`, before: left.expression, after: right.expression, entityId: id });
     }
+    if (left.kind === 'query' && right.kind === 'query') {
+      if (left.queryRole !== right.queryRole || left.scale !== right.scale) {
+        output.push(change('query_contract_changed', id, '/queryRole', `Changed query contract for ${right.symbol}`, { queryRole: left.queryRole, scale: left.scale }, { queryRole: right.queryRole, scale: right.scale }, 'warning'));
+      }
+    }
+    if (left.kind === 'block_instance' && right.kind === 'block_instance') {
+      if (
+        left.blockTypeId !== right.blockTypeId
+        || left.blockVersion !== right.blockVersion
+        || JSON.stringify(left.inputs) !== JSON.stringify(right.inputs)
+        || JSON.stringify(left.outputs) !== JSON.stringify(right.outputs)
+        || JSON.stringify(left.config) !== JSON.stringify(right.config)
+      ) {
+        output.push(change(
+          'block_contract_changed',
+          id,
+          '/block',
+          `Changed block contract for ${right.symbol}`,
+          summarizeBlock(left),
+          summarizeBlock(right),
+          'critical',
+        ));
+      }
+    }
   }
   return output;
+}
+
+function change(
+  kind: SemanticDiffKind,
+  entityId: string,
+  suffix: string,
+  label: string,
+  before: unknown,
+  after: unknown,
+  severity: SemanticDiffItem['severity'],
+): SemanticDiffItem {
+  return {
+    kind,
+    path: `/entities/${entityId}${suffix}`,
+    label,
+    before,
+    after,
+    entityId,
+    severity,
+  };
 }
 
 function diffRecords<T>(
@@ -87,5 +158,15 @@ function summarizeEntity(entity: ModelEntity): Record<string, unknown> {
     kind: entity.kind,
     symbol: entity.symbol,
     plateIds: entity.plateIds,
+  };
+}
+
+function summarizeBlock(entity: Extract<ModelEntity, { kind: 'block_instance' }>): Record<string, unknown> {
+  return {
+    blockTypeId: entity.blockTypeId,
+    blockVersion: entity.blockVersion,
+    inputs: entity.inputs,
+    outputs: entity.outputs,
+    config: entity.config,
   };
 }

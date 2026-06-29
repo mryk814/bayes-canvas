@@ -1,8 +1,17 @@
 import {
+  builtInBlockRegistry,
+} from './block-registry.js';
+import type {
+  BlockDefinition,
+  BlockRegistry,
+} from './block-sdk.js';
+import {
   collectReferenceOccurrences,
   parseExpression,
-  type ExprNode,
-  type ReferenceOccurrence,
+} from './expression.js';
+import type {
+  ExprNode,
+  ReferenceOccurrence,
 } from './expression.js';
 import { diagnostic, summarizeDiagnostics, type Diagnostic } from './diagnostics.js';
 import type {
@@ -51,6 +60,8 @@ export interface CompileOptions {
   compilerVersion?: string;
   builtInConstants?: readonly string[];
   builtInFunctions?: readonly string[];
+  blockRegistry?: BlockRegistry;
+  targetBackend?: string;
 }
 
 interface ExpressionEntry {
@@ -86,8 +97,10 @@ export function compileModel(
   const compilerVersion = options.compilerVersion ?? '0.1.0';
   const constants = new Set(options.builtInConstants ?? DEFAULT_CONSTANTS);
   const functions = new Set(options.builtInFunctions ?? DEFAULT_FUNCTIONS);
+  const blockRegistry = options.blockRegistry ?? builtInBlockRegistry;
 
   diagnostics.push(...lintDocumentEnvelope(document));
+  diagnostics.push(...lintBlockInstances(document, blockRegistry, options.targetBackend));
   diagnostics.push(...lintAxesAndPlates(document));
   diagnostics.push(...lintEntityOrder(document));
 
@@ -288,6 +301,143 @@ export function compileModel(
       summary,
     },
   };
+}
+
+function lintBlockInstances(
+  document: ModelDocument,
+  blockRegistry: BlockRegistry,
+  targetBackend = 'review',
+): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  for (const entity of Object.values(document.entities)) {
+    if (entity.kind !== 'block_instance') continue;
+    const basePath = `/entities/${escapePointer(entity.id)}`;
+    const definition = blockRegistry.get(entity.blockTypeId, entity.blockVersion);
+    if (!definition) {
+      diagnostics.push(diagnostic({
+        code: 'BC-BLOCK-UNKNOWN',
+        stage: 'portability',
+        severity: 'info',
+        message: `Unknown block ${entity.blockTypeId}@${entity.blockVersion}.`,
+        path: `${basePath}/blockTypeId`,
+        blocksHandoff: false,
+      }));
+      continue;
+    }
+    diagnostics.push(...lintBlockPorts(document, entity.id, entity, definition, basePath));
+    diagnostics.push(...lintBlockConfig(entity, definition, basePath));
+    diagnostics.push(...lintBlockBackend(entity, definition, targetBackend, basePath));
+    diagnostics.push(...(definition.validateBoundary?.(entity.config) ?? []));
+  }
+  return diagnostics;
+}
+
+function lintBlockPorts(
+  document: ModelDocument,
+  entityId: EntityId,
+  entity: Extract<ModelEntity, { kind: 'block_instance' }>,
+  definition: BlockDefinition,
+  basePath: string,
+): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const ports = new Map(definition.ports.map((port) => [port.id, port]));
+  for (const port of definition.ports) {
+    if (!port.required) continue;
+    const collection = port.direction === 'input' ? entity.inputs : entity.outputs;
+    if (!(port.id in collection)) {
+      diagnostics.push(diagnostic({
+        code: 'BC-BLOCK-MISSING-PORT',
+        stage: 'portability',
+        severity: 'error',
+        message: `${entity.symbol} is missing required ${port.direction} port ${port.id}.`,
+        path: `${basePath}/${port.direction === 'input' ? 'inputs' : 'outputs'}/${escapePointer(port.id)}`,
+        blocksHandoff: true,
+      }));
+    }
+  }
+  for (const [portId, binding] of Object.entries(entity.inputs)) {
+    if (!ports.has(portId)) {
+      diagnostics.push(diagnostic({
+        code: 'BC-BLOCK-UNKNOWN-PORT',
+        stage: 'portability',
+        severity: 'warning',
+        message: `${entity.symbol} has unknown input port ${portId}.`,
+        path: `${basePath}/inputs/${escapePointer(portId)}`,
+        blocksHandoff: false,
+      }));
+    }
+    if (binding.entityId && !document.entities[binding.entityId]) {
+      diagnostics.push(diagnostic({
+        code: 'BC-BLOCK-MISSING-ENTITY',
+        stage: 'portability',
+        severity: 'error',
+        message: `${entity.symbol} input ${portId} references a missing entity.`,
+        path: `${basePath}/inputs/${escapePointer(portId)}/entityId`,
+        blocksHandoff: true,
+      }));
+    }
+  }
+  for (const [portId, outputEntityId] of Object.entries(entity.outputs)) {
+    if (!ports.has(portId)) {
+      diagnostics.push(diagnostic({
+        code: 'BC-BLOCK-UNKNOWN-PORT',
+        stage: 'portability',
+        severity: 'warning',
+        message: `${entity.symbol} has unknown output port ${portId}.`,
+        path: `${basePath}/outputs/${escapePointer(portId)}`,
+        blocksHandoff: false,
+      }));
+    }
+    if (!document.entities[outputEntityId]) {
+      diagnostics.push(diagnostic({
+        code: 'BC-BLOCK-MISSING-ENTITY',
+        stage: 'portability',
+        severity: 'error',
+        message: `${entity.symbol} output ${portId} references a missing entity.`,
+        path: `${basePath}/outputs/${escapePointer(portId)}`,
+        blocksHandoff: true,
+      }));
+    }
+  }
+  return diagnostics;
+}
+
+function lintBlockConfig(
+  entity: Extract<ModelEntity, { kind: 'block_instance' }>,
+  definition: BlockDefinition,
+  basePath: string,
+): Diagnostic[] {
+  const schemaProperties = definition.configSchema.properties;
+  if (!schemaProperties || typeof schemaProperties !== 'object') return [];
+  const allowed = new Set(Object.keys(schemaProperties));
+  return Object.keys(entity.config)
+    .filter((key) => !allowed.has(key))
+    .map((key) => diagnostic({
+      code: 'BC-BLOCK-UNKNOWN-CONFIG',
+      stage: 'portability',
+      severity: 'warning',
+      message: `${entity.symbol} has unknown block config ${key}.`,
+      path: `${basePath}/config/${escapePointer(key)}`,
+      blocksHandoff: false,
+    }));
+}
+
+function lintBlockBackend(
+  entity: Extract<ModelEntity, { kind: 'block_instance' }>,
+  definition: BlockDefinition,
+  targetBackend: string,
+  basePath: string,
+): Diagnostic[] {
+  const support = definition.backendCapabilities?.[targetBackend] ?? 'unknown';
+  if (support !== 'unsupported' && support !== 'unknown') return [];
+  return [diagnostic({
+    code: 'BC-BLOCK-BACKEND-CAPABILITY',
+    stage: 'portability',
+    severity: support === 'unsupported' ? 'error' : 'warning',
+    message: `${entity.symbol} block support for ${targetBackend} is ${support}.`,
+    path: `${basePath}/blockTypeId`,
+    blocksHandoff: support === 'unsupported',
+  })];
 }
 
 function lintDocumentEnvelope(document: ModelDocument): Diagnostic[] {

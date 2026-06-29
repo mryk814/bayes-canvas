@@ -22,7 +22,8 @@ import { minimalDistributionRegistry } from '../dist-test/lib/core/registry.js';
 import { hierarchicalRegression } from '../dist-test/lib/core/example.js';
 import { compileModel } from '../dist-test/lib/core/compiler.js';
 import { TARGET_PROFILES } from '../dist-test/lib/core/target-profiles.js';
-import { sha256Hex } from '../dist-test/lib/core/fingerprint.js';
+import { createStableFingerprint, sha256Hex } from '../dist-test/lib/core/fingerprint.js';
+import { normalizeDistributionId, toCompilerDistributionDefinition } from '../dist-test/lib/distributionRegistry.js';
 import {
   validateImplementationReceiptEnvelope,
   validateLayoutDocumentEnvelope,
@@ -198,11 +199,25 @@ test('previews AI patch proposals through sandbox compile and semantic diff', ()
     operations: [{ op: 'replace', path: '/entities/beta/symbol', value: 'slope' }],
   }, minimalDistributionRegistry);
   assert.ok(preview.semanticDiff.some((item) => item.kind === 'entity_symbol_changed'));
+
+  const shapePreview = previewPatchProposal(compiled.document, {
+    proposalVersion: '1.0.0',
+    baseDocumentId: compiled.document.documentId,
+    baseRevision: compiled.document.revision,
+    intent: 'Change beta value type',
+    author: 'ai',
+    operations: [{ op: 'add', path: '/entities/beta/valueType/axes/-', value: { axisId: 'group', role: 'batch' } }],
+  }, minimalDistributionRegistry);
+  assert.ok(shapePreview.semanticDiff.some((item) => (
+    item.kind === 'entity_value_type_changed'
+    && item.severity === 'critical'
+  )));
 });
 
 test('builds a portable package with model and layout separated', () => {
   const compiled = compileCanvas(initialNodes, initialEdges);
-  const pkg = buildPortablePackage(compiled.document, compiled.layout, compiled.semantic);
+  const capabilityReport = buildCapabilityReport(compiled.document, 'pymc');
+  const pkg = buildPortablePackage(compiled.document, compiled.layout, compiled.semantic, 'pymc', capabilityReport);
   assert.equal(pkg.manifest.fingerprintAlgorithm, 'sha256');
   assert.match(pkg.manifest.fingerprint, /^[0-9a-f]{64}$/u);
   assert.ok(pkg.files['model.json']);
@@ -213,9 +228,45 @@ test('builds a portable package with model and layout separated', () => {
   const restoredModel = JSON.parse(pkg.files['model.json']);
   const restoredLayout = JSON.parse(pkg.files['layout.json']);
   const restoredEdges = JSON.parse(pkg.files['canvasEdges.json']);
+  const restoredHandoff = JSON.parse(pkg.files['handoff.json']);
   assert.equal(JSON.stringify(restoredModel), JSON.stringify(compiled.document));
   assert.equal(JSON.stringify(restoredLayout), JSON.stringify(compiled.layout));
   assert.equal(restoredEdges.length, initialEdges.length);
+  assert.deepEqual(restoredHandoff.capabilityReport, capabilityReport);
+  assert.equal(pkg.manifest.fingerprint, createStableFingerprint({ model: restoredModel, layout: restoredLayout }).value);
+});
+
+test('rejects unsafe AI patch operations before applying them', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  const base = {
+    proposalVersion: '1.0.0',
+    baseDocumentId: compiled.document.documentId,
+    baseRevision: compiled.document.revision,
+    intent: 'invalid edit',
+    author: 'ai',
+  };
+
+  assert.throws(
+    () => previewPatchProposal(compiled.document, {
+      ...base,
+      operations: [{ op: 'replace', path: '/documentId', value: 'other' }],
+    }, minimalDistributionRegistry),
+    /documentId/u,
+  );
+  assert.throws(
+    () => previewPatchProposal(compiled.document, {
+      ...base,
+      operations: [{ op: 'add', path: '/entityOrder/999', value: 'ghost' }],
+    }, minimalDistributionRegistry),
+    /Array index out of range/u,
+  );
+  assert.throws(
+    () => previewPatchProposal(compiled.document, {
+      ...base,
+      operations: [{ op: 'replace', path: '/entities/beta/id', value: 'renamed_beta' }],
+    }, minimalDistributionRegistry),
+    /stable entity IDs/u,
+  );
 });
 
 test('previews portable package imports after strict validation', () => {
@@ -619,6 +670,18 @@ test('flags unknown schema envelope properties at runtime boundaries', () => {
     unresolvedQuestions: [],
     extra: true,
   }), [{ path: '/extra', message: 'Unknown property "extra".' }]);
+
+  assert.ok(validateModelDocumentEnvelope({
+    ...compiled.document,
+    revision: '1',
+  }).some((issue) => issue.path === '/revision' && issue.message === 'Expected a finite number.'));
+  assert.ok(validateModelDocumentEnvelope({
+    ...compiled.document,
+    entities: {
+      ...compiled.document.entities,
+      beta: { ...compiled.document.entities.beta, id: 'other_beta' },
+    },
+  }).some((issue) => issue.path === '/entities/beta/id'));
 });
 
 test('checks the model corpus against expected diagnostics budgets', () => {
@@ -641,6 +704,17 @@ test('hashes stable fingerprint input with SHA-256', () => {
 });
 
 test('uses canonical distribution ids across registry and target profiles', () => {
+  assert.equal(normalizeDistributionId('Half Normal'), 'halfnormal');
+  assert.equal(normalizeDistributionId('StudentT'), 'student_t');
+  assert.equal(toCompilerDistributionDefinition({
+    id: 'Half Normal',
+    name: 'Half Normal',
+    support: 'positive',
+    family: 'continuous',
+    params: [{ name: 'sigma', required: true }],
+    latexTemplate: '',
+    textTemplate: '',
+  }).id, 'halfnormal');
   assert.equal(minimalDistributionRegistry.get('halfnormal')?.label, 'HalfNormal');
   assert.equal(minimalDistributionRegistry.get('half_normal')?.id, 'halfnormal');
   assert.equal(TARGET_PROFILES.pymc.distributionNames.halfnormal, 'pm.HalfNormal');
@@ -669,4 +743,35 @@ test('uses canonical distribution ids across registry and target profiles', () =
     && item.support === 'unsupported'
     && item.note === 'No backend-specific distribution name is registered.'
   )));
+});
+
+test('validates block instances through compiler diagnostics', () => {
+  const blockDocument = {
+    ...hierarchicalRegression,
+    entities: {
+      ...hierarchicalRegression.entities,
+      block_gp: {
+        id: 'block_gp',
+        symbol: 'gp_block',
+        kind: 'block_instance',
+        valueType: { scalar: 'real', axes: [] },
+        plateIds: [],
+        blockTypeId: 'gp_regression',
+        blockVersion: '1.0.0',
+        inputs: {
+          input: { portId: 'input', entityId: 'data_x' },
+          extra: { portId: 'extra', entityId: 'missing_entity' },
+        },
+        outputs: {
+          output: 'det_mu',
+        },
+        config: {},
+      },
+    },
+    entityOrder: [...hierarchicalRegression.entityOrder, 'block_gp'],
+  };
+  const compiled = compileModel(blockDocument, minimalDistributionRegistry, { targetBackend: 'unknown_backend' });
+  assert.ok(compiled.diagnostics.some((item) => item.code === 'BC-BLOCK-UNKNOWN-PORT'));
+  assert.ok(compiled.diagnostics.some((item) => item.code === 'BC-BLOCK-MISSING-ENTITY'));
+  assert.ok(compiled.diagnostics.some((item) => item.code === 'BC-BLOCK-BACKEND-CAPABILITY'));
 });

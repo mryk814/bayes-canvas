@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist-cli",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/lib/core/**/*.ts",
+    "src/lib/distributionRegistry.ts"
+  ]
+}

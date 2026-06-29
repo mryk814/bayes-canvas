@@ -1,6 +1,11 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { BayesNodeData, Constraint, ModelHint, ObservationProcess } from './modelIr';
-import { DISTRIBUTIONS, type DistributionSpec } from './distributionRegistry.js';
+import {
+  DISTRIBUTIONS,
+  normalizeDistributionId,
+  toCompilerDistributionDefinition,
+  type DistributionSpec,
+} from './distributionRegistry.js';
 import { compileModel } from './core/compiler.js';
 import { buildHandoffBundle, type BackendCapabilityItem, type HandoffTarget } from './core/handoff.js';
 import { createMacroInstance } from './core/macros.js';
@@ -18,7 +23,6 @@ import type {
   AxisUse,
   BlockInstanceEntity,
   DataEntity,
-  DistributionDefinition,
   Domain,
   FactorEntity,
   ImplementationHint,
@@ -64,7 +68,7 @@ type PortablePackageFileMap = Record<string, unknown>;
 
 const SOURCE_LANGUAGE = 'bayes-expr@1' as const;
 const compilerDistributionRegistry = new InMemoryDistributionRegistry(
-  DISTRIBUTIONS.map(toCompilerDistribution),
+  DISTRIBUTIONS.map(toCompilerDistributionDefinition),
 );
 
 export function canvasToAuthoringSnapshot({
@@ -160,7 +164,7 @@ export function buildCanvasHandoff(nodes: Node<BayesNodeData>[], edges: Edge[], 
 
 export function buildCanvasPortablePackage(nodes: Node<BayesNodeData>[], edges: Edge[], target: HandoffTarget = 'review') {
   const snapshot = compileCanvas(nodes, edges);
-  return buildPortablePackage(snapshot.document, snapshot.layout, snapshot.semantic, target);
+  return buildPortablePackage(snapshot.document, snapshot.layout, snapshot.semantic, target, buildCapabilityReport(snapshot.document, target));
 }
 
 export function previewCanvasPatch(nodes: Node<BayesNodeData>[], edges: Edge[], proposal: AiPatchProposal) {
@@ -1364,19 +1368,6 @@ function toDistributionCall(distribution?: DistributionSpec) {
   };
 }
 
-function toCompilerDistribution(distribution: (typeof DISTRIBUTIONS)[number]): DistributionDefinition {
-  return {
-    id: normalizeDistributionId(distribution.id),
-    label: distribution.name,
-    requiredArgs: distribution.params.filter((param) => param.required).map((param) => param.name),
-    optionalArgs: distribution.params.filter((param) => !param.required).map((param) => param.name),
-    support: supportToDomain(distribution.support),
-    eventRank: distribution.family === 'multivariate' ? 1 : 0,
-    aliases: [distribution.name, ...(distribution.aliases ?? [])].map(normalizeDistributionId),
-    deprecated: distribution.deprecated,
-  };
-}
-
 function toCoreConstraints(constraints?: Constraint[]): ModelConstraint[] | undefined {
   const mapped = (constraints ?? []).flatMap((constraint): ModelConstraint[] => {
     if (constraint.kind === 'sum_to_zero' && constraint.overPlateId) {
@@ -1423,24 +1414,6 @@ function constraintsToDomain(constraints?: Constraint[]): Domain | undefined {
   if (constraints?.some((constraint) => constraint.kind === 'ordered')) return { kind: 'ordered', axisId: 'category' };
   if (constraints?.some((constraint) => constraint.kind === 'correlation_matrix')) return { kind: 'correlation_matrix', axisId: 'dimension' };
   return undefined;
-}
-
-function supportToDomain(support: string): Domain {
-  if (support === 'real') return { kind: 'real' };
-  if (support === 'positive' || support === 'positive_definite_matrix' || support === 'cholesky_factor_corr') return { kind: 'positive' };
-  if (support === 'unit_interval') return { kind: 'unit_interval' };
-  if (support === 'simplex') return { kind: 'simplex', axisId: 'component' };
-  if (support === 'ordered') return { kind: 'ordered', axisId: 'category' };
-  if (support === 'correlation_matrix') return { kind: 'correlation_matrix', axisId: 'dimension' };
-  return { kind: 'custom', description: support };
-}
-
-function normalizeDistributionId(value: string): string {
-  const lowered = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
-  if (lowered === 'halfnormal' || lowered === 'half_normal') return 'halfnormal';
-  if (lowered === 'studentt') return 'student_t';
-  if (lowered === 'multivariatenormal' || lowered === 'mvn') return 'multivariate_normal';
-  return lowered;
 }
 
 function parseNodeSymbol(name: string): string {
