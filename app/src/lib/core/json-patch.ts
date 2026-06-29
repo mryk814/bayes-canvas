@@ -8,9 +8,47 @@ export interface PatchResult<T> {
 export function applyJsonPatch<T>(input: T, operations: readonly JsonPatchOperation[]): PatchResult<T> {
   const value = structuredClone(input) as T;
   for (const operation of operations) {
+    validateOperation(value as unknown, operation);
     applyOperation(value as unknown, operation);
   }
   return { value, applied: [...operations] };
+}
+
+export function validateJsonPatchOperations(root: unknown, operations: readonly JsonPatchOperation[]): void {
+  const sandbox = structuredClone(root);
+  for (const operation of operations) {
+    validateOperation(sandbox, operation);
+    applyOperation(sandbox, operation);
+  }
+}
+
+function validateOperation(root: unknown, operation: JsonPatchOperation): void {
+  if (!operation || typeof operation !== 'object') throw new Error('Patch operation must be an object.');
+  const op = (operation as { op?: unknown }).op;
+  if (typeof op !== 'string' || !['add', 'remove', 'replace', 'move', 'copy', 'test'].includes(op)) {
+    throw new Error(`Unsupported patch operation: ${String(op)}`);
+  }
+  if (operation.path === '') throw new Error('Patch path must not be the document root.');
+
+  if (operation.op === 'move' || operation.op === 'copy') {
+    if (!operation.from) throw new Error(`${operation.op} operation is missing from.`);
+    readPointer(root, operation.from);
+  }
+  if (operation.op === 'remove' || operation.op === 'replace' || operation.op === 'test') {
+    readPointer(root, operation.path);
+  }
+  if (operation.op === 'add' || operation.op === 'replace' || operation.op === 'test') {
+    if (!('value' in (operation as Record<string, unknown>))) throw new Error(`${operation.op} operation is missing value.`);
+  }
+
+  const { parent, key } = pointerParent(root, operation.path);
+  if (Array.isArray(parent)) {
+    if (key === '-' && operation.op === 'add') return;
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0) throw new Error(`Invalid array index in patch path: ${operation.path}`);
+    const max = operation.op === 'add' ? parent.length : parent.length - 1;
+    if (index > max) throw new Error(`Array index out of range in patch path: ${operation.path}`);
+  }
 }
 
 function applyOperation(root: unknown, operation: JsonPatchOperation): void {
@@ -73,9 +111,11 @@ function writePointer(root: unknown, pointer: string, value: unknown, op: 'add' 
 function removePointer(root: unknown, pointer: string): void {
   const { parent, key } = pointerParent(root, pointer);
   if (Array.isArray(parent)) {
+    if (key === '-') throw new Error(`Cannot remove append position: ${pointer}`);
     parent.splice(Number(key), 1);
     return;
   }
+  if (!(key in parent)) throw new Error(`Cannot remove missing path: ${pointer}`);
   delete parent[key];
 }
 

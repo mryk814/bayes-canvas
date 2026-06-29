@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
-import { compileModel } from '../dist-test/lib/core/compiler.js';
-import { buildHandoffBundle } from '../dist-test/lib/core/handoff.js';
-import { assertJsonComplexity } from '../dist-test/lib/core/migrations.js';
-import { hierarchicalRegression } from '../dist-test/lib/core/example.js';
-import { minimalDistributionRegistry } from '../dist-test/lib/core/registry.js';
+import { compileModel } from '../dist-cli/lib/core/compiler.js';
+import { buildHandoffBundle } from '../dist-cli/lib/core/handoff.js';
+import { assertJsonComplexity } from '../dist-cli/lib/core/migrations.js';
+import { hierarchicalRegression } from '../dist-cli/lib/core/example.js';
+import { minimalDistributionRegistry } from '../dist-cli/lib/core/registry.js';
+import { diffModelDocuments } from '../dist-cli/lib/core/semantic-diff.js';
 
 const [command, target, ...rest] = process.argv.slice(2);
 
@@ -31,7 +32,20 @@ try {
     process.exit(0);
   }
 
-  console.error('Usage: bayes-canvas <lint|handoff> <model.json|--sample> [--target pymc]');
+  if (command === 'migrate') {
+    console.log(JSON.stringify(document, null, 2));
+    process.exit(0);
+  }
+
+  if (command === 'diff') {
+    const nextPath = rest[0];
+    if (!target || !nextPath) throw new Error('Diff requires before and after model paths.');
+    const nextDocument = await loadDocument(nextPath);
+    console.log(JSON.stringify(diffModelDocuments(document, nextDocument), null, 2));
+    process.exit(0);
+  }
+
+  console.error('Usage: bayes-canvas <lint|handoff|migrate|diff> <model.json|--sample> [after.model.json] [--target pymc]');
   process.exit(2);
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

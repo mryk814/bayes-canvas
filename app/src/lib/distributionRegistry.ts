@@ -51,6 +51,26 @@ export interface DistributionSpec {
   args: Record<string, string>;
 }
 
+export interface CompilerDistributionDefinition {
+  id: string;
+  label: string;
+  requiredArgs: string[];
+  optionalArgs: string[];
+  support: CompilerDomain;
+  eventRank: number;
+  aliases?: string[];
+  deprecated?: boolean;
+}
+
+export type CompilerDomain =
+  | { kind: 'real' }
+  | { kind: 'positive' }
+  | { kind: 'unit_interval' }
+  | { kind: 'simplex'; axisId: string }
+  | { kind: 'ordered'; axisId: string }
+  | { kind: 'correlation_matrix'; axisId: string }
+  | { kind: 'custom'; description: string };
+
 export const DISTRIBUTIONS: DistributionDefinition[] = [
   {
     id: 'normal',
@@ -425,6 +445,37 @@ export function normalizeDistribution(distribution: DistributionSpec): Distribut
     id: definition.id,
     name: definition.name,
     args: distribution.args,
+  };
+}
+
+export function normalizeDistributionId(value: string): string {
+  const lowered = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  if (lowered === 'halfnormal' || lowered === 'half_normal') return 'halfnormal';
+  if (lowered === 'studentt') return 'student_t';
+  if (lowered === 'multivariatenormal' || lowered === 'mvn') return 'multivariate_normal';
+  return lowered;
+}
+
+export function supportToDomain(support: string): CompilerDomain {
+  if (support === 'real') return { kind: 'real' };
+  if (support === 'positive' || support === 'positive_definite_matrix' || support === 'cholesky_factor_corr') return { kind: 'positive' };
+  if (support === 'unit_interval') return { kind: 'unit_interval' };
+  if (support === 'simplex') return { kind: 'simplex', axisId: 'component' };
+  if (support === 'ordered') return { kind: 'ordered', axisId: 'category' };
+  if (support === 'correlation_matrix') return { kind: 'correlation_matrix', axisId: 'dimension' };
+  return { kind: 'custom', description: support };
+}
+
+export function toCompilerDistributionDefinition(distribution: DistributionDefinition): CompilerDistributionDefinition {
+  return {
+    id: normalizeDistributionId(distribution.id),
+    label: distribution.name,
+    requiredArgs: distribution.params.filter((param) => param.required).map((param) => param.name),
+    optionalArgs: distribution.params.filter((param) => !param.required).map((param) => param.name),
+    support: supportToDomain(distribution.support),
+    eventRank: distribution.family === 'multivariate' ? 1 : 0,
+    aliases: [distribution.name, ...(distribution.aliases ?? [])].map(normalizeDistributionId),
+    deprecated: distribution.deprecated,
   };
 }
 

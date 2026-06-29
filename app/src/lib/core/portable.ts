@@ -1,5 +1,5 @@
-import { buildHandoffBundle, type HandoffTarget } from './handoff.js';
-import { createStableFingerprint, type FINGERPRINT_ALGORITHM } from './fingerprint.js';
+import { buildHandoffBundle, type BackendCapabilityItem, type HandoffTarget } from './handoff.js';
+import { canonicalJsonValue, createStableFingerprint, type FINGERPRINT_ALGORITHM } from './fingerprint.js';
 import type { SemanticModel } from './compiler.js';
 import type { LayoutDocument, ModelDocument } from './model.js';
 
@@ -29,14 +29,17 @@ export function buildPortablePackage(
   layout: LayoutDocument,
   semantic: SemanticModel,
   target: HandoffTarget = 'review',
+  capabilityReport: BackendCapabilityItem[] = [],
   now = new Date(),
 ): PortableBayesCanvasPackage {
-  const handoff = buildHandoffBundle(document, semantic, target);
-  const fingerprint = createStableFingerprint({ model: document, layout });
+  const normalizedDocument = canonicalJsonValue(document);
+  const normalizedLayout = canonicalJsonValue(layout);
+  const handoff = buildHandoffBundle(document, semantic, target, capabilityReport);
+  const fingerprint = createStableFingerprint({ model: normalizedDocument, layout: normalizedLayout });
   const files = {
     'manifest.json': '',
-    'model.json': JSON.stringify(document, null, 2),
-    'layout.json': JSON.stringify(layout, null, 2),
+    'model.json': JSON.stringify(normalizedDocument, null, 2),
+    'layout.json': JSON.stringify(normalizedLayout, null, 2),
     'canvasEdges.json': JSON.stringify(extractCanvasEdges(document), null, 2),
     'diagnostics.json': JSON.stringify(semantic.diagnostics, null, 2),
     'handoff.json': JSON.stringify(handoff, null, 2),
