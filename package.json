@@ -5,8 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "npm --prefix app run dev --",
+    "lint": "npm --prefix app run lint --",
+    "format:check": "npm --prefix app run format:check --",
     "typecheck": "npm --prefix app run typecheck --",
     "test": "npm --prefix app run test --",
+    "test:property": "npm --prefix app run test:property --",
+    "test:e2e": "npm --prefix app run test:e2e --",
+    "test:large": "npm --prefix app run test:large --",
     "cli:lint:sample": "npm --prefix app run cli:lint:sample --",
     "cli:handoff:sample": "npm --prefix app run cli:handoff:sample --",
     "build": "npm --prefix app run build --",

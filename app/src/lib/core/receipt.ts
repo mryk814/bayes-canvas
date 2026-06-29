@@ -1,3 +1,5 @@
+import { parseImplementationReceipt } from './schema-validation.js';
+
 export interface ImplementationReceipt {
   receiptVersion: '1.0.0';
   inputSpecificationFingerprintAlgorithm?: 'sha256';
@@ -16,6 +18,7 @@ export interface ImplementationReceipt {
 }
 
 export function validateImplementationReceipt(value: unknown): ImplementationReceipt {
+  parseImplementationReceipt<ImplementationReceipt>(value);
   if (!value || typeof value !== 'object') throw new Error('Receipt must be a JSON object.');
   const receipt = value as Partial<ImplementationReceipt>;
   if (receipt.receiptVersion !== '1.0.0') throw new Error('Unsupported receipt version.');

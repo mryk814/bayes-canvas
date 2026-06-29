@@ -6,8 +6,12 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc",
-    "lint": "npm run typecheck",
+    "lint": "npm run typecheck && node scripts/quality-check.mjs",
+    "format:check": "node scripts/format-check.mjs",
     "test": "tsc -p tsconfig.test.json && node --experimental-specifier-resolution=node --test test/*.test.mjs",
+    "test:property": "tsc -p tsconfig.test.json && node --experimental-specifier-resolution=node scripts/property-tests.mjs",
+    "test:e2e": "npm run build && node scripts/ui-smoke.mjs",
+    "test:large": "tsc -p tsconfig.test.json && node --experimental-specifier-resolution=node scripts/large-roundtrip.mjs",
     "cli:build": "tsc -p tsconfig.cli.json",
     "cli:lint:sample": "npm run cli:build && node --experimental-specifier-resolution=node bin/bayes-canvas.mjs lint --sample",
     "cli:handoff:sample": "npm run cli:build && node --experimental-specifier-resolution=node bin/bayes-canvas.mjs handoff --sample --target pymc",

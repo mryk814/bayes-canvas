@@ -1,11 +1,13 @@
 name: CI
 
 on:
-  push:
   pull_request:
+  push:
+    branches:
+      - main
 
 jobs:
-  app:
+  quality:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -18,8 +20,12 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run test
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run test:property
+      - run: npm run test:large
+      - run: npm run build
+      - run: npm run test:e2e
       - run: npm run cli:lint:sample
       - run: npm run cli:handoff:sample
-      - run: npm run build

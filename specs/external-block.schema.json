@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bayes-canvas.local/specs/external-block.schema.json",
+  "title": "Bayes Canvas External Block Data Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "blockTypeId", "blockVersion", "inputs", "outputs", "config"],
+  "properties": {
+    "id": { "type": "string" },
+    "blockTypeId": { "type": "string" },
+    "blockVersion": { "type": "string" },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "portId": { "type": "string" },
+          "entityId": { "type": "string" },
+          "expression": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["language", "source"],
+            "properties": {
+              "language": { "const": "bayes-expr@1" },
+              "source": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "config": {
+      "type": "object",
+      "description": "Pure JSON data only. Runtime validation rejects executable fields, remote URLs, and OS/network/filesystem declarations."
+    }
+  },
+  "not": {
+    "anyOf": [
+      { "required": ["code"] },
+      { "required": ["script"] },
+      { "required": ["javascript"] },
+      { "required": ["python"] },
+      { "required": ["shell"] },
+      { "required": ["wasm"] },
+      { "required": ["remoteUrl"] },
+      { "required": ["filesystemAccess"] },
+      { "required": ["networkAccess"] },
+      { "required": ["clipboardAccess"] },
+      { "required": ["databaseAccess"] },
+      { "required": ["osAccess"] }
+    ]
+  }
+}

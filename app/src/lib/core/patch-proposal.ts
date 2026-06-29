@@ -4,6 +4,7 @@ import type { JsonPatchOperation } from './diagnostics.js';
 import { applyJsonPatch, readPointer, validateJsonPatchOperations } from './json-patch.js';
 import type { DistributionRegistry, ModelDocument } from './model.js';
 import { diffModelDocuments, type SemanticDiffItem } from './semantic-diff.js';
+import { parseAiPatchProposal } from './schema-validation.js';
 
 export interface AiPatchProposal {
   proposalVersion: '1.0.0';
@@ -46,6 +47,7 @@ export function previewPatchProposal(
 }
 
 export function validatePatchProposal(document: ModelDocument, proposal: AiPatchProposal): void {
+  parseAiPatchProposal<AiPatchProposal>(proposal);
   if (proposal.proposalVersion !== '1.0.0') throw new Error('Unsupported patch proposal version.');
   if (proposal.baseDocumentId !== document.documentId) throw new Error('Patch proposal targets a different document.');
   if (proposal.baseRevision !== document.revision) throw new Error('Patch proposal targets a different document revision.');

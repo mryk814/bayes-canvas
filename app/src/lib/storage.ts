@@ -17,13 +17,31 @@ export interface TransactionLogEntry {
   revision: number;
 }
 
+export type StorageFailureKind = 'autosave-body' | 'transaction-log' | 'snapshot';
+
+export interface StorageWriteResult {
+  ok: boolean;
+  failureKind?: StorageFailureKind;
+  quotaExceeded?: boolean;
+  message?: string;
+}
+
 const DB_NAME = 'bayes-canvas';
 const DB_VERSION = 1;
 const MAX_AUTOSAVE_TRANSACTIONS = 120;
 
-export async function saveAutosave(document: ModelDocument, layout: LayoutDocument): Promise<void> {
+export async function saveAutosave(document: ModelDocument, layout: LayoutDocument): Promise<StorageWriteResult> {
   const db = await openDatabase();
-  await put(db, 'autosave', { id: document.documentId, document, layout, savedAt: new Date().toISOString() });
+  try {
+    await put(db, 'autosave', { id: document.documentId, document, layout, savedAt: new Date().toISOString() });
+  } catch (error) {
+    return {
+      ok: false,
+      failureKind: 'autosave-body',
+      quotaExceeded: isQuotaError(error),
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
   try {
     await addTransaction(db, {
       kind: 'autosave',
@@ -35,21 +53,42 @@ export async function saveAutosave(document: ModelDocument, layout: LayoutDocume
   } catch (error) {
     if (isQuotaError(error)) {
       await pruneAutosaveTransactions(db, Math.floor(MAX_AUTOSAVE_TRANSACTIONS / 2));
-      return;
+      return {
+        ok: true,
+        failureKind: 'transaction-log',
+        quotaExceeded: true,
+        message: 'Autosave succeeded, but transaction log quota was exceeded and old autosave log rows were pruned.',
+      };
     }
-    throw error;
+    return {
+      ok: true,
+      failureKind: 'transaction-log',
+      quotaExceeded: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
   }
+  return { ok: true };
 }
 
-export async function saveSnapshot(snapshot: StoredSnapshot): Promise<void> {
+export async function saveSnapshot(snapshot: StoredSnapshot): Promise<StorageWriteResult> {
   const db = await openDatabase();
-  await put(db, 'snapshots', snapshot);
-  await addTransaction(db, {
-    kind: 'snapshot',
-    summary: `Saved snapshot ${snapshot.name}.`,
-    modelDocumentId: snapshot.document.documentId,
-    revision: snapshot.document.revision,
-  });
+  try {
+    await put(db, 'snapshots', snapshot);
+    await addTransaction(db, {
+      kind: 'snapshot',
+      summary: `Saved snapshot ${snapshot.name}.`,
+      modelDocumentId: snapshot.document.documentId,
+      revision: snapshot.document.revision,
+    });
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      failureKind: 'snapshot',
+      quotaExceeded: isQuotaError(error),
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export async function loadAutosave(documentId: string): Promise<StoredSnapshot | null> {
@@ -68,6 +107,17 @@ export async function listTransactions(limit = 50): Promise<TransactionLogEntry[
   return getAll<TransactionLogEntry>(db, 'transactions').then((rows) =>
     rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit),
   );
+}
+
+export async function cleanupOldAutosaveData(): Promise<number> {
+  const db = await openDatabase();
+  const transactions = await getAll<TransactionLogEntry>(db, 'transactions');
+  const autosaveTransactions = transactions
+    .filter((entry) => entry.kind === 'autosave')
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const staleTransactionIds = autosaveTransactions.slice(Math.floor(MAX_AUTOSAVE_TRANSACTIONS / 3)).map((entry) => entry.id);
+  await deleteMany(db, 'transactions', staleTransactionIds);
+  return staleTransactionIds.length;
 }
 
 async function addTransaction(
