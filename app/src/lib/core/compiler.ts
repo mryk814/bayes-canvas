@@ -17,6 +17,7 @@ import { diagnostic, summarizeDiagnostics, type Diagnostic } from './diagnostics
 import { lowerMacros } from './macros.js';
 import type {
   AxisId,
+  AxisUse,
   DistributionDefinition,
   DistributionRegistry,
   EntityId,
@@ -77,11 +78,15 @@ const DEFAULT_FUNCTIONS = [
   'abs',
   'dot',
   'exp',
+  'argmax',
+  'cdf_lognormal',
+  'cumulative_sum',
   'inv_logit',
   'log',
   'log1p',
   'logit',
   'max',
+  'mean',
   'min',
   'pow',
   'softmax',
@@ -588,8 +593,7 @@ function lintEntities(document: ModelDocument, distributions: DistributionRegist
 
   for (const [entityId, entity] of Object.entries(document.entities)) {
     const basePath = `/entities/${escapePointer(entityId)}`;
-    const axisIds = entity.valueType.axes.map((axis) => axis.axisId);
-    const duplicateAxisIds = duplicates(axisIds);
+    const duplicateAxisIds = duplicates(entity.valueType.axes.map((axis) => `${axis.role}:${axis.axisId}`));
 
     for (const [axisIndex, axisUse] of entity.valueType.axes.entries()) {
       if (!document.axes[axisUse.axisId]) {
@@ -604,12 +608,14 @@ function lintEntities(document: ModelDocument, distributions: DistributionRegist
       }
     }
 
-    for (const duplicateAxisId of duplicateAxisIds) {
+    for (const duplicateAxisKey of duplicateAxisIds) {
+      const [duplicateRole, duplicateAxisId] = duplicateAxisKey.split(':') as [AxisUse['role'], AxisId];
+      if (duplicateRole === 'event') continue;
       output.push(diagnostic({
         code: 'BC-SHAPE-002',
         stage: 'shape',
         severity: 'error',
-        message: `Axis "${duplicateAxisId}" is repeated in the same value shape.`,
+        message: `Batch axis "${duplicateAxisId}" is repeated in the same value shape.`,
         path: `${basePath}/valueType/axes`,
         blocksHandoff: true,
       }));

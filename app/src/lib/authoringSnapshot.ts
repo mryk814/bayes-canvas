@@ -15,7 +15,7 @@ import type {
   SourceText,
   ValueType,
 } from './core/model.js';
-import { normalizeDistributionId, type DistributionSpec } from './distributionRegistry.js';
+import { findDistribution, normalizeDistributionId, supportToDomain, type DistributionSpec } from './distributionRegistry.js';
 import type { BayesNodeData, Constraint, ModelHint, ObservationProcess } from './modelIr.js';
 
 const SOURCE_LANGUAGE = 'bayes-expr@1' as const;
@@ -294,8 +294,13 @@ function toValueType(data: BayesNodeData): ValueType {
   return {
     scalar: data.kind === 'data' && parseNodeSymbol(data.name).endsWith('_id') ? 'integer' : 'real',
     axes,
-    domain: constraintsToDomain(data.constraints),
+    domain: constraintsToDomain(data.constraints) ?? distributionToDomain(data.distribution),
   };
+}
+
+function distributionToDomain(distribution?: DistributionSpec): Domain | undefined {
+  const definition = findDistribution(distribution?.id ?? distribution?.name);
+  return definition ? supportToDomain(definition.support) : undefined;
 }
 
 function toDistributionCall(distribution?: DistributionSpec) {
@@ -317,6 +322,9 @@ function toCoreConstraints(constraints?: Constraint[]): ModelConstraint[] | unde
   const mapped = (constraints ?? []).flatMap((constraint): ModelConstraint[] => {
     if (constraint.kind === 'sum_to_zero' && constraint.overPlateId) {
       return [{ kind: 'sum_to_zero', axisId: constraint.overPlateId }];
+    }
+    if (constraint.kind === 'cholesky_factor_corr') {
+      return [{ kind: 'custom', description: 'cholesky_factor_corr' }];
     }
     if (constraint.kind === 'custom') return [{ kind: 'custom', description: constraint.description }];
     return [];
@@ -358,6 +366,9 @@ function constraintsToDomain(constraints?: Constraint[]): Domain | undefined {
   if (constraints?.some((constraint) => constraint.kind === 'simplex')) return { kind: 'simplex', axisId: 'component' };
   if (constraints?.some((constraint) => constraint.kind === 'ordered')) return { kind: 'ordered', axisId: 'category' };
   if (constraints?.some((constraint) => constraint.kind === 'correlation_matrix')) return { kind: 'correlation_matrix', axisId: 'dimension' };
+  if (constraints?.some((constraint) => constraint.kind === 'cholesky_factor_corr')) {
+    return { kind: 'cholesky_factor_corr', axisId: 'dimension' };
+  }
   return undefined;
 }
 

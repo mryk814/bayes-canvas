@@ -18,6 +18,8 @@ export type Domain =
   | { kind: 'simplex'; axisId: AxisId }
   | { kind: 'ordered'; axisId: AxisId }
   | { kind: 'correlation_matrix'; axisId: AxisId }
+  | { kind: 'cholesky_factor_corr'; axisId: AxisId }
+  | { kind: 'positive_definite_matrix'; axisId: AxisId }
   | { kind: 'custom'; description: string };
 
 /**

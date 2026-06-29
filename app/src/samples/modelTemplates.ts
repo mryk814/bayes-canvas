@@ -20,22 +20,22 @@ export interface ModelTemplate {
 const retailDemandNodes: Node<BayesNodeData>[] = [
   {
     id: 'market_id',
-    position: { x: 80, y: 260 },
+    position: { x: 432, y: 1904 },
     data: { kind: 'data', name: 'market_id[i]', shape: ['N'], plate: 'obs', observed: true },
   },
   {
     id: 'time_id',
-    position: { x: 80, y: 360 },
+    position: { x: 768, y: 1904 },
     data: { kind: 'data', name: 'time_id[i]', shape: ['N'], plate: 'obs', observed: true },
   },
   {
     id: 'channel_id',
-    position: { x: 80, y: 460 },
+    position: { x: 432, y: 2072 },
     data: { kind: 'data', name: 'channel_id[i]', shape: ['N'], plate: 'obs', observed: true },
   },
   {
     id: 'price_obs',
-    position: { x: 80, y: 560 },
+    position: { x: 432, y: 2240 },
     data: {
       kind: 'data',
       name: 'price_obs[i]',
@@ -48,7 +48,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'media_spend',
-    position: { x: 80, y: 660 },
+    position: { x: 432, y: 2408 },
     data: {
       kind: 'data',
       name: 'media_spend[i]',
@@ -60,7 +60,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'exposure',
-    position: { x: 80, y: 760 },
+    position: { x: 768, y: 2576 },
     data: {
       kind: 'data',
       name: 'exposure[i]',
@@ -72,7 +72,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'stockout_gap',
-    position: { x: 80, y: 860 },
+    position: { x: 768, y: 2744 },
     data: {
       kind: 'data',
       name: 'stockout_gap[i]',
@@ -84,7 +84,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'channel_alpha',
-    position: { x: 90, y: 1040 },
+    position: { x: 96, y: 764 },
     data: {
       kind: 'data',
       name: 'channel_alpha',
@@ -96,7 +96,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'market_effect_mu',
-    position: { x: 380, y: 80 },
+    position: { x: 96, y: 596 },
     data: {
       kind: 'data',
       name: 'market_effect_mu',
@@ -107,69 +107,63 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'market_effect_chol',
-    position: { x: 620, y: 80 },
+    position: { x: 96, y: 428 },
     data: {
       kind: 'hyperparameter',
       name: 'market_effect_chol',
-      eventShape: ['K'],
-      distribution: { id: 'lkj_cholesky', name: 'LKJCholesky', args: { eta: '2' } },
-      constraints: [{ kind: 'positive' }],
-      notes: '市場別の切片と価格傾きの相関を表す Cholesky 因子。',
+      eventShape: ['K', 'K'],
+      distribution: { id: 'lkj_cholesky', name: 'LKJCholesky', args: { eta: '2', sd_dist: 'HalfNormal(1)' } },
+      notes: '市場別の切片と価格傾きの相関とスケールを表す Cholesky 因子。',
     },
   },
   {
     id: 'tau_season',
-    position: { x: 860, y: 80 },
+    position: { x: 432, y: 428 },
     data: {
       kind: 'hyperparameter',
       name: 'tau_season',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.5' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'sigma_price',
-    position: { x: 1100, y: 80 },
+    position: { x: 432, y: 596 },
     data: {
       kind: 'hyperparameter',
       name: 'sigma_price',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.2' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'overdispersion',
-    position: { x: 1340, y: 80 },
+    position: { x: 1440, y: 428 },
     data: {
       kind: 'parameter',
       name: 'overdispersion',
       distribution: { id: 'exponential', name: 'Exponential', args: { lam: '1' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'tau_media',
-    position: { x: 1580, y: 80 },
+    position: { x: 432, y: 764 },
     data: {
       kind: 'hyperparameter',
       name: 'tau_media',
       distribution: { id: 'halfcauchy', name: 'HalfCauchy', args: { beta: '0.5' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'zi_tau_market',
-    position: { x: 1820, y: 80 },
+    position: { x: 768, y: 428 },
     data: {
       kind: 'hyperparameter',
       name: 'zi_tau_market',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.7' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'market_effect',
-    position: { x: 500, y: 250 },
+    position: { x: 432, y: 1586 },
     data: {
       kind: 'parameter',
       name: 'market_effect[m]',
@@ -183,7 +177,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'season',
-    position: { x: 850, y: 250 },
+    position: { x: 768, y: 110 },
     data: {
       kind: 'parameter',
       name: 'season[t]',
@@ -195,29 +189,27 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'channel_weight',
-    position: { x: 1180, y: 250 },
+    position: { x: 432, y: 932 },
     data: {
       kind: 'parameter',
       name: 'channel_weight',
       eventShape: ['C'],
       distribution: { id: 'dirichlet', name: 'Dirichlet', args: { alpha: 'channel_alpha' } },
-      constraints: [{ kind: 'simplex' }],
       notes: '観測された販売チャネル間の simplex 配分。',
     },
   },
   {
     id: 'media_decay',
-    position: { x: 1510, y: 250 },
+    position: { x: 432, y: 1100 },
     data: {
       kind: 'parameter',
       name: 'media_decay',
       distribution: { id: 'beta', name: 'Beta', args: { alpha: '2', beta: '2' } },
-      constraints: [{ kind: 'unit_interval' }],
     },
   },
   {
     id: 'beta_media',
-    position: { x: 1740, y: 250 },
+    position: { x: 768, y: 764 },
     data: {
       kind: 'parameter',
       name: 'beta_media',
@@ -227,7 +219,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'beta_price',
-    position: { x: 1980, y: 250 },
+    position: { x: 432, y: 1268 },
     data: {
       kind: 'parameter',
       name: 'beta_price',
@@ -237,7 +229,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'gamma_stockout',
-    position: { x: 2220, y: 250 },
+    position: { x: 768, y: 596 },
     data: {
       kind: 'parameter',
       name: 'gamma_stockout',
@@ -246,7 +238,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'zi_alpha',
-    position: { x: 2460, y: 250 },
+    position: { x: 1104, y: 428 },
     data: {
       kind: 'parameter',
       name: 'zi_alpha',
@@ -256,7 +248,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'zi_market',
-    position: { x: 2700, y: 250 },
+    position: { x: 1104, y: 1586 },
     data: {
       kind: 'parameter',
       name: 'zi_market[m]',
@@ -267,19 +259,18 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'price_true',
-    position: { x: 350, y: 560 },
+    position: { x: 768, y: 2240 },
     data: {
       kind: 'latent',
       name: 'price_true[i]',
       shape: ['N'],
       plate: 'obs',
       distribution: { id: 'lognormal', name: 'LogNormal', args: { mu: 'log(price_obs[i])', sigma: 'sigma_price' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'price_slope',
-    position: { x: 700, y: 560 },
+    position: { x: 768, y: 2072 },
     data: {
       kind: 'deterministic',
       name: 'price_slope[i]',
@@ -290,7 +281,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'media_effect',
-    position: { x: 1050, y: 560 },
+    position: { x: 768, y: 2408 },
     data: {
       kind: 'deterministic',
       name: 'media_effect[i]',
@@ -301,7 +292,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'log_mu',
-    position: { x: 1400, y: 560 },
+    position: { x: 1104, y: 1904 },
     data: {
       kind: 'deterministic',
       name: 'log_mu[i]',
@@ -312,7 +303,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'demand_mu',
-    position: { x: 1750, y: 560 },
+    position: { x: 1440, y: 1904 },
     data: {
       kind: 'deterministic',
       name: 'demand_mu[i]',
@@ -324,7 +315,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'zero_prob',
-    position: { x: 2100, y: 560 },
+    position: { x: 1440, y: 2072 },
     data: {
       kind: 'deterministic',
       name: 'zero_prob[i]',
@@ -336,7 +327,7 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'sales',
-    position: { x: 1930, y: 760 },
+    position: { x: 1776, y: 1904 },
     data: {
       kind: 'likelihood',
       name: 'sales[i]',
@@ -352,19 +343,48 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
     },
   },
   {
-    id: 'posterior_predictive_checks',
-    position: { x: 2280, y: 760 },
+    id: 'qoi_sales_ppc_gap',
+    position: { x: 2112, y: 428 },
     data: {
-      kind: 'model_block',
-      name: 'posterior_predictive_checks',
-      expression: 'sales, demand_mu, zero_prob, market_effect, channel_weight',
-      validationLevel: 'structured',
-      notes: 'ゼロ件数、裾の厚さ、市場別 calibration、チャネル lift の集中を確認する。',
+      kind: 'derived_quantity',
+      name: 'sales_mean_gap',
+      expression: 'mean(sales) - mean(demand_mu)',
+      notes: '観測販売数と期待需要の平均差を見る posterior predictive check。',
+    },
+  },
+  {
+    id: 'qoi_zero_share',
+    position: { x: 2112, y: 2072 },
+    data: {
+      kind: 'derived_quantity',
+      name: 'mean_zero_probability',
+      expression: 'mean(zero_prob)',
+      notes: '構造的ゼロがどの程度の比率で発生しそうかを見る確認量。',
+    },
+  },
+  {
+    id: 'qoi_market_spread',
+    position: { x: 2112, y: 1586 },
+    data: {
+      kind: 'derived_quantity',
+      name: 'market_effect_spread',
+      expression: 'max(market_effect[:, 0]) - min(market_effect[:, 0])',
+      notes: '市場別切片の広がりを、calibration 確認の入口として見る。',
+    },
+  },
+  {
+    id: 'qoi_channel_concentration',
+    position: { x: 2112, y: 932 },
+    data: {
+      kind: 'derived_quantity',
+      name: 'top_channel_weight',
+      expression: 'max(channel_weight)',
+      notes: 'チャネル配分が一部チャネルへ寄りすぎていないかを見る確認量。',
     },
   },
   {
     id: 'qoi_price_elasticity',
-    position: { x: 700, y: 1000 },
+    position: { x: 2112, y: 1268 },
     data: {
       kind: 'derived_quantity',
       name: 'price_elasticity',
@@ -374,17 +394,17 @@ const retailDemandNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'qoi_media_lift',
-    position: { x: 1050, y: 1000 },
+    position: { x: 2112, y: 596 },
     data: {
       kind: 'derived_quantity',
       name: 'media_lift_10pct',
-      expression: 'exp(beta_media * log(1.1)) - 1',
-      notes: 'メディア支出が10%増えたときの lift の近似。',
+      expression: 'exp(beta_media * media_decay * mean(channel_weight) * log(1.1)) - 1',
+      notes: '平均的なチャネル配分でメディア支出が10%増えたときの lift 近似。',
     },
   },
   {
     id: 'qoi_stockout_zero',
-    position: { x: 1400, y: 1000 },
+    position: { x: 2112, y: 764 },
     data: {
       kind: 'derived_quantity',
       name: 'stockout_zero_inflation_effect',
@@ -430,25 +450,27 @@ const retailDemandEdges: Edge[] = [
   { id: 'demand_mu-sales', source: 'demand_mu', target: 'sales', data: { role: 'likelihood-parameter' } },
   { id: 'zero_prob-sales', source: 'zero_prob', target: 'sales', data: { role: 'likelihood-parameter' } },
   { id: 'overdispersion-sales', source: 'overdispersion', target: 'sales', data: { role: 'likelihood-parameter' } },
-  { id: 'sales-posterior_predictive_checks', source: 'sales', target: 'posterior_predictive_checks', data: { role: 'block-input' } },
-  { id: 'demand_mu-posterior_predictive_checks', source: 'demand_mu', target: 'posterior_predictive_checks', data: { role: 'block-input' } },
-  { id: 'zero_prob-posterior_predictive_checks', source: 'zero_prob', target: 'posterior_predictive_checks', data: { role: 'block-input' } },
-  { id: 'market_effect-posterior_predictive_checks', source: 'market_effect', target: 'posterior_predictive_checks', data: { role: 'block-input' } },
-  { id: 'channel_weight-posterior_predictive_checks', source: 'channel_weight', target: 'posterior_predictive_checks', data: { role: 'block-input' } },
+  { id: 'sales-qoi_sales_ppc_gap', source: 'sales', target: 'qoi_sales_ppc_gap', data: { role: 'query-source' } },
+  { id: 'demand_mu-qoi_sales_ppc_gap', source: 'demand_mu', target: 'qoi_sales_ppc_gap', data: { role: 'query-source' } },
+  { id: 'zero_prob-qoi_zero_share', source: 'zero_prob', target: 'qoi_zero_share', data: { role: 'query-source' } },
+  { id: 'market_effect-qoi_market_spread', source: 'market_effect', target: 'qoi_market_spread', data: { role: 'query-source' } },
+  { id: 'channel_weight-qoi_channel_concentration', source: 'channel_weight', target: 'qoi_channel_concentration', data: { role: 'query-source' } },
   { id: 'beta_price-qoi_price_elasticity', source: 'beta_price', target: 'qoi_price_elasticity', data: { role: 'query-source' } },
   { id: 'beta_media-qoi_media_lift', source: 'beta_media', target: 'qoi_media_lift', data: { role: 'query-source' } },
+  { id: 'media_decay-qoi_media_lift', source: 'media_decay', target: 'qoi_media_lift', data: { role: 'query-source' } },
+  { id: 'channel_weight-qoi_media_lift', source: 'channel_weight', target: 'qoi_media_lift', data: { role: 'query-source' } },
   { id: 'gamma_stockout-qoi_stockout_zero', source: 'gamma_stockout', target: 'qoi_stockout_zero', data: { role: 'query-source' } },
 ];
 
 const correlatedPanelNodes: Node<BayesNodeData>[] = [
   {
     id: 'dose',
-    position: { x: 100, y: 300 },
+    position: { x: 432, y: 596 },
     data: { kind: 'data', name: 'dose[i]', shape: ['N'], plate: 'obs', observed: true },
   },
   {
     id: 'zero_vec',
-    position: { x: 320, y: 70 },
+    position: { x: 96, y: 278 },
     data: {
       kind: 'data',
       name: 'zero_vec',
@@ -459,31 +481,29 @@ const correlatedPanelNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'coef_chol',
-    position: { x: 560, y: 70 },
+    position: { x: 96, y: 110 },
     data: {
       kind: 'hyperparameter',
       name: 'coef_chol',
-      eventShape: ['K'],
-      distribution: { id: 'lkj_cholesky', name: 'LKJCholesky', args: { eta: '2' } },
-      constraints: [{ kind: 'positive' }],
-      notes: '切片と dose 効果の相関を表す Cholesky 因子。',
+      eventShape: ['K', 'K'],
+      distribution: { id: 'lkj_cholesky', name: 'LKJCholesky', args: { eta: '2', sd_dist: 'HalfNormal(1)' } },
+      notes: 'アウトカム次元間で共有する係数相関とスケールの Cholesky 因子。',
     },
   },
   {
     id: 'outcome_chol',
-    position: { x: 820, y: 70 },
+    position: { x: 768, y: 110 },
     data: {
       kind: 'hyperparameter',
       name: 'outcome_chol',
-      eventShape: ['K'],
-      distribution: { id: 'lkj_cholesky', name: 'LKJCholesky', args: { eta: '3' } },
-      constraints: [{ kind: 'positive' }],
-      notes: '多変量尤度で共有する残差相関の Cholesky 因子。',
+      eventShape: ['K', 'K'],
+      distribution: { id: 'lkj_cholesky', name: 'LKJCholesky', args: { eta: '3', sd_dist: 'HalfNormal(1)' } },
+      notes: '多変量尤度で共有する残差相関とスケールの Cholesky 因子。',
     },
   },
   {
     id: 'alpha',
-    position: { x: 360, y: 230 },
+    position: { x: 432, y: 110 },
     data: {
       kind: 'parameter',
       name: 'alpha',
@@ -495,7 +515,7 @@ const correlatedPanelNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'beta',
-    position: { x: 620, y: 230 },
+    position: { x: 432, y: 278 },
     data: {
       kind: 'parameter',
       name: 'beta',
@@ -507,7 +527,7 @@ const correlatedPanelNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'mu',
-    position: { x: 500, y: 420 },
+    position: { x: 768, y: 596 },
     data: {
       kind: 'deterministic',
       name: 'mu[i]',
@@ -519,7 +539,7 @@ const correlatedPanelNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'y',
-    position: { x: 500, y: 600 },
+    position: { x: 1104, y: 596 },
     data: {
       kind: 'likelihood',
       name: 'y[i]',
@@ -533,7 +553,7 @@ const correlatedPanelNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'qoi_beta',
-    position: { x: 780, y: 420 },
+    position: { x: 1104, y: 278 },
     data: {
       kind: 'derived_quantity',
       name: 'dose_effect_vector',
@@ -559,12 +579,12 @@ const correlatedPanelEdges: Edge[] = [
 const unevenBinomialNodes: Node<BayesNodeData>[] = [
   {
     id: 'site_id',
-    position: { x: 80, y: 300 },
+    position: { x: 432, y: 914 },
     data: { kind: 'data', name: 'site_id[i]', shape: ['N'], plate: 'obs', observed: true },
   },
   {
     id: 'x',
-    position: { x: 80, y: 420 },
+    position: { x: 432, y: 1082 },
     data: {
       kind: 'data',
       name: 'x[i]',
@@ -577,7 +597,7 @@ const unevenBinomialNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'trials',
-    position: { x: 80, y: 540 },
+    position: { x: 768, y: 1082 },
     data: {
       kind: 'data',
       name: 'trials[i]',
@@ -589,22 +609,21 @@ const unevenBinomialNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'alpha_bar',
-    position: { x: 320, y: 70 },
+    position: { x: 96, y: 110 },
     data: { kind: 'hyperparameter', name: 'alpha_bar', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1.5' } } },
   },
   {
     id: 'tau_site',
-    position: { x: 540, y: 70 },
+    position: { x: 96, y: 278 },
     data: {
       kind: 'hyperparameter',
       name: 'tau_site',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'alpha_site',
-    position: { x: 430, y: 230 },
+    position: { x: 432, y: 596 },
     data: {
       kind: 'parameter',
       name: 'alpha_site[s]',
@@ -616,12 +635,12 @@ const unevenBinomialNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'beta',
-    position: { x: 740, y: 230 },
+    position: { x: 432, y: 110 },
     data: { kind: 'parameter', name: 'beta', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } } },
   },
   {
     id: 'logit_p',
-    position: { x: 500, y: 430 },
+    position: { x: 768, y: 914 },
     data: {
       kind: 'deterministic',
       name: 'logit_p[i]',
@@ -632,7 +651,7 @@ const unevenBinomialNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'successes',
-    position: { x: 500, y: 620 },
+    position: { x: 1104, y: 914 },
     data: {
       kind: 'likelihood',
       name: 'successes[i]',
@@ -644,7 +663,7 @@ const unevenBinomialNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'qoi_site_spread',
-    position: { x: 760, y: 430 },
+    position: { x: 1104, y: 596 },
     data: {
       kind: 'derived_quantity',
       name: 'site_probability_spread',
@@ -669,12 +688,12 @@ const unevenBinomialEdges: Edge[] = [
 const censoredAssayNodes: Node<BayesNodeData>[] = [
   {
     id: 'batch_id',
-    position: { x: 90, y: 300 },
+    position: { x: 432, y: 746 },
     data: { kind: 'data', name: 'batch_id[i]', shape: ['N'], plate: 'obs', observed: true },
   },
   {
     id: 'dilution',
-    position: { x: 90, y: 420 },
+    position: { x: 432, y: 914 },
     data: {
       kind: 'data',
       name: 'dilution[i]',
@@ -687,7 +706,7 @@ const censoredAssayNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'lod',
-    position: { x: 90, y: 540 },
+    position: { x: 768, y: 914 },
     data: {
       kind: 'data',
       name: 'lod[i]',
@@ -700,22 +719,21 @@ const censoredAssayNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'mu_base',
-    position: { x: 330, y: 70 },
+    position: { x: 432, y: 110 },
     data: { kind: 'parameter', name: 'mu_base', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '2' } } },
   },
   {
     id: 'tau_batch',
-    position: { x: 560, y: 70 },
+    position: { x: 96, y: 110 },
     data: {
       kind: 'hyperparameter',
       name: 'tau_batch',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.5' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'batch_offset',
-    position: { x: 450, y: 230 },
+    position: { x: 432, y: 428 },
     data: {
       kind: 'parameter',
       name: 'batch_offset[b]',
@@ -728,17 +746,16 @@ const censoredAssayNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'sigma_assay',
-    position: { x: 760, y: 230 },
+    position: { x: 768, y: 110 },
     data: {
       kind: 'parameter',
       name: 'sigma_assay',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.4' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'log_conc_mu',
-    position: { x: 490, y: 430 },
+    position: { x: 768, y: 746 },
     data: {
       kind: 'deterministic',
       name: 'log_conc_mu[i]',
@@ -749,7 +766,7 @@ const censoredAssayNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'assay_value',
-    position: { x: 490, y: 620 },
+    position: { x: 1104, y: 746 },
     data: {
       kind: 'likelihood',
       name: 'assay_value[i]',
@@ -762,11 +779,11 @@ const censoredAssayNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'qoi_detection_share',
-    position: { x: 760, y: 430 },
+    position: { x: 1104, y: 110 },
     data: {
       kind: 'derived_quantity',
       name: 'expected_below_lod_share',
-      expression: 'mean(cdf_lognormal(lod[i], log_conc_mu[i], sigma_assay))',
+      expression: 'mean(cdf_lognormal(lod, log_conc_mu, sigma_assay))',
       notes: '打ち切り行がどの程度情報を持つかを確認する posterior check。',
     },
   },
@@ -789,7 +806,7 @@ const censoredAssayEdges: Edge[] = [
 const choiceSetNodes: Node<BayesNodeData>[] = [
   {
     id: 'price',
-    position: { x: 90, y: 250 },
+    position: { x: 432, y: 914 },
     data: {
       kind: 'data',
       name: 'price[i]',
@@ -802,12 +819,12 @@ const choiceSetNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'quality',
-    position: { x: 90, y: 370 },
+    position: { x: 432, y: 1082 },
     data: { kind: 'data', name: 'quality[i]', shape: ['N'], eventShape: ['C'], plate: 'obs', observed: true },
   },
   {
     id: 'available_logit_offset',
-    position: { x: 90, y: 490 },
+    position: { x: 432, y: 1250 },
     data: {
       kind: 'data',
       name: 'available_logit_offset[i]',
@@ -820,57 +837,56 @@ const choiceSetNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'person_id',
-    position: { x: 90, y: 610 },
+    position: { x: 432, y: 1418 },
     data: { kind: 'data', name: 'person_id[i]', shape: ['N'], plate: 'obs', observed: true },
   },
   {
     id: 'tau_person',
-    position: { x: 330, y: 70 },
+    position: { x: 96, y: 110 },
     data: {
       kind: 'hyperparameter',
       name: 'tau_person',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.8' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
-    id: 'person_bias',
-    position: { x: 330, y: 220 },
+    id: 'person_quality_shift',
+    position: { x: 432, y: 596 },
     data: {
       kind: 'parameter',
-      name: 'person_bias[p]',
+      name: 'person_quality_shift[p]',
       shape: ['P'],
       plate: 'person',
       distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: 'tau_person' } },
       hints: [{ kind: 'parameterization', value: 'non_centered' }],
-      notes: '回答タスク数が異なる回答者ごとの反復課題 heterogeneity。',
+      notes: '回答者ごとの quality 感度のずれ。全候補に同じ切片を足すと softmax で消えるため、係数差として置く。',
     },
   },
   {
     id: 'beta_price',
-    position: { x: 570, y: 120 },
+    position: { x: 432, y: 110 },
     data: { kind: 'parameter', name: 'beta_price', distribution: { id: 'normal', name: 'Normal', args: { mu: '-1', sigma: '0.5' } } },
   },
   {
     id: 'beta_quality',
-    position: { x: 790, y: 120 },
+    position: { x: 432, y: 278 },
     data: { kind: 'parameter', name: 'beta_quality', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } } },
   },
   {
     id: 'choice_prob',
-    position: { x: 540, y: 410 },
+    position: { x: 768, y: 914 },
     data: {
       kind: 'deterministic',
       name: 'choice_prob[i]',
       shape: ['N'],
       eventShape: ['C'],
       plate: 'obs',
-      expression: 'softmax(person_bias[person_id[i]] + beta_quality * quality[i] + beta_price * price[i] + available_logit_offset[i])',
+      expression: 'softmax((beta_quality + person_quality_shift[person_id[i]]) * quality[i] + beta_price * price[i] + available_logit_offset[i])',
     },
   },
   {
     id: 'chosen',
-    position: { x: 540, y: 620 },
+    position: { x: 1104, y: 914 },
     data: {
       kind: 'likelihood',
       name: 'chosen[i]',
@@ -882,20 +898,20 @@ const choiceSetNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'qoi_price_tradeoff',
-    position: { x: 820, y: 410 },
+    position: { x: 1104, y: 110 },
     data: {
       kind: 'derived_quantity',
       name: 'price_quality_tradeoff',
-      expression: '-beta_quality / beta_price',
-      notes: 'utility スケールでの限界 tradeoff。',
+      expression: '-(beta_quality + mean(person_quality_shift)) / beta_price',
+      notes: '平均的な回答者の utility スケールでの限界 tradeoff。',
     },
   },
 ];
 
 const choiceSetEdges: Edge[] = [
-  { id: 'tau_person-person_bias', source: 'tau_person', target: 'person_bias', data: { role: 'prior-parameter' } },
+  { id: 'tau_person-person_quality_shift', source: 'tau_person', target: 'person_quality_shift', data: { role: 'prior-parameter' } },
   { id: 'person_id-choice_prob', source: 'person_id', target: 'choice_prob', data: { role: 'index' } },
-  { id: 'person_bias-choice_prob', source: 'person_bias', target: 'choice_prob', data: { role: 'deterministic-input' } },
+  { id: 'person_quality_shift-choice_prob', source: 'person_quality_shift', target: 'choice_prob', data: { role: 'deterministic-input' } },
   { id: 'price-choice_prob', source: 'price', target: 'choice_prob', data: { role: 'data-input' } },
   { id: 'quality-choice_prob', source: 'quality', target: 'choice_prob', data: { role: 'data-input' } },
   { id: 'available_logit_offset-choice_prob', source: 'available_logit_offset', target: 'choice_prob', data: { role: 'data-input' } },
@@ -904,12 +920,13 @@ const choiceSetEdges: Edge[] = [
   { id: 'choice_prob-chosen', source: 'choice_prob', target: 'chosen', data: { role: 'likelihood-parameter' } },
   { id: 'beta_price-qoi_price_tradeoff', source: 'beta_price', target: 'qoi_price_tradeoff', data: { role: 'query-source' } },
   { id: 'beta_quality-qoi_price_tradeoff', source: 'beta_quality', target: 'qoi_price_tradeoff', data: { role: 'query-source' } },
+  { id: 'person_quality_shift-qoi_price_tradeoff', source: 'person_quality_shift', target: 'qoi_price_tradeoff', data: { role: 'query-source' } },
 ];
 
 const latentClassNodes: Node<BayesNodeData>[] = [
   {
     id: 'class_alpha',
-    position: { x: 90, y: 90 },
+    position: { x: 96, y: 428 },
     data: {
       kind: 'data',
       name: 'class_alpha',
@@ -921,18 +938,17 @@ const latentClassNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'pi',
-    position: { x: 330, y: 90 },
+    position: { x: 432, y: 428 },
     data: {
       kind: 'parameter',
       name: 'pi',
       eventShape: ['K'],
       distribution: { id: 'dirichlet', name: 'Dirichlet', args: { alpha: 'class_alpha' } },
-      constraints: [{ kind: 'simplex' }],
     },
   },
   {
     id: 'mu_class',
-    position: { x: 570, y: 90 },
+    position: { x: 768, y: 110 },
     data: {
       kind: 'parameter',
       name: 'mu_class[k]',
@@ -944,17 +960,16 @@ const latentClassNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'sigma',
-    position: { x: 810, y: 90 },
+    position: { x: 768, y: 428 },
     data: {
       kind: 'parameter',
       name: 'sigma',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'z',
-    position: { x: 330, y: 300 },
+    position: { x: 768, y: 746 },
     data: {
       kind: 'latent',
       name: 'z[i]',
@@ -967,7 +982,7 @@ const latentClassNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'y',
-    position: { x: 570, y: 500 },
+    position: { x: 1104, y: 746 },
     data: {
       kind: 'likelihood',
       name: 'y[i]',
@@ -978,7 +993,7 @@ const latentClassNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'qoi_class_weight',
-    position: { x: 810, y: 300 },
+    position: { x: 1104, y: 428 },
     data: {
       kind: 'derived_quantity',
       name: 'largest_class_share',
@@ -1000,7 +1015,7 @@ const latentClassEdges: Edge[] = [
 const latentTrajectoryNodes: Node<BayesNodeData>[] = [
   {
     id: 'season_flag',
-    position: { x: 100, y: 380 },
+    position: { x: 768, y: 596 },
     data: {
       kind: 'data',
       name: 'season_flag[t]',
@@ -1012,44 +1027,59 @@ const latentTrajectoryNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'sigma_state',
-    position: { x: 300, y: 80 },
+    position: { x: 96, y: 110 },
     data: {
       kind: 'hyperparameter',
       name: 'sigma_state',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.5' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'sigma_obs',
-    position: { x: 540, y: 80 },
+    position: { x: 1104, y: 110 },
     data: {
       kind: 'parameter',
       name: 'sigma_obs',
       distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'beta_season',
-    position: { x: 780, y: 80 },
+    position: { x: 768, y: 110 },
     data: { kind: 'parameter', name: 'beta_season', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } } },
   },
   {
-    id: 'level',
-    position: { x: 360, y: 260 },
+    id: 'level0',
+    position: { x: 432, y: 110 },
+    data: { kind: 'parameter', name: 'level0', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '2' } } },
+  },
+  {
+    id: 'level_innovation',
+    position: { x: 432, y: 428 },
     data: {
       kind: 'latent',
-      name: 'level[t]',
+      name: 'level_innovation[t]',
       shape: ['T'],
       plate: 'time',
       distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: 'sigma_state' } },
-      notes: '時間で変わる潜在 level。random-walk、AR、独立 innovation のどれにするかは handoff で決める。',
+      notes: '潜在 level の random-walk innovation。時点間の変化量を直接正則化する。',
+    },
+  },
+  {
+    id: 'level',
+    position: { x: 768, y: 428 },
+    data: {
+      kind: 'deterministic',
+      name: 'level[t]',
+      shape: ['T'],
+      plate: 'time',
+      expression: 'level0 + cumulative_sum(level_innovation[t])',
+      notes: '初期値と innovation から作る潜在軌跡。',
     },
   },
   {
     id: 'mu',
-    position: { x: 520, y: 440 },
+    position: { x: 1104, y: 428 },
     data: {
       kind: 'deterministic',
       name: 'mu[t]',
@@ -1060,7 +1090,7 @@ const latentTrajectoryNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'y',
-    position: { x: 520, y: 620 },
+    position: { x: 1440, y: 596 },
     data: {
       kind: 'likelihood',
       name: 'y[t]',
@@ -1073,7 +1103,7 @@ const latentTrajectoryNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'qoi_level_change',
-    position: { x: 780, y: 440 },
+    position: { x: 1440, y: 428 },
     data: {
       kind: 'derived_quantity',
       name: 'net_level_change',
@@ -1084,8 +1114,10 @@ const latentTrajectoryNodes: Node<BayesNodeData>[] = [
 ];
 
 const latentTrajectoryEdges: Edge[] = [
-  { id: 'sigma_state-level', source: 'sigma_state', target: 'level', data: { role: 'prior-parameter' } },
-  { id: 'level-mu', source: 'level', target: 'mu', data: { role: 'latent-input' } },
+  { id: 'sigma_state-level_innovation', source: 'sigma_state', target: 'level_innovation', data: { role: 'prior-parameter' } },
+  { id: 'level0-level', source: 'level0', target: 'level', data: { role: 'deterministic-input' } },
+  { id: 'level_innovation-level', source: 'level_innovation', target: 'level', data: { role: 'latent-input' } },
+  { id: 'level-mu', source: 'level', target: 'mu', data: { role: 'deterministic-input' } },
   { id: 'season_flag-mu', source: 'season_flag', target: 'mu', data: { role: 'data-input' } },
   { id: 'beta_season-mu', source: 'beta_season', target: 'mu', data: { role: 'deterministic-input' } },
   { id: 'mu-y', source: 'mu', target: 'y', data: { role: 'likelihood-parameter' } },
@@ -1096,17 +1128,17 @@ const latentTrajectoryEdges: Edge[] = [
 const itemResponseNodes: Node<BayesNodeData>[] = [
   {
     id: 'person_id',
-    position: { x: 90, y: 360 },
+    position: { x: 96, y: 914 },
     data: { kind: 'data', name: 'person_id[i]', shape: ['N'], plate: 'obs', observed: true },
   },
   {
     id: 'item_id',
-    position: { x: 90, y: 480 },
+    position: { x: 96, y: 1082 },
     data: { kind: 'data', name: 'item_id[i]', shape: ['N'], plate: 'obs', observed: true },
   },
   {
     id: 'theta',
-    position: { x: 330, y: 90 },
+    position: { x: 96, y: 110 },
     data: {
       kind: 'latent',
       name: 'theta[p]',
@@ -1118,7 +1150,7 @@ const itemResponseNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'difficulty',
-    position: { x: 570, y: 90 },
+    position: { x: 96, y: 428 },
     data: {
       kind: 'parameter',
       name: 'difficulty[q]',
@@ -1129,19 +1161,18 @@ const itemResponseNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'discrimination',
-    position: { x: 810, y: 90 },
+    position: { x: 96, y: 596 },
     data: {
       kind: 'parameter',
       name: 'discrimination[q]',
       shape: ['Q'],
       plate: 'question',
       distribution: { id: 'lognormal', name: 'LogNormal', args: { mu: '0', sigma: '0.3' } },
-      constraints: [{ kind: 'positive' }],
     },
   },
   {
     id: 'logit_p',
-    position: { x: 560, y: 360 },
+    position: { x: 432, y: 914 },
     data: {
       kind: 'deterministic',
       name: 'logit_p[i]',
@@ -1152,7 +1183,7 @@ const itemResponseNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'correct',
-    position: { x: 560, y: 560 },
+    position: { x: 768, y: 914 },
     data: {
       kind: 'likelihood',
       name: 'correct[i]',
@@ -1164,7 +1195,7 @@ const itemResponseNodes: Node<BayesNodeData>[] = [
   },
   {
     id: 'qoi_item_hardness',
-    position: { x: 820, y: 360 },
+    position: { x: 768, y: 428 },
     data: {
       kind: 'derived_quantity',
       name: 'hardest_item',
@@ -1213,12 +1244,12 @@ export const modelTemplates: ModelTemplate[] = [
     nodes: [
       {
         id: 'x',
-        position: { x: 120, y: 220 },
+        position: { x: 96, y: 596 },
         data: { kind: 'data', name: 'x[i]', shape: ['N'], plate: 'obs', observed: true },
       },
       {
         id: 'alpha',
-        position: { x: 300, y: 60 },
+        position: { x: 96, y: 110 },
         data: {
           kind: 'parameter',
           name: 'alpha',
@@ -1227,7 +1258,7 @@ export const modelTemplates: ModelTemplate[] = [
       },
       {
         id: 'beta',
-        position: { x: 500, y: 60 },
+        position: { x: 96, y: 278 },
         data: {
           kind: 'parameter',
           name: 'beta',
@@ -1237,7 +1268,7 @@ export const modelTemplates: ModelTemplate[] = [
       },
       {
         id: 'logit_p',
-        position: { x: 300, y: 300 },
+        position: { x: 432, y: 596 },
         data: {
           kind: 'deterministic',
           name: 'logit_p[i]',
@@ -1248,7 +1279,7 @@ export const modelTemplates: ModelTemplate[] = [
       },
       {
         id: 'y',
-        position: { x: 300, y: 470 },
+        position: { x: 768, y: 596 },
         data: {
           kind: 'likelihood',
           name: 'y[i]',
@@ -1259,7 +1290,7 @@ export const modelTemplates: ModelTemplate[] = [
       },
       {
         id: 'qoi_beta',
-        position: { x: 560, y: 300 },
+        position: { x: 768, y: 278 },
         data: {
           kind: 'derived_quantity',
           name: 'treatment_effect',
@@ -1290,27 +1321,27 @@ export const modelTemplates: ModelTemplate[] = [
     nodes: [
       {
         id: 'x',
-        position: { x: 100, y: 220 },
+        position: { x: 96, y: 596 },
         data: { kind: 'data', name: 'x[i]', shape: ['N'], plate: 'obs', observed: true },
       },
       {
         id: 'exposure',
-        position: { x: 320, y: 220 },
+        position: { x: 96, y: 764 },
         data: { kind: 'data', name: 'exposure[i]', shape: ['N'], plate: 'obs', observed: true, constraints: [{ kind: 'positive' }] },
       },
       {
         id: 'alpha',
-        position: { x: 220, y: 60 },
+        position: { x: 96, y: 110 },
         data: { kind: 'parameter', name: 'alpha', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '2' } } },
       },
       {
         id: 'beta',
-        position: { x: 440, y: 60 },
+        position: { x: 96, y: 278 },
         data: { kind: 'parameter', name: 'beta', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } } },
       },
       {
         id: 'log_rate',
-        position: { x: 300, y: 340 },
+        position: { x: 432, y: 596 },
         data: {
           kind: 'deterministic',
           name: 'log_rate[i]',
@@ -1321,7 +1352,7 @@ export const modelTemplates: ModelTemplate[] = [
       },
       {
         id: 'y',
-        position: { x: 300, y: 500 },
+        position: { x: 768, y: 596 },
         data: {
           kind: 'likelihood',
           name: 'y[i]',

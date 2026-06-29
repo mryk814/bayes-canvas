@@ -36,6 +36,7 @@ export interface DistributionDefinition {
   aliases?: string[];
   backendNames?: Partial<Record<'pymc' | 'numpyro' | 'stan', string>>;
   family?: DistributionFamily;
+  eventRank?: number;
   support: DistributionSupport;
   params: DistributionParamDefinition[];
   latexTemplate: string;
@@ -69,6 +70,8 @@ export type CompilerDomain =
   | { kind: 'simplex'; axisId: string }
   | { kind: 'ordered'; axisId: string }
   | { kind: 'correlation_matrix'; axisId: string }
+  | { kind: 'cholesky_factor_corr'; axisId: string }
+  | { kind: 'positive_definite_matrix'; axisId: string }
   | { kind: 'custom'; description: string };
 
 export const DISTRIBUTIONS: DistributionDefinition[] = [
@@ -292,6 +295,7 @@ export const DISTRIBUTIONS: DistributionDefinition[] = [
     name: 'LKJCorrelation',
     aliases: ['LKJ'],
     family: 'multivariate',
+    eventRank: 2,
     support: 'correlation_matrix',
     params: [{ name: 'eta', required: true, role: 'shape', defaultExpression: '1', support: 'positive' }],
     latexTemplate: '\\operatorname{LKJCorrelation}({eta})',
@@ -302,6 +306,7 @@ export const DISTRIBUTIONS: DistributionDefinition[] = [
     id: 'lkj_cholesky',
     name: 'LKJCholesky',
     family: 'multivariate',
+    eventRank: 2,
     support: 'cholesky_factor_corr',
     params: [
       { name: 'eta', required: true, role: 'shape', defaultExpression: '1', support: 'positive' },
@@ -390,6 +395,7 @@ export const DISTRIBUTIONS: DistributionDefinition[] = [
     id: 'wishart',
     name: 'Wishart',
     family: 'multivariate',
+    eventRank: 2,
     support: 'positive_definite_matrix',
     params: [
       { name: 'nu', required: true, role: 'df', defaultExpression: 'K + 1', support: 'positive' },
@@ -458,11 +464,13 @@ export function normalizeDistributionId(value: string): string {
 
 export function supportToDomain(support: string): CompilerDomain {
   if (support === 'real') return { kind: 'real' };
-  if (support === 'positive' || support === 'positive_definite_matrix' || support === 'cholesky_factor_corr') return { kind: 'positive' };
+  if (support === 'positive') return { kind: 'positive' };
   if (support === 'unit_interval') return { kind: 'unit_interval' };
   if (support === 'simplex') return { kind: 'simplex', axisId: 'component' };
   if (support === 'ordered') return { kind: 'ordered', axisId: 'category' };
   if (support === 'correlation_matrix') return { kind: 'correlation_matrix', axisId: 'dimension' };
+  if (support === 'cholesky_factor_corr') return { kind: 'cholesky_factor_corr', axisId: 'dimension' };
+  if (support === 'positive_definite_matrix') return { kind: 'positive_definite_matrix', axisId: 'dimension' };
   return { kind: 'custom', description: support };
 }
 
@@ -473,7 +481,7 @@ export function toCompilerDistributionDefinition(distribution: DistributionDefin
     requiredArgs: distribution.params.filter((param) => param.required).map((param) => param.name),
     optionalArgs: distribution.params.filter((param) => !param.required).map((param) => param.name),
     support: supportToDomain(distribution.support),
-    eventRank: distribution.family === 'multivariate' ? 1 : 0,
+    eventRank: distribution.eventRank ?? (distribution.family === 'multivariate' ? 1 : 0),
     aliases: [distribution.name, ...(distribution.aliases ?? [])].map(normalizeDistributionId),
     deprecated: distribution.deprecated,
   };

@@ -63,6 +63,7 @@ test('compiles the canvas sample through ModelDocument and LayoutDocument', () =
 
 test('compiles model templates into canvas documents', () => {
   assert.ok(modelTemplates.length >= 3);
+  const handoffTargets = ['review', 'pymc', 'numpyro', 'stan'];
   for (const template of modelTemplates) {
     const compiled = compileCanvas(template.nodes, template.edges);
     assert.equal(compiled.layout.modelDocumentId, compiled.document.documentId, template.id);
@@ -71,6 +72,10 @@ test('compiles model templates into canvas documents', () => {
     if (template.status === 'clean') {
       assert.equal(compiled.semantic.readiness.summary.errors, template.expectedDiagnostics.errors, template.id);
       assert.equal(compiled.semantic.readiness.summary.warnings, template.expectedDiagnostics.warnings, template.id);
+    }
+    for (const target of handoffTargets) {
+      const targetCompiled = compileCanvas(template.nodes, template.edges, target);
+      assert.equal(targetCompiled.semantic.readiness.handoff, 'ready', `${template.id}:${target}`);
     }
   }
 });
@@ -85,6 +90,15 @@ test('preserves event axes for multivariate template nodes', () => {
     ['event:k'],
   );
   assert.deepEqual(
+    compiled.document.entities.coef_chol.valueType.axes.map((axis) => `${axis.role}:${axis.axisId}`),
+    ['event:k', 'event:k'],
+  );
+  assert.deepEqual(
+    compiled.document.entities.outcome_chol.valueType.axes.map((axis) => `${axis.role}:${axis.axisId}`),
+    ['event:k', 'event:k'],
+  );
+  assert.equal(compiled.document.entities.outcome_chol.valueType.domain?.kind, 'cholesky_factor_corr');
+  assert.deepEqual(
     compiled.document.entities.y.valueType.axes.map((axis) => `${axis.role}:${axis.axisId}`),
     ['batch:n', 'batch:obs', 'event:k'],
   );
@@ -93,7 +107,35 @@ test('preserves event axes for multivariate template nodes', () => {
   const pkg = buildPortablePackage(compiled.document, compiled.layout, compiled.semantic, 'review');
   const preview = previewPortablePackageImport(pkg);
   const projectedOutcome = preview.projected.nodes.find((node) => node.id === 'y');
+  const projectedOutcomeChol = preview.projected.nodes.find((node) => node.id === 'outcome_chol');
   assert.deepEqual(projectedOutcome?.data.eventShape, ['K']);
+  assert.deepEqual(projectedOutcomeChol?.data.eventShape, ['K', 'K']);
+});
+
+test('keeps template model semantics explicit enough for handoff', () => {
+  const hierarchical = modelTemplates.find((candidate) => candidate.id === 'hierarchical-regression');
+  const choiceSet = modelTemplates.find((candidate) => candidate.id === 'variable-choice-set');
+  const trajectory = modelTemplates.find((candidate) => candidate.id === 'latent-trajectory-series');
+  assert.ok(hierarchical);
+  assert.ok(choiceSet);
+  assert.ok(trajectory);
+
+  const hierarchicalById = new Map(hierarchical.nodes.map((node) => [node.id, node]));
+  assert.equal(hierarchicalById.get('x_true')?.data.kind, 'latent');
+  assert.equal(hierarchicalById.get('sigma_x')?.data.kind, 'hyperparameter');
+  assert.equal(hierarchicalById.get('sigma_x')?.data.constraints, undefined);
+  assert.match(String(hierarchicalById.get('mu')?.data.expression), /x_true\[i\]/u);
+  assert.ok(hierarchical.edges.some((edge) => edge.source === 'y_limit' && edge.target === 'y'));
+
+  const choiceById = new Map(choiceSet.nodes.map((node) => [node.id, node]));
+  assert.equal(choiceById.has('person_bias'), false);
+  assert.match(String(choiceById.get('choice_prob')?.data.expression), /person_quality_shift\[person_id\[i\]\]/u);
+  assert.match(String(choiceById.get('qoi_price_tradeoff')?.data.expression), /mean\(person_quality_shift\)/u);
+
+  const trajectoryById = new Map(trajectory.nodes.map((node) => [node.id, node]));
+  assert.equal(trajectoryById.get('level_innovation')?.data.kind, 'latent');
+  assert.equal(trajectoryById.get('level')?.data.kind, 'deterministic');
+  assert.match(String(trajectoryById.get('level')?.data.expression), /cumulative_sum\(level_innovation\[t\]\)/u);
 });
 
 test('keeps generated observation data out of the projected canvas', () => {

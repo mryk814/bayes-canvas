@@ -119,6 +119,7 @@ export type Constraint =
   | { kind: 'ordered' }
   | { kind: 'sum_to_zero'; overPlateId?: string }
   | { kind: 'correlation_matrix' }
+  | { kind: 'cholesky_factor_corr' }
   | { kind: 'custom'; description: string };
 
 export type ModelHint =
@@ -896,8 +897,6 @@ function lintSupportCompatibility(
   const declared = supportFromConstraints(node.constraints);
   if (!declared) return undefined;
   if (declared === definition.support) return undefined;
-  if (declared === 'positive' && definition.support === 'real') return undefined;
-  if (declared === 'unit_interval' && definition.support === 'real') return undefined;
 
   return {
     id: `${node.id}-support-mismatch`,
@@ -914,6 +913,7 @@ function supportFromConstraints(constraints?: Constraint[]): string | undefined 
   if (constraints?.some((constraint) => constraint.kind === 'simplex')) return 'simplex';
   if (constraints?.some((constraint) => constraint.kind === 'ordered')) return 'ordered';
   if (constraints?.some((constraint) => constraint.kind === 'correlation_matrix')) return 'correlation_matrix';
+  if (constraints?.some((constraint) => constraint.kind === 'cholesky_factor_corr')) return 'cholesky_factor_corr';
   return undefined;
 }
 

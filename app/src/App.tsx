@@ -22,6 +22,7 @@ import {
   createDefaultDistribution,
   formatDistributionTex,
   formatDistributionText,
+  getDistributionSupport,
 } from './lib/distributionRegistry';
 import {
   exportModelIr,
@@ -140,6 +141,21 @@ const CONSTRAINT_OPTIONS: Array<{ kind: Exclude<Constraint['kind'], 'sum_to_zero
   { kind: 'ordered', label: '順序あり', note: '小から大' },
   { kind: 'correlation_matrix', label: '相関行列', note: '行列' },
 ];
+
+const SUPPORT_LABELS: Record<string, string> = {
+  real: '実数',
+  positive: '正の値',
+  unit_interval: '0から1',
+  simplex: 'simplex',
+  ordered: '順序あり',
+  correlation_matrix: '相関行列',
+  cholesky_factor_corr: 'Cholesky相関因子',
+  positive_definite_matrix: '正定値行列',
+  integer: '整数',
+  nonnegative_integer: '0以上の整数',
+  ordered_category: '順序カテゴリ',
+  custom: 'カスタム',
+};
 
 const OBSERVATION_OPTIONS = [
   { value: '', label: '通常の観測' },
@@ -1188,6 +1204,15 @@ function hasConstraint(constraints: Constraint[] | undefined, kind: Constraint['
   return Boolean(constraints?.some((constraint) => constraint.kind === kind));
 }
 
+function getVisibleConstraintOptions(data: BayesNodeData): typeof CONSTRAINT_OPTIONS {
+  if (!data.distribution) return CONSTRAINT_OPTIONS;
+  return CONSTRAINT_OPTIONS.filter((option) => hasConstraint(data.constraints, option.kind));
+}
+
+function formatSupportLabel(support?: string): string | undefined {
+  return support ? SUPPORT_LABELS[support] ?? support : undefined;
+}
+
 function toggleSimpleConstraint(
   constraints: Constraint[] | undefined,
   kind: Exclude<Constraint['kind'], 'sum_to_zero' | 'custom'>,
@@ -1699,6 +1724,10 @@ export function App() {
   const showsConstraintsEditor = Boolean(
     selectedData && ['parameter', 'hyperparameter', 'latent'].includes(selectedData.kind),
   );
+  const selectedDistributionSupportLabel = selectedData?.distribution
+    ? formatSupportLabel(getDistributionSupport(selectedData.distribution))
+    : undefined;
+  const selectedConstraintOptions = selectedData ? getVisibleConstraintOptions(selectedData) : [];
   const plateCount = useMemo(() => new Set(nodes.map((node) => node.data.plate).filter(Boolean)).size, [nodes]);
   const plateRows = useMemo<PlateRow[]>(() => {
     const byPlate = new Map<string, BayesCanvasNode[]>();
@@ -3082,28 +3111,30 @@ export function App() {
                   </label>
                   {showsConstraintsEditor ? (
                     <div className="field-group">
-                      <div className="field-group-title">制約</div>
-                      <div className="option-grid">
-                        {CONSTRAINT_OPTIONS.map((option) => (
-                          <label className="choice-card" key={option.kind}>
-                            <input
-                              checked={hasConstraint(selectedData.constraints, option.kind)}
-                              onChange={(event) =>
-                                updateSelectedNodeData({
-                                  constraints: toggleSimpleConstraint(
-                                    selectedData.constraints,
-                                    option.kind,
-                                    event.target.checked,
-                                  ),
-                                })
-                              }
-                              type="checkbox"
-                            />
-                            <span>{option.label}</span>
-                            <small>{option.note}</small>
-                          </label>
-                        ))}
-                      </div>
+                      <div className="field-group-title">追加制約</div>
+                      {selectedConstraintOptions.length ? (
+                        <div className="option-grid">
+                          {selectedConstraintOptions.map((option) => (
+                            <label className="choice-card" key={option.kind}>
+                              <input
+                                checked={hasConstraint(selectedData.constraints, option.kind)}
+                                onChange={(event) =>
+                                  updateSelectedNodeData({
+                                    constraints: toggleSimpleConstraint(
+                                      selectedData.constraints,
+                                      option.kind,
+                                      event.target.checked,
+                                    ),
+                                  })
+                                }
+                                type="checkbox"
+                              />
+                              <span>{option.label}</span>
+                              <small>{option.note}</small>
+                            </label>
+                          ))}
+                        </div>
+                      ) : null}
                       <label>
                         合計0にする単位
                         <input
@@ -3152,10 +3183,19 @@ export function App() {
                     </label>
                   ) : null}
                   {showsDistributionEditor ? (
-                    <DistributionEditor
-                      distribution={selectedData.distribution}
-                      onChange={(distribution) => updateSelectedNodeData({ distribution })}
-                    />
+                    <>
+                      <DistributionEditor
+                        distribution={selectedData.distribution}
+                        onChange={(distribution) => updateSelectedNodeData({ distribution })}
+                      />
+                      {selectedDistributionSupportLabel ? (
+                        <div className="shape-readout">
+                          <span className="shape-readout-label">値域</span>
+                          <strong className="shape-readout-formula">{selectedDistributionSupportLabel}</strong>
+                          <span className="shape-readout-plate">分布から自動</span>
+                        </div>
+                      ) : null}
+                    </>
                   ) : null}
                   {showsExpressionEditor ? (
                     <label>
