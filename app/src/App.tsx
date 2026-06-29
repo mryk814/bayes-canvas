@@ -1309,6 +1309,19 @@ function parseList(value: string): string[] | undefined {
   return items.length ? items : undefined;
 }
 
+function formatShapePart(value: string[] | undefined, fallback = '1'): string {
+  return value?.length ? value.join(' x ') : fallback;
+}
+
+function formatNodeShapeFormula(data: BayesNodeData): string {
+  const outerShape = data.shape ?? [];
+  const eventShape = data.eventShape ?? [];
+  if (!outerShape.length && !eventShape.length) return 'scalar';
+  if (!eventShape.length) return formatShapePart(outerShape);
+  if (!outerShape.length) return `[${formatShapePart(eventShape)}]`;
+  return `${formatShapePart(outerShape)} x [${formatShapePart(eventShape)}]`;
+}
+
 function hasConstraint(constraints: Constraint[] | undefined, kind: Constraint['kind']): boolean {
   return Boolean(constraints?.some((constraint) => constraint.kind === kind));
 }
@@ -1426,7 +1439,14 @@ const nodeTypes = {
             {diagnosticCount ? <span className="node-chip node-chip-warning">!{diagnosticCount}</span> : null}
           </span>
         </div>
-        <div className="node-name">{renderIndexedNodeName(data.name, plateContext)}</div>
+        <div className="node-name-row">
+          <div className="node-name">{renderIndexedNodeName(data.name, plateContext)}</div>
+          {data.shape?.length || data.eventShape?.length ? (
+            <code className="node-shape-formula" aria-label="配列の形">
+              {formatNodeShapeFormula(data)}
+            </code>
+          ) : null}
+        </div>
         {distributionText ? <div className="node-formula">{distributionText}</div> : null}
         {distributionTex ? (
           <div className="node-tex">
@@ -1445,10 +1465,6 @@ const nodeTypes = {
             <strong>{indexAccesses.map((access) => access.label).join(', ')}</strong>
           </div>
         ) : null}
-        <div className="node-meta">
-          {data.shape?.length ? <span className="node-meta-chip">{data.shape.join(' x ')}</span> : <span className="node-meta-chip">scalar</span>}
-          {data.eventShape?.length ? <span className="node-meta-chip">event: {data.eventShape.join(' x ')}</span> : null}
-        </div>
         <Handle className="node-handle node-handle-top" id="source-top" type="source" position={Position.Top} />
         <Handle className="node-handle node-handle-right" id="source-right" type="source" position={Position.Right} />
         <Handle className="node-handle node-handle-bottom" id="source-bottom" type="source" position={Position.Bottom} />
@@ -3245,32 +3261,34 @@ export function App() {
                 </div>
                 <div className="inspector-section">
                   <div className="inspector-section-title">サイズと繰り返し</div>
+                  <div className="shape-readout">
+                    <span className="shape-readout-label">配列</span>
+                    <strong className="shape-readout-formula">{formatNodeShapeFormula(selectedData)}</strong>
+                    <span className="shape-readout-plate">plate {selectedData.plate || 'なし'}</span>
+                  </div>
                   <label>
-                    並ぶ数
+                    外側サイズ
                     <input
                       placeholder="N, J"
                       value={selectedData.shape?.join(', ') ?? ''}
                       onChange={(event) => updateSelectedNodeData({ shape: parseList(event.target.value) })}
                     />
-                    <span className="field-note">観測数やグループ数など、外側に並ぶ単位。</span>
                   </label>
                   <label>
-                    1つの値の形
+                    値の形
                     <input
                       placeholder="K"
                       value={selectedData.eventShape?.join(', ') ?? ''}
                       onChange={(event) => updateSelectedNodeData({ eventShape: parseList(event.target.value) })}
                     />
-                    <span className="field-note">各セルがベクトルや行列になるときの内側サイズ。</span>
                   </label>
                   <label>
-                    繰り返す単位
+                    plate
                     <input
                       placeholder="obs"
                       value={selectedData.plate ?? ''}
                       onChange={(event) => updateSelectedNodeData({ plate: event.target.value || undefined })}
                     />
-                    <span className="field-note">同じ式をどの単位ごとに繰り返すか。</span>
                   </label>
                   {showsConstraintsEditor ? (
                     <div className="field-group">
