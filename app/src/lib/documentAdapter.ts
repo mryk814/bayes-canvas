@@ -7,17 +7,20 @@ import {
   type DistributionSpec,
 } from './distributionRegistry.js';
 import { compileModel } from './core/compiler.js';
-import { buildHandoffBundle, type BackendCapabilityItem, type HandoffTarget } from './core/handoff.js';
+import { buildCapabilityReport } from './core/capability-report.js';
+import { buildHandoffBundle, type HandoffTarget } from './core/handoff.js';
 import { createMacroInstance } from './core/macros.js';
 import { previewPatchProposal, type AiPatchProposal } from './core/patch-proposal.js';
 import { buildPortablePackage, type PortableCanvasEdge } from './core/portable.js';
 import { InMemoryDistributionRegistry } from './core/registry.js';
 import {
+  parseLayoutDocument,
+  parseModelDocument,
   validateLayoutDocumentEnvelope,
   validateModelDocumentEnvelope,
   type SchemaValidationIssue,
 } from './core/schema-validation.js';
-import { TARGET_PROFILES } from './core/target-profiles.js';
+import { assertExternalDataContract } from './core/security.js';
 import type {
   AxisDefinition,
   AxisUse,
@@ -38,6 +41,8 @@ import type {
   SourceText,
   ValueType,
 } from './core/model.js';
+
+export { buildCapabilityReport } from './core/capability-report.js';
 
 export interface AuthoringSnapshot {
   document: ModelDocument;
@@ -143,17 +148,18 @@ export function canvasToAuthoringSnapshot({
   };
 }
 
-export function compileCanvas(nodes: Node<BayesNodeData>[], edges: Edge[]) {
+export function compileCanvas(nodes: Node<BayesNodeData>[], edges: Edge[], target: HandoffTarget = 'review') {
   const snapshot = canvasToAuthoringSnapshot({ nodes, edges });
   const semantic = compileModel(snapshot.document, compilerDistributionRegistry, {
     compilerVersion: '0.2.0',
+    targetBackend: target,
   });
 
   return { ...snapshot, semantic };
 }
 
 export function buildCanvasHandoff(nodes: Node<BayesNodeData>[], edges: Edge[], target: HandoffTarget) {
-  const snapshot = compileCanvas(nodes, edges);
+  const snapshot = compileCanvas(nodes, edges, target);
   return buildHandoffBundle(
     snapshot.document,
     snapshot.semantic,
@@ -163,7 +169,7 @@ export function buildCanvasHandoff(nodes: Node<BayesNodeData>[], edges: Edge[], 
 }
 
 export function buildCanvasPortablePackage(nodes: Node<BayesNodeData>[], edges: Edge[], target: HandoffTarget = 'review') {
-  const snapshot = compileCanvas(nodes, edges);
+  const snapshot = compileCanvas(nodes, edges, target);
   return buildPortablePackage(snapshot.document, snapshot.layout, snapshot.semantic, target, buildCapabilityReport(snapshot.document, target));
 }
 
@@ -180,8 +186,9 @@ export function previewCanvasPatch(nodes: Node<BayesNodeData>[], edges: Edge[], 
 }
 
 export function previewPortablePackageImport(packageData: unknown): PortablePackageImportPreview {
+  assertExternalDataContract(packageData, 'portable package import');
   const normalized = normalizePortablePackageInput(packageData);
-  const document = normalizeImportedModelDocument(parsePackageJsonFile<unknown>(normalized.files['model.json'], 'model.json'));
+  const document = normalizeImportedModelDocument(parsePackageJsonFile<unknown>(normalized.files['model.json'], 'model.json'), 'model.json');
   const modelValidationIssues = validateImportModelDocument(document);
 
   if (modelValidationIssues.length) {
@@ -191,7 +198,7 @@ export function previewPortablePackageImport(packageData: unknown): PortablePack
   const importWarnings = [...normalized.warnings];
   const layout = normalized.files['layout.json'] === undefined
     ? synthesizeLayoutDocument(document)
-    : normalizeImportedLayoutDocument(parsePackageJsonFile<unknown>(normalized.files['layout.json'], 'layout.json'), document);
+    : normalizeImportedLayoutDocument(parsePackageJsonFile<unknown>(normalized.files['layout.json'], 'layout.json'), document, 'layout.json');
   if (normalized.files['layout.json'] === undefined) {
     importWarnings.push('layout.json was missing, so a display layout was generated from model entity order.');
   }
@@ -431,7 +438,7 @@ function normalizePortablePackageInput(packageData: unknown): { files: PortableP
   };
 }
 
-function normalizeImportedModelDocument(value: unknown): ModelDocument {
+function normalizeImportedModelDocument(value: unknown, scope = 'model.json'): ModelDocument {
   if (!isRecord(value)) throw new Error('model.json must contain a ModelDocument object.');
   const document = structuredClone(value) as Record<string, unknown>;
   const entities = isRecord(document.entities) ? document.entities : {};
@@ -445,7 +452,12 @@ function normalizeImportedModelDocument(value: unknown): ModelDocument {
   document.notes = normalizeImportedNotes(document.notes);
   if (!Array.isArray(document.noteOrder)) document.noteOrder = Object.keys(document.notes as Record<string, unknown>);
 
-  return document as unknown as ModelDocument;
+  try {
+    return parseModelDocument<ModelDocument>(document);
+  } catch (error) {
+    if (error instanceof Error) throw new Error(error.message.replaceAll(/(?<=: )\//gu, `${scope}/`));
+    throw error;
+  }
 }
 
 function normalizeImportedAxes(value: unknown, platesValue: unknown): ModelDocument['axes'] {
@@ -652,11 +664,12 @@ function normalizeImportedNotes(value: unknown): ModelDocument['notes'] {
   }));
 }
 
-function normalizeImportedLayoutDocument(value: unknown, document: ModelDocument): LayoutDocument {
+function normalizeImportedLayoutDocument(value: unknown, document: ModelDocument, scope = 'layout.json'): LayoutDocument {
   if (!isRecord(value)) throw new Error('layout.json must contain a LayoutDocument object.');
   const layout = structuredClone(value) as Record<string, unknown>;
   const rawNodes = isRecord(layout.nodes) ? layout.nodes : {};
-  return {
+  try {
+    return parseLayoutDocument<LayoutDocument>({
     ...layout,
     schemaVersion: layout.schemaVersion === '1.0.0' ? '1.0.0' : '1.0.0',
     modelDocumentId: firstNonEmptyString(layout.modelDocumentId, document.documentId),
@@ -682,7 +695,11 @@ function normalizeImportedLayoutDocument(value: unknown, document: ModelDocument
     hiddenEntityIds: Array.isArray(layout.hiddenEntityIds)
       ? layout.hiddenEntityIds.filter((entityId): entityId is string => typeof entityId === 'string')
       : undefined,
-  };
+    });
+  } catch (error) {
+    if (error instanceof Error) throw new Error(error.message.replaceAll(/(?<=: )\//gu, `${scope}/`));
+    throw error;
+  }
 }
 
 function normalizeSourceText(value: unknown, fallback: string): SourceText {
@@ -999,68 +1016,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function buildCapabilityReport(document: ModelDocument, target: HandoffTarget): BackendCapabilityItem[] {
-  const items: BackendCapabilityItem[] = [
-    {
-      feature: 'ModelDocument schema',
-      support: 'native',
-      relatedEntityIds: [],
-      note: 'Canvas semantics are exported separately from layout state.',
-    },
-    {
-      feature: 'Expression AST and symbol binding',
-      support: 'native',
-      relatedEntityIds: [],
-      note: 'Expressions are parsed by the compiler before handoff.',
-    },
-    {
-      feature: `${TARGET_PROFILES[target].label} target profile`,
-      support: TARGET_PROFILES[target].defaultSupport,
-      relatedEntityIds: [],
-      note: TARGET_PROFILES[target].notes.join(' '),
-    },
-  ];
-
-  for (const entity of Object.values(document.entities)) {
-    if (entity.kind === 'block_instance') {
-      items.push({
-        feature: `${entity.blockTypeId} block`,
-        support: target === 'review' ? 'native' : 'approximate',
-        relatedEntityIds: [entity.id],
-        note: 'Block internals are boundary-checked; implementation must preserve ports and config.',
-      });
-    }
-    if (entity.kind === 'random_variable') {
-      const backendName = TARGET_PROFILES[target].distributionNames[entity.distribution.distributionId];
-      items.push({
-        feature: `${entity.distribution.distributionId} distribution`,
-        support: backendName ? 'native' : distributionSupportForTarget(target),
-        relatedEntityIds: [entity.id],
-        note: backendName ? `Backend name: ${backendName}` : 'No backend-specific distribution name is registered.',
-      });
-    }
-    if (entity.kind === 'random_variable' && entity.distribution.distributionId === 'wishart') {
-      items.push({
-        feature: 'Wishart covariance prior',
-        support: 'unsupported',
-        relatedEntityIds: [entity.id],
-        note: 'Prefer LKJ correlation plus scale priors unless a backend-specific reason is documented.',
-      });
-    }
-  }
-
-  return items;
-}
-
-function distributionSupportForTarget(target: HandoffTarget): BackendCapabilityItem['support'] {
-  if (target === 'generic' || target === 'review') return TARGET_PROFILES[target].defaultSupport;
-  return 'unsupported';
-}
-
 function buildMacros(nodes: Node<BayesNodeData>[]): ModelDocument['macros'] | undefined {
   const macros = Object.fromEntries(
     nodes
-      .filter((node) => node.data.distribution?.id === 'horseshoe' || node.data.distribution?.name === 'Horseshoe')
+      .filter((node) => (
+        node.data.validationLevel === 'expanded'
+        && (node.data.distribution?.id === 'horseshoe' || node.data.distribution?.name === 'Horseshoe')
+      ))
       .map((node) => {
         const symbol = parseNodeSymbol(node.data.name);
         return [

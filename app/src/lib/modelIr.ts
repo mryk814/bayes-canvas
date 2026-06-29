@@ -6,6 +6,7 @@ import {
   normalizeDistribution,
   type DistributionSpec,
 } from './distributionRegistry';
+import { collectReferenceOccurrences, parseExpression } from './core/expression';
 
 interface CanvasNodeLike {
   id: string;
@@ -577,34 +578,30 @@ export function generateModelMarkdown(model: ModelIr): string {
 }
 
 export function analyzeExpression(expression: string, symbolTable: SymbolTable): ExpressionAnalysis {
+  const parsed = parseExpression(expression);
+  if (!parsed.ok) {
+    return { expression, references: [], functions: [], indices: [] };
+  }
   const references = new Map<string, ExpressionReference>();
   const functions = new Set<string>();
   const indices = new Set<string>();
-  const identifierPattern = /[a-zA-Z][a-zA-Z0-9_]*/g;
-  let match: RegExpExecArray | null;
 
-  while ((match = identifierPattern.exec(expression))) {
-    const symbol = match[0];
-    const nextChar = expression[match.index + symbol.length];
-    const bracket = nextChar === '[' ? readBalancedBracket(expression, match.index + symbol.length) : undefined;
-    const isFunction = nextChar === '(' && symbol in symbolTable.functions;
-
-    if (isFunction) {
-      functions.add(symbol);
-      continue;
-    }
-
+  for (const occurrence of collectReferenceOccurrences(parsed.ast)) {
+    const symbol = occurrence.symbol;
     if (symbol in symbolTable.indices) {
       indices.add(symbol);
       continue;
     }
-
-    const raw = bracket ? `${symbol}${bracket.raw}` : symbol;
+    if (symbol in symbolTable.functions) {
+      functions.add(symbol);
+      continue;
+    }
+    const raw = expression.slice(occurrence.span.start, occurrence.span.end);
     const current = references.get(symbol);
     const nextReference: ExpressionReference = {
       symbol,
       raw,
-      indices: bracket ? [bracket.content] : [],
+      indices: extractIndexFragments(raw),
     };
 
     if (current) {
@@ -626,19 +623,11 @@ export function analyzeExpression(expression: string, symbolTable: SymbolTable):
   };
 }
 
-function readBalancedBracket(value: string, startIndex: number): { raw: string; content: string } | undefined {
-  let depth = 0;
-
-  for (let index = startIndex; index < value.length; index += 1) {
-    if (value[index] === '[') depth += 1;
-    if (value[index] === ']') depth -= 1;
-    if (depth === 0) {
-      const raw = value.slice(startIndex, index + 1);
-      return { raw, content: raw.slice(1, -1) };
-    }
-  }
-
-  return undefined;
+function extractIndexFragments(raw: string): string[] {
+  const firstBracket = raw.indexOf('[');
+  const lastBracket = raw.lastIndexOf(']');
+  if (firstBracket < 0 || lastBracket <= firstBracket) return [];
+  return [raw.slice(firstBracket + 1, lastBracket)];
 }
 
 function buildIndexMappings(nodes: ModelIr['nodes'], plates: ModelIr['plates']): IndexMapping[] {
@@ -1004,7 +993,9 @@ function nodeBySymbolName(model: ModelIr, nodeId: string): string {
 }
 
 function analyzeLooseSymbols(expression: string): string[] {
-  return [...new Set(expression.match(/[a-zA-Z][a-zA-Z0-9_]*/g) ?? [])]
+  const parsed = parseExpression(expression);
+  if (!parsed.ok) return [];
+  return [...new Set(collectReferenceOccurrences(parsed.ast).map((reference) => reference.symbol))]
     .filter((symbol) => !['exp', 'log', 'logit', 'inv_logit', 'softmax', 'dot', 'i', 'j', 'k', 't'].includes(symbol));
 }
 

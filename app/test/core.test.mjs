@@ -21,11 +21,14 @@ import { modelCorpus } from '../dist-test/samples/modelCorpus.js';
 import { minimalDistributionRegistry } from '../dist-test/lib/core/registry.js';
 import { hierarchicalRegression } from '../dist-test/lib/core/example.js';
 import { compileModel } from '../dist-test/lib/core/compiler.js';
+import { loadModelDocumentContract } from '../dist-test/lib/core/import-contract.js';
+import { validateExternalDataContract } from '../dist-test/lib/core/security.js';
 import { TARGET_PROFILES } from '../dist-test/lib/core/target-profiles.js';
 import { createStableFingerprint, sha256Hex } from '../dist-test/lib/core/fingerprint.js';
 import { normalizeDistributionId, toCompilerDistributionDefinition } from '../dist-test/lib/distributionRegistry.js';
 import {
   validateImplementationReceiptEnvelope,
+  validateAiPatchProposalEnvelope,
   validateLayoutDocumentEnvelope,
   validateModelDocumentEnvelope,
 } from '../dist-test/lib/core/schema-validation.js';
@@ -774,4 +777,141 @@ test('validates block instances through compiler diagnostics', () => {
   assert.ok(compiled.diagnostics.some((item) => item.code === 'BC-BLOCK-UNKNOWN-PORT'));
   assert.ok(compiled.diagnostics.some((item) => item.code === 'BC-BLOCK-MISSING-ENTITY'));
   assert.ok(compiled.diagnostics.some((item) => item.code === 'BC-BLOCK-BACKEND-CAPABILITY'));
+});
+
+test('blocks unsafe external package contracts before import or handoff', () => {
+  const issues = validateExternalDataContract({
+    model: hierarchicalRegression,
+    plugin: {
+      javascriptCode: 'fetch("https://example.com/run.js")',
+      filesystemAccess: true,
+    },
+  }, 'malicious fixture');
+  assert.ok(issues.some((issue) => issue.path.includes('javascriptCode')));
+  assert.ok(issues.some((issue) => issue.path.includes('filesystemAccess')));
+  assert.throws(
+    () => previewPortablePackageImport({
+      model: hierarchicalRegression,
+      remoteUrl: 'https://example.com/model.json',
+    }),
+    /Unsafe external data contract rejected/u,
+  );
+});
+
+test('full runtime validation catches nested invalid fixtures with paths', () => {
+  assert.ok(validateModelDocumentEnvelope({
+    ...hierarchicalRegression,
+    entities: {
+      ...hierarchicalRegression.entities,
+      rv_alpha: {
+        ...hierarchicalRegression.entities.rv_alpha,
+        kind: 'surprise_entity',
+      },
+    },
+  }).some((issue) => issue.path === '/entities/rv_alpha/kind'));
+
+  assert.ok(validateModelDocumentEnvelope({
+    ...hierarchicalRegression,
+    entities: {
+      ...hierarchicalRegression.entities,
+      rv_alpha: {
+        ...hierarchicalRegression.entities.rv_alpha,
+        distribution: { distributionId: 'normal', args: { mu: { language: 'python', source: 'os.system("x")' } } },
+      },
+    },
+  }).some((issue) => issue.path === '/entities/rv_alpha/distribution/args/mu/language'));
+
+  assert.ok(validateModelDocumentEnvelope({
+    ...hierarchicalRegression,
+    entities: {
+      ...hierarchicalRegression.entities,
+      obs_y: {
+        ...hierarchicalRegression.entities.obs_y,
+        observationProcess: { kind: 'telepathy' },
+      },
+    },
+  }).some((issue) => issue.path === '/entities/obs_y/observationProcess/kind'));
+
+  assert.ok(validateAiPatchProposalEnvelope({
+    proposalVersion: '1.0.0',
+    baseDocumentId: hierarchicalRegression.documentId,
+    baseRevision: hierarchicalRegression.revision,
+    intent: 'bad patch',
+    author: 'ai',
+    operations: [{ op: 'replace' }],
+  }).some((issue) => issue.path === '/operations/0/path'));
+
+  assert.ok(validateImplementationReceiptEnvelope({
+    receiptVersion: '1.0.0',
+    inputSpecificationFingerprint: 'abc',
+    backend: 'pymc',
+    mappings: [{ entityId: 'rv_alpha', implementationSymbol: 'alpha' }],
+    deviations: [],
+    addedAssumptions: [],
+    approximations: [],
+    unresolvedQuestions: [],
+  }).some((issue) => issue.path === '/mappings/0/file'));
+});
+
+test('unknown and unsupported blocks are target-aware across compiler and handoff', () => {
+  const document = {
+    ...hierarchicalRegression,
+    entities: {
+      ...hierarchicalRegression.entities,
+      block_unknown: {
+        id: 'block_unknown',
+        symbol: 'external_unknown',
+        kind: 'block_instance',
+        valueType: { scalar: 'real', axes: [] },
+        plateIds: [],
+        blockTypeId: 'external_unknown',
+        blockVersion: '1.0.0',
+        inputs: {},
+        outputs: {},
+        config: {},
+      },
+    },
+    entityOrder: [...hierarchicalRegression.entityOrder, 'block_unknown'],
+  };
+  const review = compileModel(document, minimalDistributionRegistry, { targetBackend: 'review' });
+  const pymc = compileModel(document, minimalDistributionRegistry, { targetBackend: 'pymc' });
+  assert.equal(review.diagnostics.find((item) => item.code === 'BC-BLOCK-UNKNOWN')?.blocksHandoff, false);
+  assert.equal(pymc.diagnostics.find((item) => item.code === 'BC-BLOCK-UNKNOWN')?.blocksHandoff, true);
+});
+
+test('macro lowering remaps generated diagnostics to editable macro source paths', () => {
+  const document = {
+    ...hierarchicalRegression,
+    macros: {
+      bad_horseshoe: {
+        id: 'bad_horseshoe',
+        macroTypeId: 'horseshoe_prior',
+        macroVersion: '1.0.0',
+        bindings: {
+          target: 'beta',
+          scale: { language: 'bayes-expr@1', source: 'missing_scale' },
+        },
+        config: {},
+      },
+    },
+  };
+  const compiled = compileModel(document, minimalDistributionRegistry);
+  const remapped = compiled.diagnostics.find((item) => item.sourceMacroPath === '/macros/bad_horseshoe/bindings/scale');
+  assert.ok(remapped);
+  assert.equal(remapped.displayPath, '/macros/bad_horseshoe/bindings/scale');
+  assert.match(remapped.generatedPath, /^\/entities\/bad_horseshoe_local_scale/u);
+});
+
+test('CLI loader accepts raw model, portable package, and folder-like file maps', () => {
+  const raw = loadModelDocumentContract(hierarchicalRegression);
+  assert.equal(raw.sourceKind, 'raw-model');
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  const pkg = buildPortablePackage(compiled.document, compiled.layout, compiled.semantic);
+  assert.equal(loadModelDocumentContract(pkg).sourceKind, 'portable-package');
+  assert.equal(loadModelDocumentContract({
+    files: [
+      { path: 'model.bayescanvas/model.json', content: compiled.document },
+      { path: 'model.bayescanvas/layout.json', content: compiled.layout },
+    ],
+  }).sourceKind, 'file-map');
 });

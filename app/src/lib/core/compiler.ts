@@ -14,6 +14,7 @@ import type {
   ReferenceOccurrence,
 } from './expression.js';
 import { diagnostic, summarizeDiagnostics, type Diagnostic } from './diagnostics.js';
+import { lowerMacros } from './macros.js';
 import type {
   AxisId,
   DistributionDefinition,
@@ -89,10 +90,12 @@ const DEFAULT_FUNCTIONS = [
 ] as const;
 
 export function compileModel(
-  document: ModelDocument,
+  inputDocument: ModelDocument,
   distributions: DistributionRegistry,
   options: CompileOptions = {},
 ): SemanticModel {
+  const lowered = lowerMacros(inputDocument);
+  const document = lowered.document;
   const diagnostics: Diagnostic[] = [];
   const compilerVersion = options.compilerVersion ?? '0.1.0';
   const constants = new Set(options.builtInConstants ?? DEFAULT_CONSTANTS);
@@ -285,17 +288,18 @@ export function compileModel(
     return { from, to, role };
   });
 
-  const summary = summarizeDiagnostics(diagnostics);
+  const remappedDiagnostics = remapLoweredDiagnostics(diagnostics, document);
+  const summary = summarizeDiagnostics(remappedDiagnostics);
   return {
-    sourceDocumentId: document.documentId,
-    sourceRevision: document.revision,
+    sourceDocumentId: inputDocument.documentId,
+    sourceRevision: inputDocument.revision,
     compilerVersion,
     symbols,
     indexSymbols,
     expressions,
     entities: semanticEntities,
     dependencyEdges,
-    diagnostics,
+    diagnostics: remappedDiagnostics,
     readiness: {
       handoff: summary.handoffBlocked ? 'blocked' : 'ready',
       summary,
@@ -314,13 +318,16 @@ function lintBlockInstances(
     const basePath = `/entities/${escapePointer(entity.id)}`;
     const definition = blockRegistry.get(entity.blockTypeId, entity.blockVersion);
     if (!definition) {
+      const targetIsReview = targetBackend === 'review';
       diagnostics.push(diagnostic({
         code: 'BC-BLOCK-UNKNOWN',
         stage: 'portability',
-        severity: 'info',
-        message: `Unknown block ${entity.blockTypeId}@${entity.blockVersion}.`,
+        severity: targetIsReview ? 'info' : 'error',
+        message: targetIsReview
+          ? `Unknown block ${entity.blockTypeId}@${entity.blockVersion} is diagnostic-only in review mode.`
+          : `Unknown block ${entity.blockTypeId}@${entity.blockVersion} cannot be generated for ${targetBackend}.`,
         path: `${basePath}/blockTypeId`,
-        blocksHandoff: false,
+        blocksHandoff: !targetIsReview,
       }));
       continue;
     }
@@ -330,6 +337,29 @@ function lintBlockInstances(
     diagnostics.push(...(definition.validateBoundary?.(entity.config) ?? []));
   }
   return diagnostics;
+}
+
+function remapLoweredDiagnostics(diagnostics: Diagnostic[], document: ModelDocument): Diagnostic[] {
+  const sourceMapByGeneratedId = new Map(
+    (document.loweringSourceMap ?? []).map((entry) => [entry.generatedEntityId, entry]),
+  );
+  return diagnostics.map((item) => {
+    const generatedEntityId = /^\/entities\/([^/]+)/u.exec(item.path)?.[1]?.replaceAll('~1', '/').replaceAll('~0', '~');
+    const sourceMap = generatedEntityId ? sourceMapByGeneratedId.get(generatedEntityId) : undefined;
+    if (!sourceMap) return item;
+    const sourceMacroPath = `/macros/${escapePointer(sourceMap.macroInstanceId)}${sourceMap.macroFieldPath}`;
+    return {
+      ...item,
+      generatedPath: item.path,
+      sourceMacroPath,
+      displayPath: sourceMacroPath,
+      path: sourceMacroPath,
+      related: [
+        ...(item.related ?? []),
+        { message: 'Generated lowered entity.', path: item.path },
+      ],
+    };
+  });
 }
 
 function lintBlockPorts(

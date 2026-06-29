@@ -49,6 +49,12 @@ export interface Diagnostic {
   message: string;
   /** JSON Pointer into the authoring document. */
   path: string;
+  /** Original generated path when a lowered macro diagnostic was remapped. */
+  generatedPath?: string;
+  /** Editable macro source path when a lowered diagnostic can be repaired in a macro field. */
+  sourceMacroPath?: string;
+  /** User-facing editable path for review panels and handoff reports. */
+  displayPath?: string;
   range?: SourceSpan;
   related?: RelatedLocation[];
   fixes?: DiagnosticFix[];

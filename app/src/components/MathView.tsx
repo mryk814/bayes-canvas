@@ -6,9 +6,12 @@ import {
   generateModelMarkdown,
   type ModelIr,
 } from '../lib/modelIr';
+import { generateTexFromDocument } from '../lib/documentOutputs';
+import type { ModelDocument } from '../lib/core/model';
 
 interface MathViewProps {
   model: ModelIr;
+  document?: ModelDocument;
   onSelectNode?: (nodeId: string) => void;
 }
 
@@ -35,14 +38,14 @@ const SECTION_KIND_CLASS: Record<string, string> = {
   'Derived Quantities': 'math-line-query',
 };
 
-export function MathView({ model, onSelectNode }: MathViewProps) {
+export function MathView({ model, document, onSelectNode }: MathViewProps) {
   const sections = useMemo(() => generateModelTexSections(model), [model]);
   const visibleSections = useMemo(
     () => sections.filter((section) => VISIBLE_SECTION_TITLES.has(section.title)),
     [sections],
   );
-  const fullTex = useMemo(() => generateModelTex(model), [model]);
-  const markdown = useMemo(() => generateModelMarkdown(model), [model]);
+  const fullTex = useMemo(() => document ? generateTexFromDocument(document) : generateModelTex(model), [document, model]);
+  const markdown = useMemo(() => document ? `$$\n${generateTexFromDocument(document)}\n$$` : generateModelMarkdown(model), [document, model]);
 
   const hasContent = visibleSections.some((section) => section.lines.length > 0);
 
@@ -60,7 +63,20 @@ export function MathView({ model, onSelectNode }: MathViewProps) {
           Markdownをコピー
         </button>
       </div>
-      {visibleSections.map((section) => {
+      {document ? (
+        <div className="math-section">
+          <h3 className="math-section-title">
+            <span>ModelDocument</span>
+            <span className="math-section-count">{document.entityOrder.length}</span>
+          </h3>
+          <div className="math-section-lines">
+            <div className="math-line">
+              <TexMath tex={fullTex} block />
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {document ? null : visibleSections.map((section) => {
         const kindClass = SECTION_KIND_CLASS[section.title] ?? '';
         return (
           <div className="math-section" key={section.title}>

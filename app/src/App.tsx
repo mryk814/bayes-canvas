@@ -30,8 +30,6 @@ import {
 } from './lib/distributionRegistry';
 import {
   exportModelIr,
-  generateAiPrompt,
-  generateModelTex,
   getPromptTargetLabel,
   parseSymbolName,
   type BayesNodeData,
@@ -48,8 +46,6 @@ import { DistributionEditor } from './components/DistributionEditor';
 import { MathView } from './components/MathView';
 import { ModelProjectionView } from './components/ModelProjectionView';
 import {
-  buildCanvasHandoff,
-  buildCanvasPortablePackage,
   compileCanvas,
   isPortablePackageImportCandidate,
   previewPortablePackageImport,
@@ -62,9 +58,11 @@ import type { HandoffBundle, HandoffTarget } from './lib/core/handoff.js';
 import type { PatchPreview } from './lib/core/patch-proposal.js';
 import { diffModelDocuments } from './lib/core/semantic-diff.js';
 import { compareReceiptFingerprint, validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
-import { loadLatestAutosave, saveAutosave, type StoredSnapshot } from './lib/storage';
-import { buildModelViewProjections, type ModelViewProjectionId } from './lib/modelViewProjections';
+import { cleanupOldAutosaveData, loadLatestAutosave, saveAutosave, type StoredSnapshot } from './lib/storage';
+import type { ModelViewProjectionId } from './lib/modelViewProjections';
 import { getDynamicEdgeHandles } from './lib/edgeRouting';
+import { buildCanvasPortablePackage } from './lib/documentAdapter';
+import { useCompiledCanvas } from './hooks/useCompiledCanvas';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   data: 'データ',
@@ -385,6 +383,7 @@ interface CanvasState {
 interface ImportErrorState {
   title: string;
   detail: string;
+  recovery?: 'autosave-quota' | 'autosave-transaction';
 }
 
 interface UndoState {
@@ -1678,24 +1677,21 @@ export function App() {
   const [activeLeftPanel, setActiveLeftPanel] = useState<LeftPanelTab>('add');
   const editorHeadingRef = useRef<HTMLHeadingElement>(null);
   const [promptTarget, setPromptTarget] = useState<PromptTarget>('generic');
-  const modelIr = useMemo(() => exportModelIr(nodes, edges), [nodes, edges]);
-  const compiledCanvas = useMemo(() => compileCanvas(nodes, edges), [nodes, edges]);
-  const handoffBundle = useMemo(
-    () => buildCanvasHandoff(nodes, edges, promptTarget as HandoffTarget),
-    [edges, nodes, promptTarget],
-  );
-  const modelViewProjections = useMemo(
-    () => buildModelViewProjections({
-      document: compiledCanvas.document,
-      semantic: compiledCanvas.semantic,
-      handoff: handoffBundle,
-    }),
-    [compiledCanvas.document, compiledCanvas.semantic, handoffBundle],
-  );
-  const prompt = useMemo(() => generateAiPrompt(modelIr, promptTarget), [modelIr, promptTarget]);
   const [activeModelView, setActiveModelView] = useState<ModelViewProjectionId>('canvas');
   const [activeOutput, setActiveOutput] = useState<'math' | 'review' | 'handoff' | 'advanced'>('math');
   const [advancedOutput, setAdvancedOutput] = useState<'ir' | 'prompt' | 'package' | 'diff'>('ir');
+  const modelIr = useMemo(() => exportModelIr(nodes, edges), [nodes, edges]);
+  const {
+    compiledCanvas,
+    handoffBundle,
+    modelViewProjections,
+    prompt,
+    fullTex,
+    portablePackage,
+  } = useCompiledCanvas(nodes, edges, promptTarget as HandoffTarget, {
+    needsPrompt: activeOutput === 'advanced' && advancedOutput === 'prompt',
+    needsPackage: activeOutput === 'advanced' && advancedOutput === 'package',
+  });
   const [handoffPreviewFormat, setHandoffPreviewFormat] = useState<'markdown' | 'json'>('markdown');
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
@@ -1724,7 +1720,6 @@ export function App() {
       receipt,
     ],
   );
-  const fullTex = useMemo(() => generateModelTex(modelIr), [modelIr]);
   const activeProjection = useMemo(
     () => modelViewProjections.find((projection) => projection.id === activeModelView) ?? modelViewProjections[0]!,
     [activeModelView, modelViewProjections],
@@ -1734,10 +1729,6 @@ export function App() {
   const semanticDiff = useMemo(
     () => diffModelDocuments(initialCompiledCanvas.document, compiledCanvas.document),
     [compiledCanvas.document, initialCompiledCanvas.document],
-  );
-  const portablePackage = useMemo(
-    () => buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget),
-    [edges, nodes, promptTarget],
   );
   const blockingDiagnostics = useMemo(
     () => compiledCanvas.semantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff),
@@ -1769,7 +1760,7 @@ export function App() {
     : advancedOutput === 'prompt'
       ? prompt
       : advancedOutput === 'package'
-        ? JSON.stringify(portablePackage, null, 2)
+        ? JSON.stringify(portablePackage ?? buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget), null, 2)
         : formatSemanticDiff(semanticDiff);
   const outputText = activeOutput === 'review'
     ? reviewText
@@ -2073,7 +2064,25 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     const timeout = window.setTimeout(() => {
-      void saveAutosave(compiledCanvas.document, compiledCanvas.layout).catch((error) => {
+      void saveAutosave(compiledCanvas.document, compiledCanvas.layout).then((result) => {
+        if (cancelled) return;
+        if (result.ok && !result.failureKind) return;
+        if (result.ok && result.failureKind === 'transaction-log') {
+          setImportError({
+            title: '自動保存の記録だけ失敗しました',
+            detail: result.message ?? 'モデル本体は保存されています。古い記録を削除すると次回以降の記録を再開できます。',
+            recovery: 'autosave-transaction',
+          });
+          return;
+        }
+        setImportError({
+          title: '自動保存に失敗しました',
+          detail: result.quotaExceeded
+            ? 'IndexedDBの容量上限に達しました。古い自動保存記録を削除するか、現在のモデルをPackageとして書き出してください。'
+            : result.message ?? 'IndexedDBへ保存できませんでした。',
+          recovery: result.quotaExceeded ? 'autosave-quota' : undefined,
+        });
+      }).catch((error) => {
         if (cancelled) return;
         setImportError({
           title: '自動保存に失敗しました',
@@ -2438,6 +2447,26 @@ export function App() {
     setSelectedEdgeId(null);
     setUndoState(null);
   }, [setEdges, setNodes, undoState]);
+
+  const cleanupAutosaveRecovery = useCallback(() => {
+    void cleanupOldAutosaveData()
+      .then((deletedCount) => {
+        setImportError({
+          title: '古い自動保存記録を削除しました',
+          detail: `${deletedCount}件を削除しました。自動保存を再試行します。`,
+        });
+      })
+      .catch((error) => {
+        setImportError({
+          title: '自動保存記録を削除できません',
+          detail: error instanceof Error ? error.message : 'IndexedDBの削除に失敗しました。',
+        });
+      });
+  }, []);
+
+  const exportCurrentPackageForRecovery = useCallback(() => {
+    exportPortablePackageToFile(buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget));
+  }, [edges, nodes, promptTarget]);
 
   const applyRestorePrompt = useCallback(() => {
     if (!restorePrompt) return;
@@ -2816,7 +2845,7 @@ export function App() {
       id: 'export-package',
       label: 'Packageを書き出し',
       group: 'ファイル',
-      run: () => exportPortablePackageToFile(portablePackage),
+      run: () => exportPortablePackageToFile(buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget)),
     },
     {
       id: 'import-canvas',
@@ -2903,7 +2932,9 @@ export function App() {
     handleSave,
     modelIr,
     modelViewProjections,
-    portablePackage,
+    edges,
+    nodes,
+    promptTarget,
     resetSample,
     resolveCanvasOverlaps,
     selectedNodeId,
@@ -2975,6 +3006,18 @@ export function App() {
           <div className="status-banner status-error" role="alert">
             <strong>{importError.title}</strong>
             <span>{importError.detail}</span>
+            {importError.recovery ? (
+              <>
+                <button type="button" onClick={cleanupAutosaveRecovery}>
+                  古い記録を削除
+                </button>
+                {importError.recovery === 'autosave-quota' ? (
+                  <button type="button" onClick={exportCurrentPackageForRecovery}>
+                    Packageを書き出す
+                  </button>
+                ) : null}
+              </>
+            ) : null}
             <button type="button" onClick={() => setImportError(null)}>
               閉じる
             </button>
@@ -3799,6 +3842,7 @@ export function App() {
             {activeOutput === 'math' ? (
               <MathView
                 model={modelIr}
+                document={compiledCanvas.document}
                 onSelectNode={(nodeId) => selectNodeForEditing(nodeId, { focusEditor: true })}
               />
             ) : (
@@ -3821,7 +3865,7 @@ export function App() {
                   コピー
                 </button>
                 {activeOutput === 'advanced' && advancedOutput === 'package' ? (
-                  <button type="button" onClick={() => copyText(portablePackage.files['model.json'])}>
+                  <button type="button" onClick={() => copyText((portablePackage ?? buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget)).files['model.json'])}>
                     model.json
                   </button>
                 ) : null}
