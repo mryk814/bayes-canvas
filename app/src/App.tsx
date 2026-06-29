@@ -2,19 +2,14 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js';
 import {
   addEdge,
-  Background,
   BaseEdge,
   type Connection,
-  Controls,
   EdgeLabelRenderer,
   type EdgeProps,
   getSmoothStepPath,
   Handle,
   MarkerType,
-  MiniMap,
   Position,
-  ReactFlow,
-  SelectionMode,
   type Edge,
   type Node,
   type NodeProps,
@@ -43,26 +38,22 @@ import { initialEdges, initialNodes } from './samples/hierarchicalRegression';
 import { modelTemplates, type ModelTemplate } from './samples/modelTemplates';
 import { TexMath } from './components/TexMath';
 import { DistributionEditor } from './components/DistributionEditor';
-import { MathView } from './components/MathView';
-import { ModelProjectionView } from './components/ModelProjectionView';
-import {
-  compileCanvas,
-  isPortablePackageImportCandidate,
-  previewPortablePackageImport,
-  projectToReactFlow,
-  previewCanvasPatch,
-  type PortablePackageImportPreview,
-} from './lib/documentAdapter';
+import { CanvasPane, type FlowViewportControls } from './components/CanvasPane';
+import { OutputPanel, type AdvancedOutputMode, type HandoffPreviewFormat, type OutputMode } from './components/OutputPanel';
 import { assertJsonComplexity } from './lib/core/migrations.js';
 import type { HandoffBundle, HandoffTarget } from './lib/core/handoff.js';
-import type { PatchPreview } from './lib/core/patch-proposal.js';
+import type { Diagnostic } from './lib/core/diagnostics.js';
 import { diffModelDocuments } from './lib/core/semantic-diff.js';
 import { compareReceiptFingerprint, validateImplementationReceipt, type ImplementationReceipt } from './lib/core/receipt.js';
-import { cleanupOldAutosaveData, loadLatestAutosave, saveAutosave, type StoredSnapshot } from './lib/storage';
 import type { ModelViewProjectionId } from './lib/modelViewProjections';
 import { getDynamicEdgeHandles } from './lib/edgeRouting';
-import { buildCanvasPortablePackage } from './lib/documentAdapter';
+import { deriveCanvasModel } from './lib/canvasCompiler';
+import { makePortablePackage, type CanvasPortablePackage } from './lib/packageExport';
 import { useCompiledCanvas } from './hooks/useCompiledCanvas';
+import { useAutosaveRestore, type AutosaveNotice } from './hooks/useAutosaveRestore';
+import { useImportPreview } from './hooks/useImportPreview';
+import { useInspectorEditing } from './hooks/useInspectorEditing';
+import { usePatchPreview } from './hooks/usePatchPreview';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   data: 'データ',
@@ -392,41 +383,11 @@ interface UndoState {
   edges: Edge[];
 }
 
-interface PendingPatchState {
-  preview: PatchPreview;
-  nodes: BayesCanvasNode[];
-  edges: Edge[];
-  summary: string;
-}
-
-interface PendingImportState {
-  sourceName: string;
-  sourceKind: 'portable package' | 'legacy canvas';
-  nodes: BayesCanvasNode[];
-  edges: Edge[];
-  summary: string;
-  importWarnings: string[];
-  diagnostics: number;
-  blockingDiagnostics: number;
-  preview?: PortablePackageImportPreview;
-}
-
-interface RestorePromptState {
-  snapshot: StoredSnapshot;
-  nodes: BayesCanvasNode[];
-  edges: Edge[];
-  summary: string;
-}
-
 interface CanvasRect {
   x: number;
   y: number;
   width: number;
   height: number;
-}
-
-interface FlowViewportControls {
-  fitView: (options?: { padding?: number; duration?: number }) => Promise<boolean>;
 }
 
 const NODE_LAYOUT_WIDTH: Record<BayesNodeData['kind'], number> = {
@@ -1025,7 +986,7 @@ function exportCanvasToFile(nodes: BayesCanvasNode[], edges: Edge[]) {
   URL.revokeObjectURL(url);
 }
 
-function exportPortablePackageToFile(packageData: ReturnType<typeof buildCanvasPortablePackage>) {
+function exportPortablePackageToFile(packageData: CanvasPortablePackage) {
   const data = JSON.stringify(packageData, null, 2);
   const blob = new Blob([data], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -1034,104 +995,6 @@ function exportPortablePackageToFile(packageData: ReturnType<typeof buildCanvasP
   a.download = `bayes-canvas-${new Date().toISOString().slice(0, 10)}.bayescanvas.json`;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-function parseImportJsonText(input: string): unknown {
-  try {
-    return assertJsonComplexity(input, {
-      maxBytes: MAX_IMPORT_BYTES,
-      maxDepth: MAX_IMPORT_DEPTH,
-    });
-  } catch (error) {
-    if (error instanceof Error && (error.message.includes('too large') || error.message.includes('nesting'))) {
-      throw error;
-    }
-    const extracted = extractImportJsonPayload(input);
-    if (extracted === input.trim()) throw error;
-    return assertJsonComplexity(extracted, {
-      maxBytes: MAX_IMPORT_BYTES,
-      maxDepth: MAX_IMPORT_DEPTH,
-    });
-  }
-}
-
-function extractImportJsonPayload(input: string): string {
-  const trimmed = input.trim();
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed);
-  if (fenced) return fenced[1].trim();
-
-  const firstObject = trimmed.indexOf('{');
-  const firstArray = trimmed.indexOf('[');
-  const first = [firstObject, firstArray].filter((index) => index >= 0).sort((a, b) => a - b)[0];
-  if (first === undefined) return trimmed;
-  const opener = trimmed[first];
-  const closer = opener === '{' ? '}' : ']';
-  const last = trimmed.lastIndexOf(closer);
-  return last > first ? trimmed.slice(first, last + 1).trim() : trimmed;
-}
-
-function parseCanvasFile(file: File): Promise<PendingImportState> {
-  return new Promise((resolve, reject) => {
-    if (file.size > MAX_IMPORT_BYTES) {
-      reject(new Error(`ファイルが大きすぎます。上限は ${Math.round(MAX_IMPORT_BYTES / 1024)}KB です。`));
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = parseImportJsonText(String(reader.result));
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          reject(new Error('Bayes CanvasのJSONオブジェクトではありません。'));
-          return;
-        }
-        const modelFile = parsed as Partial<CanvasState>;
-        if (isPortablePackageImportCandidate(parsed)) {
-          const preview = previewPortablePackageImport(parsed);
-          resolve({
-            sourceName: file.name,
-            sourceKind: 'portable package',
-            nodes: preview.projected.nodes.map(prepareCanvasNode),
-            edges: preview.projected.edges.map((edge: Edge) => ({
-              ...edge,
-              type: 'smoothstep',
-              markerEnd: { type: MarkerType.ArrowClosed },
-            })),
-            summary: preview.summary,
-            importWarnings: preview.importWarnings,
-            diagnostics: preview.semantic.diagnostics.length,
-            blockingDiagnostics: preview.semantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff).length,
-            preview,
-          });
-          return;
-        }
-        if (!Array.isArray(modelFile.nodes) || !Array.isArray(modelFile.edges)) {
-          reject(new Error('必須field `nodes` / `edges` または portable package の `model` / `files.model.json` がありません。'));
-          return;
-        }
-        const legacyNodes = modelFile.nodes.map(prepareCanvasNode);
-        const legacySemantic = compileCanvas(legacyNodes, modelFile.edges).semantic;
-        resolve({
-          sourceName: file.name,
-          sourceKind: 'legacy canvas',
-          nodes: legacyNodes,
-          edges: modelFile.edges.map((edge: Edge) => ({
-            ...edge,
-            type: 'smoothstep',
-            markerEnd: { type: MarkerType.ArrowClosed },
-          })),
-          summary: `${modelFile.nodes.length} nodes / ${modelFile.edges.length} links`,
-          importWarnings: [],
-          diagnostics: legacySemantic.diagnostics.length,
-          blockingDiagnostics: legacySemantic.diagnostics.filter((diagnostic) => diagnostic.blocksHandoff).length,
-        });
-      } catch (error) {
-        reject(error instanceof Error ? error : new Error('JSON形式が正しくありません。'));
-      }
-    };
-    reader.onerror = () => reject(reader.error ?? new Error('ファイルを読み込めませんでした。'));
-    reader.readAsText(file);
-  });
 }
 
 function addImportProvenance(nodes: BayesCanvasNode[], sourceName: string): BayesCanvasNode[] {
@@ -1579,7 +1442,7 @@ function renameIndexedSymbol(name: string, nextIndex: string): string {
   return `${trimmed}[${nextIndex.trim()}]`;
 }
 
-function formatReviewPanel(diagnostics: ReturnType<typeof compileCanvas>['semantic']['diagnostics']): string {
+function formatReviewPanel(diagnostics: Diagnostic[]): string {
   if (!diagnostics.length) {
     return 'compiler診断はありません。受け渡しできます。';
   }
@@ -1678,8 +1541,8 @@ export function App() {
   const editorHeadingRef = useRef<HTMLHeadingElement>(null);
   const [promptTarget, setPromptTarget] = useState<PromptTarget>('generic');
   const [activeModelView, setActiveModelView] = useState<ModelViewProjectionId>('canvas');
-  const [activeOutput, setActiveOutput] = useState<'math' | 'review' | 'handoff' | 'advanced'>('math');
-  const [advancedOutput, setAdvancedOutput] = useState<'ir' | 'prompt' | 'package' | 'diff'>('ir');
+  const [activeOutput, setActiveOutput] = useState<OutputMode>('math');
+  const [advancedOutput, setAdvancedOutput] = useState<AdvancedOutputMode>('ir');
   const modelIr = useMemo(() => exportModelIr(nodes, edges), [nodes, edges]);
   const {
     compiledCanvas,
@@ -1692,16 +1555,36 @@ export function App() {
     needsPrompt: activeOutput === 'advanced' && advancedOutput === 'prompt',
     needsPackage: activeOutput === 'advanced' && advancedOutput === 'package',
   });
-  const [handoffPreviewFormat, setHandoffPreviewFormat] = useState<'markdown' | 'json'>('markdown');
+  const [handoffPreviewFormat, setHandoffPreviewFormat] = useState<HandoffPreviewFormat>('markdown');
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
   const [importError, setImportError] = useState<ImportErrorState | null>(null);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
-  const [patchInput, setPatchInput] = useState('');
-  const [pendingPatch, setPendingPatch] = useState<PendingPatchState | null>(null);
-  const [pendingImport, setPendingImport] = useState<PendingImportState | null>(null);
-  const [restorePrompt, setRestorePrompt] = useState<RestorePromptState | null>(null);
-  const [patchInbox, setPatchInbox] = useState<Array<{ id: string; label: string; value: string }>>([]);
+  const {
+    patchInput,
+    setPatchInput,
+    pendingPatch,
+    setPendingPatch,
+    patchInbox,
+    setPatchInbox,
+    previewPatchInput,
+  } = usePatchPreview(nodes, edges);
+  const {
+    pendingImport,
+    setPendingImport,
+    parseFile: parseImportFile,
+  } = useImportPreview(prepareCanvasNode, {
+    maxBytes: MAX_IMPORT_BYTES,
+    maxDepth: MAX_IMPORT_DEPTH,
+  });
+  const handleAutosaveNotice = useCallback((notice: AutosaveNotice) => {
+    setImportError(notice);
+  }, []);
+  const {
+    restorePrompt,
+    setRestorePrompt,
+    cleanupAutosaveRecovery: cleanupAutosaveRecords,
+  } = useAutosaveRestore(compiledCanvas.document, compiledCanvas.layout, prepareCanvasNode, handleAutosaveNotice);
   const [schemaInput, setSchemaInput] = useState('x, real, N\ny, real, N');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ImplementationReceipt | null>(null);
@@ -1725,7 +1608,7 @@ export function App() {
     [activeModelView, modelViewProjections],
   );
   const reviewText = useMemo(() => formatReviewPanel(compiledCanvas.semantic.diagnostics), [compiledCanvas.semantic.diagnostics]);
-  const initialCompiledCanvas = useMemo(() => compileCanvas(initialCanvasNodes, initialCanvasEdges), []);
+  const initialCompiledCanvas = useMemo(() => deriveCanvasModel(initialCanvasNodes, initialCanvasEdges), []);
   const semanticDiff = useMemo(
     () => diffModelDocuments(initialCompiledCanvas.document, compiledCanvas.document),
     [compiledCanvas.document, initialCompiledCanvas.document],
@@ -1760,7 +1643,7 @@ export function App() {
     : advancedOutput === 'prompt'
       ? prompt
       : advancedOutput === 'package'
-        ? JSON.stringify(portablePackage ?? buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget), null, 2)
+        ? JSON.stringify(portablePackage ?? makePortablePackage(nodes, edges, promptTarget as HandoffTarget), null, 2)
         : formatSemanticDiff(semanticDiff);
   const outputText = activeOutput === 'review'
     ? reviewText
@@ -1781,6 +1664,21 @@ export function App() {
   );
   const selectedData = selectedNode?.data;
   const selectedKindLabel = selectedData ? NODE_KIND_LABELS[selectedData.kind] : selectedEdge ? 'リンク' : '未選択';
+  const {
+    updateSelectedNodeData,
+    updateSelectedEdgeRole,
+    deleteSelectedItem,
+  } = useInspectorEditing({
+    nodes,
+    edges,
+    selectedNodeId,
+    selectedEdgeId,
+    setNodes,
+    setEdges,
+    setSelectedNodeId,
+    setSelectedEdgeId,
+    setUndoState,
+  });
   const showsDistributionEditor = Boolean(
     selectedData && ['parameter', 'hyperparameter', 'latent', 'likelihood'].includes(selectedData.kind),
   );
@@ -2029,73 +1927,6 @@ export function App() {
     });
   }, [nodes, edges, focusedNodeIds, modelIr.indexMappings]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void loadLatestAutosave()
-      .then((snapshot) => {
-        if (cancelled || !snapshot) return;
-        const projected = projectToReactFlow({
-          document: snapshot.document,
-          layout: snapshot.layout,
-        });
-        setRestorePrompt({
-          snapshot,
-          nodes: projected.nodes.map(prepareCanvasNode),
-          edges: projected.edges.map((edge: Edge) => ({
-            ...edge,
-            type: 'smoothstep',
-            markerEnd: { type: MarkerType.ArrowClosed },
-          })),
-          summary: `${projected.nodes.length} nodes / ${projected.edges.length} links / ${new Date(snapshot.savedAt).toLocaleString()}`,
-        });
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setImportError({
-          title: '自動保存を確認できません',
-          detail: error instanceof Error ? error.message : 'IndexedDBの復元候補を読み込めませんでした。',
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const timeout = window.setTimeout(() => {
-      void saveAutosave(compiledCanvas.document, compiledCanvas.layout).then((result) => {
-        if (cancelled) return;
-        if (result.ok && !result.failureKind) return;
-        if (result.ok && result.failureKind === 'transaction-log') {
-          setImportError({
-            title: '自動保存の記録だけ失敗しました',
-            detail: result.message ?? 'モデル本体は保存されています。古い記録を削除すると次回以降の記録を再開できます。',
-            recovery: 'autosave-transaction',
-          });
-          return;
-        }
-        setImportError({
-          title: '自動保存に失敗しました',
-          detail: result.quotaExceeded
-            ? 'IndexedDBの容量上限に達しました。古い自動保存記録を削除するか、現在のモデルをPackageとして書き出してください。'
-            : result.message ?? 'IndexedDBへ保存できませんでした。',
-          recovery: result.quotaExceeded ? 'autosave-quota' : undefined,
-        });
-      }).catch((error) => {
-        if (cancelled) return;
-        setImportError({
-          title: '自動保存に失敗しました',
-          detail: error instanceof Error ? error.message : 'IndexedDBへ保存できませんでした。',
-        });
-      });
-    }, 400);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-    };
-  }, [compiledCanvas.document, compiledCanvas.layout]);
-
   const addNodeFromPalette = useCallback(
     (kind: BayesNodeData['kind']) => {
       const count = nodes.filter((node) => node.data.kind === kind).length + 1;
@@ -2208,52 +2039,6 @@ export function App() {
       });
     },
     [nodes, selectNodeForEditing],
-  );
-
-  const updateSelectedNodeData = useCallback(
-    (changes: Partial<BayesNodeData>) => {
-      if (!selectedNodeId) {
-        return;
-      }
-
-      setNodes((currentNodes) =>
-        currentNodes.map((node) =>
-          node.id === selectedNodeId
-            ? {
-                ...node,
-                data: {
-                  ...node.data,
-                  ...changes,
-                },
-              }
-            : node,
-        ),
-      );
-    },
-    [selectedNodeId, setNodes],
-  );
-
-  const updateSelectedEdgeRole = useCallback(
-    (role: string) => {
-      if (!selectedEdgeId) {
-        return;
-      }
-
-      setEdges((currentEdges) =>
-        currentEdges.map((edge) =>
-          edge.id === selectedEdgeId
-            ? {
-                ...edge,
-                data: {
-                  ...edge.data,
-                  role,
-                },
-              }
-            : edge,
-        ),
-      );
-    },
-    [selectedEdgeId, setEdges],
   );
 
   const renamePlate = useCallback((plateId: string, nextId: string) => {
@@ -2411,34 +2196,6 @@ export function App() {
     [addNodeFromPalette, applyHorseshoePrior, applyRegressionTermPreset],
   );
 
-  const deleteSelectedItem = useCallback(() => {
-    if (selectedNodeId) {
-      const targetName = nodes.find((node) => node.id === selectedNodeId)?.data.name ?? selectedNodeId;
-      setUndoState({
-        message: `${targetName} を削除しました。`,
-        nodes,
-        edges,
-      });
-      setNodes((currentNodes) => currentNodes.filter((node) => node.id !== selectedNodeId));
-      setEdges((currentEdges) =>
-        currentEdges.filter((edge) => edge.source !== selectedNodeId && edge.target !== selectedNodeId),
-      );
-      setSelectedNodeId(null);
-      setSelectedEdgeId(null);
-      return;
-    }
-
-    if (selectedEdgeId) {
-      setUndoState({
-        message: `${selectedEdgeId} を削除しました。`,
-        nodes,
-        edges,
-      });
-      setEdges((currentEdges) => currentEdges.filter((edge) => edge.id !== selectedEdgeId));
-      setSelectedEdgeId(null);
-    }
-  }, [edges, nodes, selectedEdgeId, selectedNodeId, setEdges, setNodes]);
-
   const restoreUndo = useCallback(() => {
     if (!undoState) return;
     setNodes(undoState.nodes);
@@ -2449,7 +2206,7 @@ export function App() {
   }, [setEdges, setNodes, undoState]);
 
   const cleanupAutosaveRecovery = useCallback(() => {
-    void cleanupOldAutosaveData()
+    void cleanupAutosaveRecords()
       .then((deletedCount) => {
         setImportError({
           title: '古い自動保存記録を削除しました',
@@ -2462,10 +2219,10 @@ export function App() {
           detail: error instanceof Error ? error.message : 'IndexedDBの削除に失敗しました。',
         });
       });
-  }, []);
+  }, [cleanupAutosaveRecords]);
 
   const exportCurrentPackageForRecovery = useCallback(() => {
-    exportPortablePackageToFile(buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget));
+    exportPortablePackageToFile(makePortablePackage(nodes, edges, promptTarget as HandoffTarget));
   }, [edges, nodes, promptTarget]);
 
   const applyRestorePrompt = useCallback(() => {
@@ -2503,17 +2260,7 @@ export function App() {
 
   const previewPatch = useCallback(() => {
     try {
-      const preview = previewCanvasPatch(nodes, edges, JSON.parse(patchInput));
-      setPendingPatch({
-        preview,
-        nodes: preview.projected.nodes,
-        edges: preview.projected.edges,
-        summary: [
-          `${preview.semanticDiff.length} semantic changes`,
-          `${preview.before.diagnostics.length} diagnostics before`,
-          `${preview.after.diagnostics.length} diagnostics after`,
-        ].join(' / '),
-      });
+      previewPatchInput();
       setImportError(null);
     } catch (error) {
       setPendingPatch(null);
@@ -2522,7 +2269,7 @@ export function App() {
         detail: error instanceof Error ? error.message : 'JSON Patch proposalを確認してください。',
       });
     }
-  }, [edges, nodes, patchInput]);
+  }, [previewPatchInput, setPendingPatch]);
 
   const applyPendingPatch = useCallback(() => {
     if (!pendingPatch) return;
@@ -2620,7 +2367,7 @@ export function App() {
       const file = input.files?.[0];
       if (!file) return;
       try {
-        const state = await parseCanvasFile(file);
+        const state = await parseImportFile(file);
         setPendingImport(state);
         setImportError(null);
       } catch (error) {
@@ -2632,7 +2379,7 @@ export function App() {
       }
     };
     input.click();
-  }, []);
+  }, [parseImportFile, setPendingImport]);
 
   const addQoIFromSelection = useCallback(() => {
     const sourceNode = selectedNode ?? nodes.find((node) => ['parameter', 'deterministic', 'likelihood'].includes(node.data.kind));
@@ -2845,7 +2592,7 @@ export function App() {
       id: 'export-package',
       label: 'Packageを書き出し',
       group: 'ファイル',
-      run: () => exportPortablePackageToFile(buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget)),
+      run: () => exportPortablePackageToFile(makePortablePackage(nodes, edges, promptTarget as HandoffTarget)),
     },
     {
       id: 'import-canvas',
@@ -3556,97 +3303,29 @@ export function App() {
               </div>
             </div>
           </div>
-          {activeModelView === 'canvas' ? (
-            <ReactFlow
-              nodes={visibleFlowNodes}
-              edges={labeledEdges}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              onConnect={onConnect}
-              onEdgesChange={onEdgesChange}
-              onNodesChange={onNodesChange}
-              onSelectionChange={onSelectionChange}
-              onInit={(instance) => {
-                reactFlowRef.current = {
-                  fitView: (options) => instance.fitView(options),
-                };
-                setFlowViewport(instance.getViewport());
-              }}
-              onMove={(_, viewport) => setFlowViewport(viewport)}
-              multiSelectionKeyCode={['Control', 'Meta']}
-              selectionKeyCode={null}
-              selectionMode={SelectionMode.Partial}
-              selectionOnDrag
-              panOnDrag={[1, 2]}
-              deleteKeyCode={['Backspace', 'Delete']}
-              minZoom={CANVAS_MIN_ZOOM}
-              fitView
-              fitViewOptions={{ padding: 0.18 }}
-            >
-              <Background color="var(--color-border)" gap={24} />
-              <div
-                className="plate-overlay-layer plate-overlay-frame-layer"
-                aria-hidden="true"
-                style={{
-                  transform: `translate(${flowViewport.x}px, ${flowViewport.y}px) scale(${flowViewport.zoom})`,
-                }}
-              >
-                {plateOverlays.map((plate) => (
-                  <div
-                    className={`plate-overlay-box plate-tone-${plate.data.tone}`}
-                    key={plate.id}
-                    style={{
-                      left: plate.x,
-                      top: plate.y,
-                      width: plate.width,
-                      height: plate.height,
-                    }}
-                  >
-                  </div>
-                ))}
-              </div>
-              <div
-                className="plate-overlay-layer plate-overlay-label-layer"
-                style={{
-                  transform: `translate(${flowViewport.x}px, ${flowViewport.y}px) scale(${flowViewport.zoom})`,
-                }}
-              >
-                {plateOverlays.map((plate) => (
-                  <button
-                    className={`plate-group-label plate-overlay-label plate-tone-${plate.data.tone}`}
-                    key={`${plate.id}-label`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      selectPlateNodes(plate.nodeIds, event.ctrlKey || event.metaKey);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter' && event.key !== ' ') return;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      selectPlateNodes(plate.nodeIds, event.ctrlKey || event.metaKey);
-                    }}
-                    style={{
-                      left: plate.x + 18,
-                      top: plate.y - 16,
-                    }}
-                    type="button"
-                  >
-                    <strong>{plate.data.label}</strong>
-                    {plate.data.isGlobal ? null : <span>{plate.data.index}</span>}
-                    <small>{plate.data.isGlobal ? '反復なし' : `${plate.data.index}=1..${plate.data.size}`} / {plate.data.nodeCount}要素</small>
-                  </button>
-                ))}
-              </div>
-              <MiniMap />
-              <Controls />
-            </ReactFlow>
-          ) : (
-            <ModelProjectionView
-              projection={activeProjection}
-              onCopy={copyText}
-              onSelectEntity={selectProjectionEntity}
-            />
-          )}
+          <CanvasPane
+            activeModelView={activeModelView}
+            activeProjection={activeProjection}
+            nodes={visibleFlowNodes}
+            edges={labeledEdges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            plateOverlays={plateOverlays}
+            viewport={flowViewport}
+            minZoom={CANVAS_MIN_ZOOM}
+            onConnect={onConnect}
+            onEdgesChange={onEdgesChange}
+            onNodesChange={onNodesChange}
+            onSelectionChange={onSelectionChange}
+            onViewportReady={(controls, viewport) => {
+              reactFlowRef.current = controls;
+              setFlowViewport(viewport);
+            }}
+            onViewportChange={setFlowViewport}
+            onSelectPlateNodes={selectPlateNodes}
+            onCopyProjection={copyText}
+            onSelectProjectionEntity={selectProjectionEntity}
+          />
         </section>
 
         <aside className="panel right-panel">
@@ -3783,162 +3462,23 @@ export function App() {
               ))}
             </div>
           </div>
-          <div className="output-tabs" role="tablist" aria-label="出力">
-            <button
-              aria-controls="output-panel"
-              aria-selected={activeOutput === 'math'}
-              className={activeOutput === 'math' ? 'is-active' : ''}
-              id="output-tab-math"
-              onClick={() => setActiveOutput('math')}
-              role="tab"
-              tabIndex={activeOutput === 'math' ? 0 : -1}
-              type="button"
-            >
-              数式
-            </button>
-            <button
-              aria-controls="output-panel"
-              aria-selected={activeOutput === 'review'}
-              className={activeOutput === 'review' ? 'is-active' : ''}
-              id="output-tab-review"
-              onClick={() => setActiveOutput('review')}
-              role="tab"
-              tabIndex={activeOutput === 'review' ? 0 : -1}
-              type="button"
-            >
-              診断
-            </button>
-            <button
-              aria-controls="output-panel"
-              aria-selected={activeOutput === 'handoff'}
-              className={activeOutput === 'handoff' ? 'is-active' : ''}
-              id="output-tab-handoff"
-              onClick={() => setActiveOutput('handoff')}
-              role="tab"
-              tabIndex={activeOutput === 'handoff' ? 0 : -1}
-              type="button"
-            >
-              受け渡し
-            </button>
-            <button
-              aria-controls="output-panel"
-              aria-selected={activeOutput === 'advanced'}
-              className={activeOutput === 'advanced' ? 'is-active' : ''}
-              id="output-tab-advanced"
-              onClick={() => setActiveOutput('advanced')}
-              role="tab"
-              tabIndex={activeOutput === 'advanced' ? 0 : -1}
-              type="button"
-            >
-              詳細
-            </button>
-          </div>
-          <div
-            aria-labelledby={`output-tab-${activeOutput}`}
-            className="output-panel"
-            id="output-panel"
-            role="tabpanel"
-          >
-            {activeOutput === 'math' ? (
-              <MathView
-                model={modelIr}
-                document={compiledCanvas.document}
-                onSelectNode={(nodeId) => selectNodeForEditing(nodeId, { focusEditor: true })}
-              />
-            ) : (
-              <>
-              <div className="output-actions">
-                <span>
-                  {activeOutput === 'review'
-                    ? '診断一覧'
-                    : activeOutput === 'handoff'
-                      ? '受け渡しサマリー'
-                      : advancedOutput === 'ir'
-                        ? 'JSON契約'
-                        : advancedOutput === 'prompt'
-                          ? '実装用メモ'
-                          : advancedOutput === 'package'
-                            ? 'portable package'
-                            : 'semantic diff'}
-                </span>
-                <button type="button" onClick={() => copyText(outputText)}>
-                  コピー
-                </button>
-                {activeOutput === 'advanced' && advancedOutput === 'package' ? (
-                  <button type="button" onClick={() => copyText((portablePackage ?? buildCanvasPortablePackage(nodes, edges, promptTarget as HandoffTarget)).files['model.json'])}>
-                    model.json
-                  </button>
-                ) : null}
-                {activeOutput === 'advanced' ? (
-                  <div className="segmented-control" aria-label="詳細出力">
-                    <button
-                      type="button"
-                      className={advancedOutput === 'ir' ? 'is-active' : ''}
-                      onClick={() => setAdvancedOutput('ir')}
-                    >
-                      IR
-                    </button>
-                    <button
-                      type="button"
-                      className={advancedOutput === 'prompt' ? 'is-active' : ''}
-                      onClick={() => setAdvancedOutput('prompt')}
-                    >
-                      AIメモ
-                    </button>
-                    <button
-                      type="button"
-                      className={advancedOutput === 'package' ? 'is-active' : ''}
-                      onClick={() => setAdvancedOutput('package')}
-                    >
-                      Package
-                    </button>
-                    <button
-                      type="button"
-                      className={advancedOutput === 'diff' ? 'is-active' : ''}
-                      onClick={() => setAdvancedOutput('diff')}
-                    >
-                      Diff
-                    </button>
-                  </div>
-                ) : null}
-                {activeOutput === 'handoff' ? (
-                  <div className="segmented-control" aria-label="受け渡しプレビュー形式">
-                    <button
-                      type="button"
-                      className={handoffPreviewFormat === 'markdown' ? 'is-active' : ''}
-                      onClick={() => setHandoffPreviewFormat('markdown')}
-                    >
-                      Markdown
-                    </button>
-                    <button
-                      type="button"
-                      className={handoffPreviewFormat === 'json' ? 'is-active' : ''}
-                      onClick={() => setHandoffPreviewFormat('json')}
-                    >
-                      JSON
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              {activeOutput === 'handoff' || (activeOutput === 'advanced' && advancedOutput === 'prompt') ? (
-                <label className="prompt-target">
-                  出力先
-                  <select
-                    value={promptTarget}
-                    onChange={(event) => setPromptTarget(event.target.value as PromptTarget)}
-                  >
-                    {PROMPT_TARGETS.map((target) => (
-                      <option key={target} value={target}>
-                        {getPromptTargetLabel(target)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <pre>{outputText}</pre>
-              </>
-            )}
-          </div>
+          <OutputPanel
+            activeOutput={activeOutput}
+            advancedOutput={advancedOutput}
+            handoffPreviewFormat={handoffPreviewFormat}
+            outputText={outputText}
+            modelIr={modelIr}
+            document={compiledCanvas.document}
+            promptTarget={promptTarget as HandoffTarget}
+            promptTargets={PROMPT_TARGETS}
+            onCopyOutput={() => copyText(outputText)}
+            onCopyPackageModel={() => copyText((portablePackage ?? makePortablePackage(nodes, edges, promptTarget as HandoffTarget)).files['model.json'])}
+            onSelectNode={(nodeId) => selectNodeForEditing(nodeId, { focusEditor: true })}
+            onSetActiveOutput={setActiveOutput}
+            onSetAdvancedOutput={setAdvancedOutput}
+            onSetHandoffPreviewFormat={setHandoffPreviewFormat}
+            onSetPromptTarget={setPromptTarget}
+          />
         </aside>
       </section>
     </main>
