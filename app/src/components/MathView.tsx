@@ -66,8 +66,8 @@ export function MathView({ model, document, onSelectNode }: MathViewProps) {
       {document ? (
         <div className="math-section">
           <h3 className="math-section-title">
-            <span>ModelDocument</span>
-            <span className="math-section-count">{document.entityOrder.length}</span>
+            <span>モデル全体</span>
+            <span className="math-section-count">{document.entityOrder.length}要素</span>
           </h3>
           <div className="math-section-lines">
             <div className="math-line">

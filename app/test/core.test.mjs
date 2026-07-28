@@ -174,7 +174,7 @@ test('projects the sample model into synchronized model views', () => {
 
   assert.deepEqual(
     projections.map((projection) => projection.id),
-    ['canvas', 'story', 'equations', 'structure', 'contract'],
+    ['canvas', 'equations', 'story', 'structure', 'contract'],
   );
 
   const diagnosticFingerprints = compiled.semantic.diagnostics.map((diagnostic) =>
