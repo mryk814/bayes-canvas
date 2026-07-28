@@ -82,7 +82,8 @@ type PaletteItem =
   | { type: 'node'; kind: BayesNodeData['kind']; label: string; note: string }
   | { type: 'preset'; preset: 'horseshoe_prior' | 'linear_term' | 'group_effect' | 'interaction_term'; label: string; note: string };
 
-type LeftPanelTab = 'add' | 'structure' | 'inspector' | 'library';
+type LeftPanelTab = 'add' | 'structure' | 'inspector';
+type WorkStage = 'build' | 'review' | 'handoff';
 type CommandAction = {
   id: string;
   label: string;
@@ -94,7 +95,12 @@ const LEFT_PANEL_TABS: Array<{ id: LeftPanelTab; label: string }> = [
   { id: 'add', label: '追加' },
   { id: 'structure', label: '構造' },
   { id: 'inspector', label: '編集' },
-  { id: 'library', label: '保存' },
+];
+
+const WORK_STAGES: Array<{ id: WorkStage; label: string; note: string }> = [
+  { id: 'build', label: '組む', note: 'モデルを編集' },
+  { id: 'review', label: '確認', note: '診断と仮定' },
+  { id: 'handoff', label: '渡す', note: '実装へ出力' },
 ];
 
 const PALETTE_GROUPS: Array<{
@@ -939,6 +945,11 @@ interface SavedModelEntry {
   edgeCount: number;
 }
 
+interface DeletedSnapshotState {
+  entry: SavedModelEntry;
+  payload: string;
+}
+
 const SAVED_MODELS_KEY = 'bayes-canvas:saved-models';
 
 function loadSavedModelsList(): SavedModelEntry[] {
@@ -984,10 +995,23 @@ function loadModelSnapshot(id: string): CanvasState | null {
   }
 }
 
-function deleteModelSnapshot(id: string): SavedModelEntry[] {
-  const models = loadSavedModelsList().filter((m) => m.id !== id);
+function deleteModelSnapshot(id: string): { models: SavedModelEntry[]; deleted: DeletedSnapshotState | null } {
+  const currentModels = loadSavedModelsList();
+  const entry = currentModels.find((model) => model.id === id);
+  const payload = localStorage.getItem(`bayes-canvas:saved:${id}`);
+  const models = currentModels.filter((model) => model.id !== id);
   localStorage.setItem(SAVED_MODELS_KEY, JSON.stringify(models));
   localStorage.removeItem(`bayes-canvas:saved:${id}`);
+  return {
+    models,
+    deleted: entry && payload ? { entry, payload } : null,
+  };
+}
+
+function restoreDeletedSnapshot(snapshot: DeletedSnapshotState): SavedModelEntry[] {
+  const models = [snapshot.entry, ...loadSavedModelsList().filter((model) => model.id !== snapshot.entry.id)];
+  localStorage.setItem(SAVED_MODELS_KEY, JSON.stringify(models));
+  localStorage.setItem(`bayes-canvas:saved:${snapshot.entry.id}`, snapshot.payload);
   return models;
 }
 
@@ -1563,8 +1587,10 @@ export function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [activeLeftPanel, setActiveLeftPanel] = useState<LeftPanelTab>('add');
+  const [workStage, setWorkStage] = useState<WorkStage>('build');
+  const [startDialogOpen, setStartDialogOpen] = useState(false);
   const editorHeadingRef = useRef<HTMLHeadingElement>(null);
-  const [promptTarget, setPromptTarget] = useState<PromptTarget>('generic');
+  const [promptTarget, setPromptTarget] = useState<PromptTarget>('numpyro');
   const [activeModelView, setActiveModelView] = useState<ModelViewProjectionId>('canvas');
   const [activeOutput, setActiveOutput] = useState<OutputMode>('math');
   const [advancedOutput, setAdvancedOutput] = useState<AdvancedOutputMode>('ir');
@@ -1750,6 +1776,7 @@ export function App() {
     });
   }, [nodes]);
   const [savedModels, setSavedModels] = useState<SavedModelEntry[]>(loadSavedModelsList);
+  const [deletedSnapshot, setDeletedSnapshot] = useState<DeletedSnapshotState | null>(null);
   const diagnosticCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const diagnostic of modelIr.diagnostics) {
@@ -2003,6 +2030,7 @@ export function App() {
     setSelectedNodeId(params.nodes[0]?.id ?? null);
     setSelectedEdgeId(params.nodes.length ? null : (params.edges[0]?.id ?? null));
     if (params.nodes.length || params.edges.length) {
+      setWorkStage('build');
       setActiveLeftPanel('inspector');
     }
   }, []);
@@ -2023,6 +2051,7 @@ export function App() {
       setSelectedNodeId(nodeId);
       setSelectedEdgeId(null);
       if (options.focusEditor) {
+        setWorkStage('build');
         setActiveLeftPanel('inspector');
         focusEditorHeading();
       }
@@ -2045,6 +2074,7 @@ export function App() {
     setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
     setSelectedNodeId(firstSelectedId);
     setSelectedEdgeId(null);
+    setWorkStage('build');
     setActiveLeftPanel('inspector');
   }, [setEdges, setNodes]);
 
@@ -2319,6 +2349,7 @@ export function App() {
     setSelectedEdgeId(null);
     setPendingImport(null);
     setActiveLeftPanel('inspector');
+    setWorkStage('review');
     setActiveOutput('review');
   }, [edges, nodes, pendingImport, setEdges, setNodes]);
 
@@ -2362,17 +2393,28 @@ export function App() {
     (id: string) => {
       const state = loadModelSnapshot(id);
       if (!state) return;
+      setUndoState({ message: '保存済みスナップショットを読み込みました。', nodes, edges });
       setNodes(state.nodes);
       setEdges(state.edges);
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
+      setStartDialogOpen(false);
+      setWorkStage('build');
     },
-    [setNodes, setEdges],
+    [edges, nodes, setNodes, setEdges],
   );
 
   const handleDeleteSnapshot = useCallback((id: string) => {
-    setSavedModels(deleteModelSnapshot(id));
+    const result = deleteModelSnapshot(id);
+    setSavedModels(result.models);
+    setDeletedSnapshot(result.deleted);
   }, []);
+
+  const undoDeleteSnapshot = useCallback(() => {
+    if (!deletedSnapshot) return;
+    setSavedModels(restoreDeletedSnapshot(deletedSnapshot));
+    setDeletedSnapshot(null);
+  }, [deletedSnapshot]);
 
   const applyModelTemplate = useCallback((template: ModelTemplate) => {
     setUndoState({ message: `${template.name} テンプレートを適用しました。`, nodes, edges });
@@ -2381,7 +2423,20 @@ export function App() {
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     setActiveLeftPanel('inspector');
+    setStartDialogOpen(false);
+    setWorkStage('review');
     setActiveOutput('review');
+  }, [edges, nodes, setEdges, setNodes]);
+
+  const startBlankModel = useCallback(() => {
+    setUndoState({ message: '空のモデルから始めました。', nodes, edges });
+    setNodes([]);
+    setEdges([]);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setActiveLeftPanel('add');
+    setStartDialogOpen(false);
+    setWorkStage('build');
   }, [edges, nodes, setEdges, setNodes]);
 
   const handleExport = useCallback(() => {
@@ -2536,6 +2591,13 @@ export function App() {
     }, 0);
   }, [edges, nodes, setEdges, setNodes]);
 
+  const openWorkStage = useCallback((stage: WorkStage) => {
+    setWorkStage(stage);
+    if (stage === 'build' && (selectedNodeId || selectedEdgeId)) setActiveLeftPanel('inspector');
+    if (stage === 'review') setActiveOutput('review');
+    if (stage === 'handoff') setActiveOutput('handoff');
+  }, [selectedEdgeId, selectedNodeId]);
+
   const commands = useMemo<CommandAction[]>(() => [
     {
       id: 'add-data',
@@ -2565,7 +2627,22 @@ export function App() {
       id: 'open-add',
       label: '追加パネルを開く',
       group: '移動',
-      run: () => setActiveLeftPanel('add'),
+      run: () => {
+        setWorkStage('build');
+        setActiveLeftPanel('add');
+      },
+    },
+    {
+      id: 'open-start',
+      label: '新規作成・テンプレートを開く',
+      group: 'ファイル',
+      run: () => setStartDialogOpen(true),
+    },
+    {
+      id: 'start-blank',
+      label: '空のモデルから始める',
+      group: 'ファイル',
+      run: startBlankModel,
     },
     ...modelTemplates.map((template) => ({
       id: `template-${template.id}`,
@@ -2577,7 +2654,10 @@ export function App() {
       id: 'open-structure',
       label: '構造パネルを開く',
       group: '移動',
-      run: () => setActiveLeftPanel('structure'),
+      run: () => {
+        setWorkStage('build');
+        setActiveLeftPanel('structure');
+      },
     },
     ...modelViewProjections.map((projection) => ({
       id: `view-${projection.id}`,
@@ -2597,7 +2677,7 @@ export function App() {
       id: 'go-review',
       label: '診断へ移動',
       group: '移動',
-      run: () => setActiveOutput('review'),
+      run: () => openWorkStage('review'),
     },
     {
       id: 'add-qoi',
@@ -2615,7 +2695,7 @@ export function App() {
       id: 'prepare-handoff',
       label: '受け渡しを準備',
       group: '移動',
-      run: () => setActiveOutput('handoff'),
+      run: () => openWorkStage('handoff'),
     },
     {
       id: 'export-package',
@@ -2675,7 +2755,10 @@ export function App() {
       id: 'schema-import',
       label: 'スキーマ取り込みを開く',
       group: '補助',
-      run: () => setActiveLeftPanel('structure'),
+      run: () => {
+        setWorkStage('build');
+        setActiveLeftPanel('structure');
+      },
     },
     {
       id: 'focus-dependencies',
@@ -2693,7 +2776,10 @@ export function App() {
       id: 'go-advanced',
       label: '詳細出力を開く',
       group: '移動',
-      run: () => setActiveOutput('advanced'),
+      run: () => {
+        setWorkStage('handoff');
+        setActiveOutput('advanced');
+      },
     },
   ], [
     addModelBlock,
@@ -2708,12 +2794,14 @@ export function App() {
     handleSave,
     modelIr,
     modelViewProjections,
+    openWorkStage,
     edges,
     nodes,
     promptTarget,
     resetSample,
     resolveCanvasOverlaps,
     selectedNodeId,
+    startBlankModel,
   ]);
 
   const filteredCommands = useMemo(() => {
@@ -2740,6 +2828,7 @@ export function App() {
       }
       if (event.key === 'Escape') {
         setCommandPaletteOpen(false);
+        setStartDialogOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -2751,28 +2840,53 @@ export function App() {
       <header className="topbar">
         <div className="brand-block">
           <h1>Bayes Canvas</h1>
-          <p>ベイズモデルを図で組み、実装へ渡すためのキャンバス。</p>
+          <p>{compiledCanvas.document.model.name}</p>
         </div>
-        <div className="model-summary" aria-label="モデル概要">
-          <div className="summary-secondary">
-            <span className="summary-value">{nodes.length}</span>
-            <span className="summary-label">ノード</span>
+        <nav className="work-stage-nav" aria-label="作業ステップ">
+          {WORK_STAGES.map((stage, index) => (
+            <button
+              aria-current={workStage === stage.id ? 'step' : undefined}
+              className={workStage === stage.id ? 'is-active' : undefined}
+              key={stage.id}
+              onClick={() => openWorkStage(stage.id)}
+              type="button"
+            >
+              <span>{index + 1}</span>
+              <strong>{stage.label}</strong>
+              <small>{stage.note}</small>
+            </button>
+          ))}
+        </nav>
+        <div className="header-actions" aria-label="モデル操作">
+          <div className="model-health" aria-label="モデル概要">
+            <span>{nodes.length}ノード</span>
+            <span>{edges.length}リンク</span>
+            <span className={compiledCanvas.semantic.readiness.summary.errors ? 'has-error' : undefined}>
+              {compiledCanvas.semantic.readiness.summary.errors}エラー
+            </span>
+            <span className={compiledCanvas.semantic.readiness.summary.warnings ? 'has-warning' : undefined}>
+              {compiledCanvas.semantic.readiness.summary.warnings}確認
+            </span>
           </div>
-          <div className="summary-secondary">
-            <span className="summary-value">{edges.length}</span>
-            <span className="summary-label">リンク</span>
-          </div>
-          <div className="summary-secondary">
-            <span className="summary-value">{plateCount}</span>
-            <span className="summary-label">反復範囲</span>
-          </div>
-          <div className={compiledCanvas.semantic.readiness.summary.errors ? 'summary-danger' : 'summary-quiet'}>
-            <span className="summary-value">{compiledCanvas.semantic.readiness.summary.errors}</span>
-            <span className="summary-label">エラー</span>
-          </div>
-          <div className={modelIr.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length + compiledCanvas.semantic.readiness.summary.warnings ? 'summary-warning' : 'summary-quiet'}>
-            <span className="summary-value">{modelIr.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length + compiledCanvas.semantic.readiness.summary.warnings}</span>
-            <span className="summary-label">確認</span>
+          <div className="header-action-buttons">
+            <button type="button" onClick={() => setStartDialogOpen(true)}>
+              新規・テンプレート
+            </button>
+            <button type="button" onClick={handleSave}>
+              スナップショット
+            </button>
+            <button type="button" onClick={handleImport}>
+              読み込み
+            </button>
+            <button type="button" onClick={handleExport}>
+              書き出し
+            </button>
+            <button type="button" onClick={copyExternalImportPrompt}>
+              変換プロンプト
+            </button>
+            <button type="button" onClick={() => setCommandPaletteOpen(true)}>
+              操作検索
+            </button>
           </div>
         </div>
       </header>
@@ -2807,6 +2921,19 @@ export function App() {
               元に戻す
             </button>
             <button type="button" onClick={() => setUndoState(null)}>
+              確定
+            </button>
+          </div>
+        ) : null}
+
+        {deletedSnapshot ? (
+          <div className="status-banner status-undo" role="status">
+            <strong>スナップショットを削除しました</strong>
+            <span>{deletedSnapshot.entry.name}</span>
+            <button type="button" onClick={undoDeleteSnapshot}>
+              元に戻す
+            </button>
+            <button type="button" onClick={() => setDeletedSnapshot(null)}>
               確定
             </button>
           </div>
@@ -2874,26 +3001,96 @@ export function App() {
         </div>
       ) : null}
 
-      <section className="workspace">
-        <aside className="panel left-panel">
+      {startDialogOpen ? (
+        <div className="start-backdrop" role="presentation" onMouseDown={() => setStartDialogOpen(false)}>
+          <section
+            aria-label="新規作成と保存済みモデル"
+            aria-modal="true"
+            className="start-dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="start-dialog-heading">
+              <div>
+                <span>START</span>
+                <h2>モデルの出発点を選ぶ</h2>
+              </div>
+              <button autoFocus type="button" onClick={() => setStartDialogOpen(false)}>
+                閉じる
+              </button>
+            </div>
+            <div className="start-dialog-content">
+              <section className="template-panel">
+                <button className="blank-start-card" type="button" onClick={startBlankModel}>
+                  <strong>空のモデル</strong>
+                  <span>必要な要素だけを追加して組み始める</span>
+                </button>
+                <div className="panel-title compact">
+                  <h2>テンプレート</h2>
+                  <span>{modelTemplates.length}</span>
+                </div>
+                <div className="template-list template-grid">
+                  {modelTemplates.map((template) => (
+                    <button key={template.id} type="button" onClick={() => applyModelTemplate(template)}>
+                      <strong>{template.name}</strong>
+                      <span>{template.family} / {template.status}</span>
+                      <small>{template.reviewQuestions[0]}</small>
+                    </button>
+                  ))}
+                </div>
+              </section>
+              <section className="snapshots-panel">
+                <div className="panel-title compact">
+                  <h2>保存済みスナップショット</h2>
+                  <span>{savedModels.length}</span>
+                </div>
+                {savedModels.length > 0 ? (
+                  <div className="snapshots-list">
+                    {savedModels.map((model) => (
+                      <div className="snapshot-row" key={model.id}>
+                        <div className="snapshot-info">
+                          <span className="snapshot-name">{model.name}</span>
+                          <span className="snapshot-meta">
+                            {model.nodeCount} nodes / {model.edgeCount} links / {new Date(model.savedAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <div className="snapshot-actions">
+                          <button type="button" onClick={() => handleLoad(model.id)}>
+                            開く
+                          </button>
+                          <button type="button" onClick={() => handleDeleteSnapshot(model.id)}>
+                            削除
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="empty-note">保存済みスナップショットはまだありません。</p>
+                )}
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      <section className={`workspace workspace-${workStage}`}>
+        {workStage === 'build' ? (
+          <aside className="panel left-panel">
           <div className="panel-title">
             <h2>
               {activeLeftPanel === 'add'
                 ? '追加'
                 : activeLeftPanel === 'structure'
                   ? '構造'
-                  : activeLeftPanel === 'library'
-                    ? '保存'
-                    : '編集'}
+                  : '編集'}
             </h2>
             <span>
               {activeLeftPanel === 'add'
                 ? 'モデル要素'
                 : activeLeftPanel === 'structure'
                   ? `${plateRows.length}件の反復範囲`
-                  : activeLeftPanel === 'library'
-                    ? `${savedModels.length}件のsnapshot`
-                    : selectedKindLabel}
+                  : selectedKindLabel}
             </span>
           </div>
           <div className="panel-tabs" role="tablist" aria-label="左ペイン">
@@ -2993,55 +3190,6 @@ export function App() {
               ) : null}
             </div>
           ) : null}
-          {activeLeftPanel === 'library' ? (
-            <div className="library-panel">
-              <div className="template-panel">
-                <div className="panel-title compact">
-                  <h2>テンプレート</h2>
-                  <span>{modelTemplates.length}</span>
-                </div>
-                <div className="template-list">
-                  {modelTemplates.map((template) => (
-                    <button key={template.id} type="button" onClick={() => applyModelTemplate(template)}>
-                      <strong>{template.name}</strong>
-                      <span>{template.family} / {template.status}</span>
-                      <small>{template.reviewQuestions[0]}</small>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="snapshots-panel">
-                <div className="panel-title compact">
-                  <h2>保存済み</h2>
-                  <span>{savedModels.length}</span>
-                </div>
-                {savedModels.length > 0 ? (
-                  <div className="snapshots-list">
-                    {savedModels.map((model) => (
-                      <div className="snapshot-row" key={model.id}>
-                        <div className="snapshot-info">
-                          <span className="snapshot-name">{model.name}</span>
-                          <span className="snapshot-meta">
-                            {model.nodeCount}n {model.edgeCount}e · {new Date(model.savedAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                        <div className="snapshot-actions">
-                          <button type="button" onClick={() => handleLoad(model.id)}>
-                            読込
-                          </button>
-                          <button type="button" onClick={() => handleDeleteSnapshot(model.id)}>
-                            削除
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="empty-note">保存済みsnapshotはまだありません。</p>
-                )}
-              </div>
-            </div>
-          ) : null}
           {activeLeftPanel === 'inspector' ? (
             <div className="editor-panel">
               <div className="panel-title compact">
@@ -3078,7 +3226,12 @@ export function App() {
                   </label>
                   <span className={`kind-pill palette-${selectedData.kind}`}>{NODE_KIND_LABELS[selectedData.kind]}</span>
                 </div>
-                <div className="inspector-section">
+                <details className="inspector-disclosure">
+                  <summary>
+                    <span>サイズ・plate・追加制約</span>
+                    <small>{formatNodeShapeFormula(selectedData)} / {selectedData.plate || 'plateなし'}</small>
+                  </summary>
+                  <div className="inspector-section">
                   <div className="inspector-section-title">サイズと繰り返し</div>
                   <div className="shape-readout">
                     <span className="shape-readout-label">配列</span>
@@ -3149,7 +3302,8 @@ export function App() {
                       </label>
                     </div>
                   ) : null}
-                </div>
+                  </div>
+                </details>
                 <div className="inspector-section">
                   <div className="inspector-section-title">モデル定義</div>
                   {showsObservedEditor ? (
@@ -3211,25 +3365,30 @@ export function App() {
                     <p className="empty-note">この種類に追加のモデル定義はありません。</p>
                   ) : null}
                 </div>
-                <div className="inspector-section">
-                  <div className="inspector-section-title">メモ</div>
-                  <label>
-                    実装メモ
-                    <input
-                      placeholder="non_centered, sparse GP, warning:識別性を確認"
-                      value={formatHintsForInput(selectedData.hints)}
-                      onChange={(event) => updateSelectedNodeData({ hints: parseHints(event.target.value) })}
-                    />
-                  </label>
-                  <label>
-                    ノート
-                    <textarea
-                      placeholder="仮定、実装へ渡す注意、あとで確認すること"
-                      value={selectedData.notes ?? ''}
-                      onChange={(event) => updateSelectedNodeData({ notes: event.target.value || undefined })}
-                    />
-                  </label>
-                </div>
+                <details className="inspector-disclosure">
+                  <summary>
+                    <span>実装メモ・判断ノート</span>
+                    <small>{selectedData.notes || selectedData.hints?.length ? '記録あり' : '未記入'}</small>
+                  </summary>
+                  <div className="inspector-section">
+                    <label>
+                      実装メモ
+                      <input
+                        placeholder="non_centered, sparse GP, warning:識別性を確認"
+                        value={formatHintsForInput(selectedData.hints)}
+                        onChange={(event) => updateSelectedNodeData({ hints: parseHints(event.target.value) })}
+                      />
+                    </label>
+                    <label>
+                      ノート
+                      <textarea
+                        placeholder="仮定、実装へ渡す注意、あとで確認すること"
+                        value={selectedData.notes ?? ''}
+                        onChange={(event) => updateSelectedNodeData({ notes: event.target.value || undefined })}
+                      />
+                    </label>
+                  </div>
+                </details>
                 <div className="inspector-section">
                   <div className="inspector-section-title">診断</div>
                   {selectedDiagnostics.length || selectedCompilerDiagnostics.length ? (
@@ -3276,7 +3435,8 @@ export function App() {
             )}
             </div>
           ) : null}
-        </aside>
+          </aside>
+        ) : null}
 
         <section className="canvas">
           <div className="canvas-toolbar">
@@ -3301,46 +3461,21 @@ export function App() {
                 </button>
               ))}
             </div>
-            <div className="toolbar-actions">
-              <div className="toolbar-group toolbar-primary" aria-label="主要操作">
-                <button type="button" onClick={() => setCommandPaletteOpen(true)}>
-                  操作検索
-                </button>
-                <button type="button" onClick={() => setActiveOutput('review')}>
-                  診断
-                </button>
-                <button type="button" onClick={() => setActiveOutput('handoff')}>
-                  受け渡し
-                </button>
-              </div>
-              <div className="toolbar-group" aria-label="ファイル操作">
-                <button type="button" onClick={handleSave}>
-                  保存
-                </button>
-                <button type="button" onClick={handleImport}>
-                  読み込み
-                </button>
-                <button type="button" onClick={copyExternalImportPrompt}>
-                  変換プロンプト
-                </button>
-                <button type="button" onClick={handleExport}>
-                  書き出し
-                </button>
-              </div>
-              <div className="toolbar-group" aria-label="編集操作">
-                <button
-                  disabled={nodes.length < 2}
-                  type="button"
-                  onClick={() => {
-                    void resolveCanvasOverlaps();
-                  }}
-                >
-                  配置整理
-                </button>
+            <div className="toolbar-actions" aria-label="キャンバス操作">
+              <button
+                disabled={nodes.length < 2}
+                type="button"
+                onClick={() => {
+                  void resolveCanvasOverlaps();
+                }}
+              >
+                配置整理
+              </button>
+              {workStage === 'build' ? (
                 <button disabled={!selectedNode && !selectedEdge} type="button" onClick={deleteSelectedItem}>
-                  削除
+                  選択を削除
                 </button>
-              </div>
+              ) : null}
             </div>
           </div>
           <CanvasPane
@@ -3368,10 +3503,11 @@ export function App() {
           />
         </section>
 
-        <aside className="panel right-panel">
+        {workStage !== 'build' ? (
+          <aside className="panel right-panel">
           <div className="panel-title">
-            <h2>受け渡し</h2>
-            <span>生成される内容</span>
+            <h2>{workStage === 'review' ? 'モデル確認' : '受け渡し'}</h2>
+            <span>{workStage === 'review' ? '診断と仮定' : '実装へ出力'}</span>
           </div>
           <section className={`readiness-card readiness-${handoffReadiness.state}`} aria-label="受け渡し準備状況">
             <div className="readiness-heading">
@@ -3403,14 +3539,22 @@ export function App() {
               </div>
             ) : null}
             <div className="readiness-actions">
-              <button type="button" onClick={() => setActiveOutput('review')}>
-                診断を見る
+              <button type="button" onClick={() => openWorkStage('build')}>
+                モデルを修正
               </button>
-              <button type="button" onClick={() => setActiveOutput('handoff')}>
-                受け渡しを準備
-              </button>
+              {workStage === 'review' ? (
+                <button type="button" onClick={() => openWorkStage('handoff')}>
+                  受け渡しへ
+                </button>
+              ) : (
+                <button type="button" onClick={() => openWorkStage('review')}>
+                  診断へ戻る
+                </button>
+              )}
             </div>
           </section>
+          {workStage === 'review' ? (
+            <>
           <div className="outline-panel">
             <div className="panel-title compact">
               <h2>構成</h2>
@@ -3502,7 +3646,10 @@ export function App() {
               ))}
             </div>
           </div>
-          <OutputPanel
+            </>
+          ) : null}
+          {workStage === 'handoff' ? (
+            <OutputPanel
             activeOutput={activeOutput}
             advancedOutput={advancedOutput}
             handoffPreviewFormat={handoffPreviewFormat}
@@ -3518,8 +3665,11 @@ export function App() {
             onSetAdvancedOutput={setAdvancedOutput}
             onSetHandoffPreviewFormat={setHandoffPreviewFormat}
             onSetPromptTarget={setPromptTarget}
+            showTabs={false}
           />
-        </aside>
+          ) : null}
+          </aside>
+        ) : null}
       </section>
     </main>
   );

@@ -118,6 +118,12 @@ export function CanvasPane({
       fitView
       fitViewOptions={{ padding: 0.18 }}
     >
+      {nodes.length === 0 ? (
+        <div className="canvas-empty-state" role="status">
+          <strong>空のモデル</strong>
+          <span>左の「追加」から、データ・パラメータ・尤度を置きます。</span>
+        </div>
+      ) : null}
       <Background color="var(--color-border)" gap={24} />
       <div
         className="plate-overlay-layer plate-overlay-frame-layer"

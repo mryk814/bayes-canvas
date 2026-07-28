@@ -23,6 +23,7 @@ interface OutputPanelProps {
   onSetAdvancedOutput: (output: AdvancedOutputMode) => void;
   onSetHandoffPreviewFormat: (format: HandoffPreviewFormat) => void;
   onSetPromptTarget: (target: PromptTarget) => void;
+  showTabs?: boolean;
 }
 
 export function OutputPanel({
@@ -41,17 +42,21 @@ export function OutputPanel({
   onSetAdvancedOutput,
   onSetHandoffPreviewFormat,
   onSetPromptTarget,
+  showTabs = true,
 }: OutputPanelProps) {
   return (
     <>
-      <div className="output-tabs" aria-label="出力の種類" role="tablist">
-        <OutputTab activeOutput={activeOutput} id="math" label="数式" onSelect={onSetActiveOutput} />
-        <OutputTab activeOutput={activeOutput} id="review" label="診断" onSelect={onSetActiveOutput} />
-        <OutputTab activeOutput={activeOutput} id="handoff" label="受け渡し" onSelect={onSetActiveOutput} />
-        <OutputTab activeOutput={activeOutput} id="advanced" label="詳細" onSelect={onSetActiveOutput} />
-      </div>
+      {showTabs ? (
+        <div className="output-tabs" aria-label="出力の種類" role="tablist">
+          <OutputTab activeOutput={activeOutput} id="math" label="数式" onSelect={onSetActiveOutput} />
+          <OutputTab activeOutput={activeOutput} id="review" label="診断" onSelect={onSetActiveOutput} />
+          <OutputTab activeOutput={activeOutput} id="handoff" label="受け渡し" onSelect={onSetActiveOutput} />
+          <OutputTab activeOutput={activeOutput} id="advanced" label="詳細" onSelect={onSetActiveOutput} />
+        </div>
+      ) : null}
       <div
-        aria-labelledby={`output-tab-${activeOutput}`}
+        aria-label={showTabs ? undefined : getOutputLabel(activeOutput, advancedOutput)}
+        aria-labelledby={showTabs ? `output-tab-${activeOutput}` : undefined}
         className="output-panel"
         id="output-panel"
         role="tabpanel"
