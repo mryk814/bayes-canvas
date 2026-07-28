@@ -50,6 +50,10 @@ export interface DistributionSpec {
   id?: string;
   name: string;
   args: Record<string, string>;
+  truncation?: {
+    lower?: string;
+    upper?: string;
+  };
 }
 
 export interface CompilerDistributionDefinition {
@@ -132,6 +136,11 @@ export const DISTRIBUTIONS: DistributionDefinition[] = [
     id: 'exponential',
     name: 'Exponential',
     aliases: ['Exp'],
+    backendNames: {
+      pymc: 'pm.Exponential',
+      numpyro: 'dist.Exponential',
+      stan: 'exponential',
+    },
     family: 'continuous',
     support: 'positive',
     params: [{ name: 'lam', required: true, role: 'rate', defaultExpression: '1', support: 'positive' }],
@@ -142,6 +151,11 @@ export const DISTRIBUTIONS: DistributionDefinition[] = [
     id: 'lognormal',
     name: 'LogNormal',
     aliases: ['Lognormal'],
+    backendNames: {
+      pymc: 'pm.LogNormal',
+      numpyro: 'dist.LogNormal',
+      stan: 'lognormal',
+    },
     family: 'continuous',
     support: 'positive',
     params: [
@@ -150,6 +164,97 @@ export const DISTRIBUTIONS: DistributionDefinition[] = [
     ],
     latexTemplate: '\\operatorname{LogNormal}({mu}, {sigma})',
     textTemplate: 'LogNormal({mu}, {sigma})',
+  },
+  {
+    id: 'uniform',
+    name: 'Uniform',
+    backendNames: {
+      pymc: 'pm.Uniform',
+      numpyro: 'dist.Uniform',
+      stan: 'uniform',
+    },
+    family: 'continuous',
+    support: 'bounded_real',
+    params: [
+      { name: 'lower', required: true, role: 'location', defaultExpression: '0', support: 'real' },
+      { name: 'upper', required: true, role: 'location', defaultExpression: '1', support: 'real' },
+    ],
+    latexTemplate: '\\operatorname{Uniform}({lower}, {upper})',
+    textTemplate: 'Uniform({lower}, {upper})',
+    description: 'Continuous uniform distribution between declared lower and upper bounds.',
+  },
+  {
+    id: 'gamma',
+    name: 'Gamma',
+    backendNames: {
+      pymc: 'pm.Gamma',
+      numpyro: 'dist.Gamma',
+      stan: 'gamma',
+    },
+    family: 'continuous',
+    support: 'positive',
+    params: [
+      { name: 'alpha', required: true, role: 'shape', defaultExpression: '2', support: 'positive' },
+      { name: 'beta', required: true, role: 'rate', defaultExpression: '1', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{Gamma}({alpha}, {beta})',
+    textTemplate: 'Gamma({alpha}, {beta})',
+    description: 'Positive distribution parameterized by shape alpha and rate beta.',
+  },
+  {
+    id: 'inverse_gamma',
+    name: 'InverseGamma',
+    aliases: ['Inverse Gamma', 'InvGamma'],
+    backendNames: {
+      pymc: 'pm.InverseGamma',
+      numpyro: 'dist.InverseGamma',
+      stan: 'inv_gamma',
+    },
+    family: 'continuous',
+    support: 'positive',
+    params: [
+      { name: 'alpha', required: true, role: 'shape', defaultExpression: '2', support: 'positive' },
+      { name: 'beta', required: true, role: 'scale', defaultExpression: '1', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{InvGamma}({alpha}, {beta})',
+    textTemplate: 'InverseGamma({alpha}, {beta})',
+    description: 'Positive inverse-gamma distribution parameterized by shape and scale.',
+  },
+  {
+    id: 'weibull',
+    name: 'Weibull',
+    backendNames: {
+      pymc: 'pm.Weibull',
+      numpyro: 'dist.Weibull',
+      stan: 'weibull',
+    },
+    family: 'continuous',
+    support: 'positive',
+    params: [
+      { name: 'alpha', required: true, role: 'shape', defaultExpression: '2', support: 'positive' },
+      { name: 'beta', required: true, role: 'scale', defaultExpression: '1', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{Weibull}({alpha}, {beta})',
+    textTemplate: 'Weibull({alpha}, {beta})',
+    description: 'Positive duration distribution with shape alpha and scale beta.',
+  },
+  {
+    id: 'logistic',
+    name: 'Logistic',
+    backendNames: {
+      pymc: 'pm.Logistic',
+      numpyro: 'dist.Logistic',
+      stan: 'logistic',
+    },
+    family: 'continuous',
+    support: 'real',
+    params: [
+      { name: 'mu', required: true, role: 'location', defaultExpression: '0', support: 'real' },
+      { name: 's', required: true, role: 'scale', defaultExpression: '1', support: 'positive' },
+    ],
+    latexTemplate: '\\operatorname{Logistic}({mu}, {s})',
+    textTemplate: 'Logistic({mu}, {s})',
+    description: 'Real-valued logistic distribution with location and positive scale.',
   },
   {
     id: 'bernoulli',
@@ -451,6 +556,7 @@ export function normalizeDistribution(distribution: DistributionSpec): Distribut
     id: definition.id,
     name: definition.name,
     args: distribution.args,
+    truncation: distribution.truncation,
   };
 }
 
@@ -495,10 +601,10 @@ export function formatDistributionText(distribution: DistributionSpec): string {
     const args = Object.entries(normalized.args)
       .map(([key, value]) => `${key}=${value}`)
       .join(', ');
-    return `${normalized.name}(${args})`;
+    return appendTruncationText(`${normalized.name}(${args})`, normalized.truncation);
   }
 
-  return applyTemplate(definition.textTemplate, normalized.args);
+  return appendTruncationText(applyTemplate(definition.textTemplate, normalized.args), normalized.truncation);
 }
 
 export function formatDistributionTex(distribution: DistributionSpec): string {
@@ -507,10 +613,13 @@ export function formatDistributionTex(distribution: DistributionSpec): string {
 
   if (!definition) {
     const args = Object.values(normalized.args).map(formatTexExpression).join(', ');
-    return `\\operatorname{${normalized.name}}(${args})`;
+    return appendTruncationTex(`\\operatorname{${normalized.name}}(${args})`, normalized.truncation);
   }
 
-  return applyTemplate(definition.latexTemplate, normalized.args, formatTexExpression);
+  return appendTruncationTex(
+    applyTemplate(definition.latexTemplate, normalized.args, formatTexExpression),
+    normalized.truncation,
+  );
 }
 
 export function getDistributionSupport(distribution: DistributionSpec): string | undefined {
@@ -527,6 +636,24 @@ function applyTemplate(
     if (/^[a-z][a-z0-9_]*$/.test(key)) return formatValue(key);
     return match;
   });
+}
+
+function appendTruncationText(
+  base: string,
+  truncation?: DistributionSpec['truncation'],
+): string {
+  if (!truncation?.lower && !truncation?.upper) return base;
+  return `${base} T[${truncation.lower ?? '-inf'}, ${truncation.upper ?? '+inf'}]`;
+}
+
+function appendTruncationTex(
+  base: string,
+  truncation?: DistributionSpec['truncation'],
+): string {
+  if (!truncation?.lower && !truncation?.upper) return base;
+  const lower = truncation.lower ? formatTexExpression(truncation.lower) : '-\\infty';
+  const upper = truncation.upper ? formatTexExpression(truncation.upper) : '+\\infty';
+  return `${base}\\;\\mathcal{T}[${lower}, ${upper}]`;
 }
 
 const GREEK_LETTERS: Record<string, string> = {

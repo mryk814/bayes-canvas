@@ -38,6 +38,10 @@ export interface BayesNodeData extends Record<string, unknown> {
   plate?: string;
   distribution?: DistributionSpec;
   expression?: string;
+  blockTypeId?: 'gp_regression' | 'gam_smooth' | 'mixture' | 'state_space' | 'hidden_markov';
+  blockInputs?: Record<string, string>;
+  blockOutputPort?: string;
+  blockConfig?: Record<string, string | number | boolean>;
   constraints?: Constraint[];
   hints?: ModelHint[];
   observationProcess?: ObservationProcess;
@@ -129,9 +133,13 @@ export type ModelHint =
 
 export type ObservationProcess =
   | { kind: 'exact' }
-  | { kind: 'missing'; strategy: 'ignore' | 'latent_imputation' | 'note_only' }
+  | {
+    kind: 'missing';
+    mechanism: 'MCAR' | 'MAR' | 'MNAR' | 'unspecified';
+    strategy: 'ignore' | 'latent_imputation' | 'note_only';
+  }
   | { kind: 'measurement_error'; latentTrueSymbol: string; errorScaleSymbol?: string }
-  | { kind: 'censored'; direction: 'left' | 'right' | 'interval'; boundSymbol?: string }
+  | { kind: 'censored'; direction: 'left' | 'right' | 'interval'; lower?: string; upper?: string }
   | { kind: 'truncated'; lower?: string; upper?: string }
   | { kind: 'rounded'; unit?: string }
   | { kind: 'custom'; description: string };
@@ -712,11 +720,12 @@ function buildModelBlocks(nodes: ModelIr['nodes']): ModelBlock[] {
 
       return {
         id: `${parsed.baseSymbol}_block`,
-        kind: parsed.baseSymbol,
+        kind: node.blockTypeId ?? parsed.baseSymbol,
         label: node.name,
-        inputs: node.expression ? analyzeLooseSymbols(node.expression) : [],
+        inputs: node.blockInputs ? Object.values(node.blockInputs) : node.expression ? analyzeLooseSymbols(node.expression) : [],
         outputs: [parsed.baseSymbol],
         formulas: node.expression ? [node.expression] : undefined,
+        config: node.blockConfig,
         validationLevel: node.validationLevel ?? 'structured',
         notes: node.notes,
       } satisfies ModelBlock;
@@ -1192,11 +1201,13 @@ function formatObservationProcesses(nodes: ModelIr['nodes']): string {
 }
 
 function formatObservationProcess(process: ObservationProcess): string {
-  if (process.kind === 'missing') return `missing (${process.strategy})`;
+  if (process.kind === 'missing') return `missing (${process.mechanism}; ${process.strategy})`;
   if (process.kind === 'measurement_error') {
     return `measurement error; latent true ${process.latentTrueSymbol}${process.errorScaleSymbol ? `; scale ${process.errorScaleSymbol}` : ''}`;
   }
-  if (process.kind === 'censored') return `${process.direction} censored${process.boundSymbol ? ` at ${process.boundSymbol}` : ''}`;
+  if (process.kind === 'censored') {
+    return `${process.direction} censored${process.lower ? ` lower ${process.lower}` : ''}${process.upper ? ` upper ${process.upper}` : ''}`;
+  }
   if (process.kind === 'truncated') return `truncated${process.lower ? ` lower ${process.lower}` : ''}${process.upper ? ` upper ${process.upper}` : ''}`;
   if (process.kind === 'rounded') return `rounded${process.unit ? ` to ${process.unit}` : ''}`;
   if (process.kind === 'custom') return process.description;
@@ -1205,14 +1216,15 @@ function formatObservationProcess(process: ObservationProcess): string {
 
 function formatObservationProcessTex(process: ObservationProcess): string {
   const sym = (s: string) => formatTexExpression(s);
-  if (process.kind === 'missing') return `\\text{missing (${process.strategy})}`;
+  if (process.kind === 'missing') return `\\text{missing (${process.mechanism}; ${process.strategy})}`;
   if (process.kind === 'measurement_error') {
     const scale = process.errorScaleSymbol ? `,\\; \\text{scale } ${sym(process.errorScaleSymbol)}` : '';
     return `\\text{measurement error; latent } ${sym(process.latentTrueSymbol)}${scale}`;
   }
   if (process.kind === 'censored') {
-    const bound = process.boundSymbol ? `\\text{ at } ${sym(process.boundSymbol)}` : '';
-    return `\\text{${process.direction} censored}${bound}`;
+    const lower = process.lower ? `\\text{ lower } ${sym(process.lower)}` : '';
+    const upper = process.upper ? `\\text{ upper } ${sym(process.upper)}` : '';
+    return `\\text{${process.direction} censored}${lower}${upper}`;
   }
   if (process.kind === 'truncated') {
     const lower = process.lower ? `\\text{ lower } ${sym(process.lower)}` : '';

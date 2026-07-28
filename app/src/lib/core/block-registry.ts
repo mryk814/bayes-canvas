@@ -20,23 +20,84 @@ export class InMemoryBlockRegistry implements BlockRegistry {
 }
 
 export const builtInBlockRegistry = new InMemoryBlockRegistry([
-  block('gp_regression', 'GP regression', 'Boundary-checked Gaussian process latent function.'),
-  block('gam_smooth', 'GAM smooth', 'Boundary-checked generalized additive smooth term.'),
-  block('mixture', 'Mixture model', 'Component and weight contract for finite mixtures.'),
-  block('state_space', 'State-space model', 'Transition and observation boundary contract.'),
+  block(
+    'gp_regression',
+    'GP regression',
+    'Gaussian-process latent function indexed by declared coordinates.',
+    [
+      input('coordinates', 'Coordinates', 'data'),
+      input('kernel', 'Kernel', 'parameter'),
+      output('latent_function', 'Latent function', 'latent_process'),
+    ],
+    ['approximation'],
+  ),
+  block(
+    'gam_smooth',
+    'GAM smooth',
+    'Basis expansion and coefficient contract for a smooth additive term.',
+    [
+      input('predictor', 'Predictor', 'data'),
+      input('basis', 'Basis and coefficients', 'parameter'),
+      output('smooth_effect', 'Smooth effect', 'deterministic_value'),
+    ],
+    ['basis_family', 'basis_count'],
+  ),
+  block(
+    'mixture',
+    'Mixture model',
+    'Finite-mixture contract that keeps weights and component distributions distinct.',
+    [
+      input('weights', 'Mixture weights', 'parameter'),
+      input('components', 'Component distributions', 'parameter'),
+      output('mixture_value', 'Mixture value', 'latent_process'),
+    ],
+    ['component_count', 'marginalize_assignments'],
+  ),
+  block(
+    'state_space',
+    'State-space model',
+    'Initial-state, transition, innovation, and latent-state sequence contract.',
+    [
+      input('initial_state', 'Initial state', 'parameter'),
+      input('transition', 'Transition function', 'parameter'),
+      input('innovation', 'Innovation scale', 'parameter'),
+      output('state', 'State sequence', 'latent_process'),
+    ],
+    ['transition_family', 'time_axis'],
+  ),
+  block(
+    'hidden_markov',
+    'Hidden Markov model',
+    'Discrete latent-state sequence with initial, transition, and emission contracts.',
+    [
+      input('initial_probs', 'Initial probabilities', 'parameter'),
+      input('transition_matrix', 'Transition matrix', 'parameter'),
+      input('emission', 'Emission distribution', 'parameter'),
+      output('state_sequence', 'State sequence', 'latent_process'),
+    ],
+    ['state_count', 'marginalize_states'],
+  ),
 ]);
 
-function block(typeId: string, label: string, description: string): BlockDefinition {
+function block(
+  typeId: string,
+  label: string,
+  description: string,
+  ports: BlockDefinition['ports'],
+  configKeys: string[],
+): BlockDefinition {
   return {
     typeId,
     version: '1.0.0',
     label,
     description,
-    ports: [
-      { id: 'input', label: 'Input', direction: 'input', required: true, multiplicity: 'many', semanticRole: 'data' },
-      { id: 'output', label: 'Output', direction: 'output', required: true, multiplicity: 'one', semanticRole: 'deterministic_value' },
-    ],
-    configSchema: { type: 'object' },
+    ports,
+    configSchema: {
+      type: 'object',
+      properties: Object.fromEntries(
+        ['expression', 'validationLevel', ...configKeys].map((key) => [key, {}]),
+      ),
+    },
     coverage: {
       config: 'declared',
       symbols: 'boundary_checked',
@@ -64,6 +125,22 @@ function block(typeId: string, label: string, description: string): BlockDefinit
       review: 'native',
     },
   };
+}
+
+function input(
+  id: string,
+  label: string,
+  semanticRole: BlockDefinition['ports'][number]['semanticRole'],
+): BlockDefinition['ports'][number] {
+  return { id, label, direction: 'input', required: true, multiplicity: 'one', semanticRole };
+}
+
+function output(
+  id: string,
+  label: string,
+  semanticRole: BlockDefinition['ports'][number]['semanticRole'],
+): BlockDefinition['ports'][number] {
+  return { id, label, direction: 'output', required: true, multiplicity: 'one', semanticRole };
 }
 
 function key(typeId: string, version: string): string {

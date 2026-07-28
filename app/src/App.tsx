@@ -80,7 +80,13 @@ const NODE_KIND_OPTIONS: BayesNodeData['kind'][] = [
 
 type PaletteItem =
   | { type: 'node'; kind: BayesNodeData['kind']; label: string; note: string }
-  | { type: 'preset'; preset: 'linear_term' | 'group_effect' | 'interaction_term'; label: string; note: string };
+  | {
+    type: 'preset';
+    preset: 'linear_term' | 'group_effect' | 'group_slope' | 'interaction_term' | 'smooth_term' | 'offset_term';
+    label: string;
+    note: string;
+  }
+  | { type: 'block'; blockTypeId: NonNullable<BayesNodeData['blockTypeId']>; label: string; note: string };
 
 type LeftPanelTab = 'add' | 'structure' | 'inspector';
 type WorkStage = 'build' | 'review' | 'handoff';
@@ -119,12 +125,23 @@ const PALETTE_GROUPS: Array<{
     ],
   },
   {
-    title: '構造',
+    title: '予測式',
     items: [
       { type: 'preset', preset: 'linear_term', label: '線形項', note: '予測子へ追加' },
       { type: 'preset', preset: 'group_effect', label: 'グループ効果', note: '階層効果を追加' },
+      { type: 'preset', preset: 'group_slope', label: 'グループ傾き', note: '傾きも階層化' },
       { type: 'preset', preset: 'interaction_term', label: '交互作用', note: '積の項を追加' },
-      { type: 'node', kind: 'model_block', label: 'モデルブロック', note: '詳細をまとめる構造' },
+      { type: 'preset', preset: 'smooth_term', label: '平滑項', note: '非線形な効果' },
+      { type: 'preset', preset: 'offset_term', label: 'オフセット', note: '既知の露出量' },
+    ],
+  },
+  {
+    title: '潜在構造',
+    items: [
+      { type: 'block', blockTypeId: 'gp_regression', label: 'Gaussian process', note: '座標に沿う相関' },
+      { type: 'block', blockTypeId: 'state_space', label: 'State space', note: '連続状態の時間発展' },
+      { type: 'block', blockTypeId: 'hidden_markov', label: 'Hidden Markov', note: '離散状態の遷移' },
+      { type: 'block', blockTypeId: 'mixture', label: 'Mixture', note: '複数の生成成分' },
     ],
   },
   {
@@ -171,6 +188,70 @@ const OBSERVATION_OPTIONS = [
   { value: 'truncated', label: '切断あり' },
   { value: 'rounded', label: '丸められた値' },
 ] as const;
+
+const BLOCK_PRESETS: Record<NonNullable<BayesNodeData['blockTypeId']>, BayesNodeData> = {
+  gp_regression: {
+    kind: 'model_block',
+    name: 'f_gp[i]',
+    shape: ['N'],
+    plate: 'obs',
+    expression: 'f_gp = GP(coordinates; kernel)',
+    blockTypeId: 'gp_regression',
+    blockInputs: { coordinates: 'x[i]', kernel: 'RBF(ell, rho)' },
+    blockOutputPort: 'latent_function',
+    blockConfig: { approximation: 'exact' },
+    validationLevel: 'structured',
+    notes: 'Kernel family and approximation choice remain explicit for implementation.',
+  },
+  gam_smooth: {
+    kind: 'model_block',
+    name: 'f_smooth[i]',
+    shape: ['N'],
+    plate: 'obs',
+    expression: 'f_smooth = basis(x) @ coefficients',
+    blockTypeId: 'gam_smooth',
+    blockInputs: { predictor: 'x[i]', basis: 'B(x) @ beta_smooth' },
+    blockOutputPort: 'smooth_effect',
+    blockConfig: { basis_family: 'spline', basis_count: 10 },
+    validationLevel: 'structured',
+  },
+  mixture: {
+    kind: 'model_block',
+    name: 'mixture_value[i]',
+    shape: ['N'],
+    plate: 'obs',
+    expression: 'mixture_value ~ Mixture(weights, components)',
+    blockTypeId: 'mixture',
+    blockInputs: { weights: 'weights', components: 'components' },
+    blockOutputPort: 'mixture_value',
+    blockConfig: { component_count: 2, marginalize_assignments: true },
+    validationLevel: 'structured',
+  },
+  state_space: {
+    kind: 'model_block',
+    name: 'state[t]',
+    shape: ['T'],
+    plate: 'time',
+    expression: 'state[t] = transition(state[t-1]) + innovation[t]',
+    blockTypeId: 'state_space',
+    blockInputs: { initial_state: 'state[1]', transition: 'transition(state[t-1])', innovation: 'sigma_state' },
+    blockOutputPort: 'state',
+    blockConfig: { transition_family: 'linear_gaussian', time_axis: 'time' },
+    validationLevel: 'structured',
+  },
+  hidden_markov: {
+    kind: 'model_block',
+    name: 'state[t]',
+    shape: ['T'],
+    plate: 'time',
+    expression: 'state[t] ~ Categorical(transition_matrix[state[t-1]])',
+    blockTypeId: 'hidden_markov',
+    blockInputs: { initial_probs: 'initial_probs', transition_matrix: 'transition_matrix', emission: 'emission[state[t]]' },
+    blockOutputPort: 'state_sequence',
+    blockConfig: { state_count: 2, marginalize_states: true },
+    validationLevel: 'structured',
+  },
+};
 
 const EDGE_ROUTE_SPACING = 18;
 const EDGE_ENDPOINT_SPACING = 12;
@@ -1178,15 +1259,7 @@ function createNodeData(kind: BayesNodeData['kind'], count: number): BayesNodeDa
   }
 
   if (kind === 'model_block') {
-    return {
-      kind,
-      name: 'f_gp[i]',
-      shape: ['N'],
-      plate: 'obs',
-      expression: 'GP(time[i]; kernel=RBF, lengthscale=ell, amplitude=rho)',
-      notes: 'Structured block. Keep inputs, outputs, and implementation detail explicit for handoff.',
-      validationLevel: 'structured',
-    };
+    return structuredClone(BLOCK_PRESETS.gp_regression);
   }
 
   if (kind === 'derived_quantity') {
@@ -1301,12 +1374,168 @@ function formatHintsForInput(hints?: ModelHint[]): string {
 function createObservationProcess(kind: string): ObservationProcess | undefined {
   if (!kind) return undefined;
   if (kind === 'exact') return { kind: 'exact' };
-  if (kind === 'missing') return { kind: 'missing', strategy: 'latent_imputation' };
+  if (kind === 'missing') return { kind: 'missing', mechanism: 'unspecified', strategy: 'latent_imputation' };
   if (kind === 'measurement_error') return { kind: 'measurement_error', latentTrueSymbol: 'x_true', errorScaleSymbol: 'sigma_x' };
-  if (kind === 'censored') return { kind: 'censored', direction: 'right', boundSymbol: 'limit' };
+  if (kind === 'censored') return { kind: 'censored', direction: 'right', lower: 'limit' };
   if (kind === 'truncated') return { kind: 'truncated', lower: 'lower', upper: 'upper' };
   if (kind === 'rounded') return { kind: 'rounded', unit: 'unit' };
   return { kind: 'custom', description: kind };
+}
+
+function ObservationProcessEditor({
+  process,
+  onChange,
+}: {
+  process?: ObservationProcess;
+  onChange: (process: ObservationProcess | undefined) => void;
+}) {
+  return (
+    <div className="observation-process-editor">
+      <label>
+        観測の扱い
+        <select
+          value={process?.kind ?? ''}
+          onChange={(event) => onChange(createObservationProcess(event.target.value))}
+        >
+          {OBSERVATION_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {process?.kind === 'missing' ? (
+        <div className="field-grid">
+          <label>
+            欠測機構
+            <select
+              value={process.mechanism}
+              onChange={(event) =>
+                onChange({
+                  ...process,
+                  mechanism: event.target.value as Extract<ObservationProcess, { kind: 'missing' }>['mechanism'],
+                })
+              }
+            >
+              <option value="unspecified">未確定</option>
+              <option value="MCAR">MCAR</option>
+              <option value="MAR">MAR</option>
+              <option value="MNAR">MNAR</option>
+            </select>
+          </label>
+          <label>
+            推論での扱い
+            <select
+              value={process.strategy}
+              onChange={(event) =>
+                onChange({
+                  ...process,
+                  strategy: event.target.value as Extract<ObservationProcess, { kind: 'missing' }>['strategy'],
+                })
+              }
+            >
+              <option value="latent_imputation">潜在値として補完</option>
+              <option value="ignore">対象外にする</option>
+              <option value="note_only">判断を保留</option>
+            </select>
+          </label>
+        </div>
+      ) : null}
+      {process?.kind === 'measurement_error' ? (
+        <div className="field-grid">
+          <label>
+            真値
+            <input
+              value={process.latentTrueSymbol}
+              onChange={(event) => onChange({ ...process, latentTrueSymbol: event.target.value })}
+            />
+          </label>
+          <label>
+            誤差スケール
+            <input
+              value={process.errorScaleSymbol ?? ''}
+              onChange={(event) => onChange({ ...process, errorScaleSymbol: event.target.value || undefined })}
+            />
+          </label>
+        </div>
+      ) : null}
+      {process?.kind === 'censored' ? (
+        <>
+          <label>
+            打ち切り方向
+            <select
+              value={process.direction}
+              onChange={(event) =>
+                onChange({
+                  ...process,
+                  direction: event.target.value as Extract<ObservationProcess, { kind: 'censored' }>['direction'],
+                })
+              }
+            >
+              <option value="left">左（検出下限など）</option>
+              <option value="right">右（追跡終了など）</option>
+              <option value="interval">区間</option>
+            </select>
+          </label>
+          <div className="field-grid">
+            <label>
+              下側境界
+              <input
+                placeholder={process.direction === 'left' ? '通常は空欄' : 'lower'}
+                value={process.lower ?? ''}
+                onChange={(event) => onChange({ ...process, lower: event.target.value || undefined })}
+              />
+            </label>
+            <label>
+              上側境界
+              <input
+                placeholder={process.direction === 'right' ? '通常は空欄' : 'upper'}
+                value={process.upper ?? ''}
+                onChange={(event) => onChange({ ...process, upper: event.target.value || undefined })}
+              />
+            </label>
+          </div>
+        </>
+      ) : null}
+      {process?.kind === 'truncated' ? (
+        <div className="field-grid">
+          <label>
+            選択下限
+            <input
+              value={process.lower ?? ''}
+              onChange={(event) => onChange({ ...process, lower: event.target.value || undefined })}
+            />
+          </label>
+          <label>
+            選択上限
+            <input
+              value={process.upper ?? ''}
+              onChange={(event) => onChange({ ...process, upper: event.target.value || undefined })}
+            />
+          </label>
+        </div>
+      ) : null}
+      {process?.kind === 'rounded' ? (
+        <label>
+          丸め単位
+          <input
+            placeholder="0.1"
+            value={process.unit ?? ''}
+            onChange={(event) => onChange({ ...process, unit: event.target.value || undefined })}
+          />
+        </label>
+      ) : null}
+      {process?.kind === 'custom' ? (
+        <label>
+          観測規則
+          <textarea
+            value={process.description}
+            onChange={(event) => onChange({ ...process, description: event.target.value })}
+          />
+        </label>
+      ) : null}
+    </div>
+  );
 }
 
 
@@ -2024,6 +2253,37 @@ export function App() {
     },
     [edges, nodes, setEdges, setNodes, setUndoState],
   );
+  const showsBlockEditor = selectedData?.kind === 'model_block';
+
+  const addBlockFromPalette = useCallback(
+    (blockTypeId: NonNullable<BayesNodeData['blockTypeId']>) => {
+      const data = structuredClone(BLOCK_PRESETS[blockTypeId]);
+      const id = `${blockTypeId}_${Date.now()}`;
+      const column = (nodes.length % 4) * 210 + 120;
+      const row = Math.floor(nodes.length / 4) * 150 + 80;
+
+      setUndoState({
+        message: `${data.name}を追加しました。`,
+        nodes,
+        edges,
+      });
+      setNodes((currentNodes) => [
+        ...currentNodes.map((node) => ({ ...node, selected: false })),
+        {
+          id,
+          type: 'bayesNode',
+          position: { x: column, y: row },
+          selected: true,
+          data,
+        },
+      ]);
+      setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
+      setSelectedNodeId(id);
+      setSelectedEdgeId(null);
+      setActiveLeftPanel('inspector');
+    },
+    [edges, nodes, setEdges, setNodes, setUndoState],
+  );
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -2210,6 +2470,10 @@ export function App() {
         addNodeFromPalette(item.kind);
         return;
       }
+      if (item.type === 'block') {
+        addBlockFromPalette(item.blockTypeId);
+        return;
+      }
 
       if (item.preset === 'linear_term') {
         applyRegressionTermPreset('beta * x[i]');
@@ -2221,9 +2485,24 @@ export function App() {
         return;
       }
 
-      applyRegressionTermPreset('beta_interaction * x1[i] * x2[i]');
+      if (item.preset === 'group_slope') {
+        applyRegressionTermPreset('beta_group[group_id[i]] * x[i]');
+        return;
+      }
+
+      if (item.preset === 'interaction_term') {
+        applyRegressionTermPreset('beta_interaction * x1[i] * x2[i]');
+        return;
+      }
+
+      if (item.preset === 'smooth_term') {
+        addBlockFromPalette('gam_smooth');
+        return;
+      }
+
+      applyRegressionTermPreset('log(exposure[i])');
     },
-    [addNodeFromPalette, applyRegressionTermPreset],
+    [addBlockFromPalette, addNodeFromPalette, applyRegressionTermPreset],
   );
 
   const restoreUndo = useCallback(() => {
@@ -3141,7 +3420,7 @@ export function App() {
                       {group.items.map((item) => (
                         <button
                           className={`palette-item ${item.type === 'node' ? `palette-${item.kind}` : 'palette-preset'}`}
-                          key={item.type === 'node' ? item.kind : item.preset}
+                          key={item.type === 'node' ? item.kind : item.type === 'block' ? item.blockTypeId : item.preset}
                           onClick={() => applyPaletteItem(item)}
                           type="button"
                         >
@@ -3346,19 +3625,10 @@ export function App() {
                     </label>
                   ) : null}
                   {showsObservationEditor ? (
-                    <label>
-                      観測の扱い
-                      <select
-                        value={selectedData.observationProcess?.kind ?? ''}
-                        onChange={(event) => updateSelectedNodeData({ observationProcess: createObservationProcess(event.target.value) })}
-                      >
-                        {OBSERVATION_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <ObservationProcessEditor
+                      process={selectedData.observationProcess}
+                      onChange={(observationProcess) => updateSelectedNodeData({ observationProcess })}
+                    />
                   ) : null}
                   {showsDistributionEditor ? (
                     <>
@@ -3374,6 +3644,52 @@ export function App() {
                         </div>
                       ) : null}
                     </>
+                  ) : null}
+                  {showsBlockEditor && selectedData ? (
+                    <div className="block-contract-editor">
+                      <label>
+                        構造ブロック
+                        <select
+                          value={selectedData.blockTypeId ?? 'gp_regression'}
+                          onChange={(event) =>
+                            updateSelectedNodeData(
+                              structuredClone(
+                                BLOCK_PRESETS[event.target.value as NonNullable<BayesNodeData['blockTypeId']>],
+                              ),
+                            )
+                          }
+                        >
+                          <option value="gp_regression">Gaussian process</option>
+                          <option value="gam_smooth">GAM smooth</option>
+                          <option value="state_space">State space</option>
+                          <option value="hidden_markov">Hidden Markov</option>
+                          <option value="mixture">Mixture</option>
+                        </select>
+                      </label>
+                      <div className="block-port-list">
+                        {Object.entries(selectedData.blockInputs ?? {}).map(([portId, expression]) => (
+                          <label key={portId}>
+                            {portId}
+                            <input
+                              value={expression}
+                              onChange={(event) =>
+                                updateSelectedNodeData({
+                                  blockInputs: {
+                                    ...(selectedData.blockInputs ?? {}),
+                                    [portId]: event.target.value,
+                                  },
+                                })
+                              }
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      <div className="shape-readout">
+                        <span className="shape-readout-label">出力port</span>
+                        <strong className="shape-readout-formula">{selectedData.blockOutputPort ?? 'output'}</strong>
+                        <span className="shape-readout-plate">契約として保存</span>
+                      </div>
+                    </div>
                   ) : null}
                   {showsExpressionEditor ? (
                     <label>

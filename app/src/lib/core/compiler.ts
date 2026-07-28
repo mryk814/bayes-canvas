@@ -724,6 +724,21 @@ function lintRandomVariable(
     }
   }
 
+  if (
+    entity.distribution.truncation
+    && !entity.distribution.truncation.lower?.source.trim()
+    && !entity.distribution.truncation.upper?.source.trim()
+  ) {
+    output.push(diagnostic({
+      code: 'BC-DIST-005',
+      stage: 'schema',
+      severity: 'error',
+      message: `${definition.label} truncation requires at least one bound.`,
+      path: `${basePath}/distribution/truncation`,
+      blocksHandoff: true,
+    }));
+  }
+
   const declaredDomain = entity.valueType.domain;
   if (declaredDomain && !domainsCompatible(declaredDomain, definition)) {
     output.push(diagnostic({
