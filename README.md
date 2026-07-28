@@ -19,12 +19,23 @@ Canvas, Story, Equations, Structure, and Contract are synchronized projections o
 - Node-based visual model editor
 - Variables, priors, deterministic expressions, likelihoods, and plates
 - Shape/index awareness
-- Multi-view projections for canvas editing, generative story, equations, structure, and handoff contract review
+- Three-stage workflow for building, reviewing, and handing off a model
+- Multi-view projections for canvas editing, generative story, equations, structure, and contract review
 - Model IR export as JSON/YAML
 - AI implementation prompt export
 - Portable package import with validation preview before replacing current work
 - IndexedDB autosave restore prompt for local-first recovery
 - PyMC/NumPyro code generation target later
+
+## Workflow
+
+The header keeps the current task explicit:
+
+1. **組む** — add and edit model elements on the canvas.
+2. **確認** — inspect diagnostics, assumptions, and the compiled outline without losing canvas context.
+3. **渡す** — export the canonical document or prepare an implementation prompt. NumPyro is the default prompt target.
+
+Use **新規・テンプレート** to start from an empty canvas, choose a teaching template, or reopen a saved snapshot. **スナップショット** stores named checkpoints in the browser. Autosave remains separate and is offered as a recovery action after reloading.
 
 ## Prototype stack
 

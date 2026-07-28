@@ -14,9 +14,16 @@ for (const marker of [
   'updateSelectedNodeData',
   '操作検索',
   '変換プロンプト',
+  'モデルの出発点を選ぶ',
+  '空のモデルから始める',
+  'workspace-${workStage}',
+  'undoDeleteSnapshot',
 ]) {
   assert.ok(appSource.includes(marker), `UI smoke marker missing: ${marker}`);
 }
 
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 assert.ok(css.includes(':focus-visible'), 'focus-visible styles must remain reachable');
+assert.ok(css.includes('.workspace-build'), 'build workspace must keep the canvas-first layout');
+assert.ok(css.includes('.work-stage-nav'), 'workflow stage navigation must remain visible');
+assert.match(css, /\.status-stack\s*\{[^}]*position:\s*relative;/su, 'recovery status must not cover the canvas');
