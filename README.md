@@ -46,8 +46,35 @@ Use **新規・テンプレート** to start from an empty canvas, choose a teac
 
 ## Development
 
+### Windows: easiest launch
+
+Double-click [`start-bayes-canvas.cmd`](./start-bayes-canvas.cmd). On the first launch it installs the locked dependencies, starts Bayes Canvas, and opens the browser automatically. Keep the terminal window open while using the app. Press `Ctrl+C` in that window to stop it.
+
+The same launcher is available from PowerShell:
+
+```powershell
+.\start-bayes-canvas.cmd
+```
+
+### Command-line launch
+
+Install dependencies once:
+
+```powershell
+npm.cmd --prefix app ci
+```
+
+Then start the app. The browser opens automatically, normally at `http://127.0.0.1:5173/`:
+
+```powershell
+npm.cmd start
+```
+
+Press `Ctrl+C` to stop it.
+
+For development without automatically opening a browser:
+
 ```bash
-npm install
 npm run dev
 ```
 
