@@ -34,7 +34,7 @@ export function buildCapabilityReport(document: ModelDocument, target: HandoffTa
         support,
         relatedEntityIds: [entity.id],
         note: definition
-          ? 'Block internals are pure data boundaries; implementation must preserve ports and config.'
+          ? `Block internals are pure data boundaries; implementation must preserve ports and config (${formatConfig(entity.config)}).`
           : 'Unknown external block is diagnostic-only and must not be silently lowered into backend code.',
       });
     }
@@ -54,6 +54,24 @@ export function buildCapabilityReport(document: ModelDocument, target: HandoffTa
           note: truncationNoteForTarget(target, entity.distribution.distributionId),
         });
       }
+      if (entity.transform) {
+        items.push({
+          feature: `${entity.transform.kind} transform`,
+          support: transformSupportForTarget(target, entity.transform.jacobianOwner),
+          relatedEntityIds: [entity.id],
+          note: `Jacobian owner: ${entity.transform.jacobianOwner}. Forward and inverse expressions remain explicit in the contract.`,
+        });
+      }
+      if (entity.observationProcess?.kind === 'missing' && entity.observationProcess.mechanism === 'MNAR') {
+        items.push({
+          feature: 'MNAR selection model',
+          support: target === 'review' ? 'native' : target === 'generic' ? 'unknown' : 'approximate',
+          relatedEntityIds: [entity.id],
+          note: entity.observationProcess.selectionModel
+            ? `Selection equation: ${entity.observationProcess.selectionModel.source}. Imputation strategy is reported separately.`
+            : 'A selection equation is required before backend handoff.',
+        });
+      }
     }
     if (entity.kind === 'random_variable' && entity.distribution.distributionId === 'wishart') {
       items.push({
@@ -66,6 +84,21 @@ export function buildCapabilityReport(document: ModelDocument, target: HandoffTa
   }
 
   return items;
+}
+
+function formatConfig(config: Record<string, unknown>): string {
+  return Object.entries(config)
+    .map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : String(value)}`)
+    .join(', ');
+}
+
+function transformSupportForTarget(
+  target: HandoffTarget,
+  jacobianOwner: 'backend' | 'model' | 'not_required',
+): BackendCapabilityItem['support'] {
+  if (target === 'review') return 'native';
+  if (target === 'generic') return 'unknown';
+  return jacobianOwner === 'backend' ? 'native' : 'lowered';
 }
 
 function truncationSupportForTarget(

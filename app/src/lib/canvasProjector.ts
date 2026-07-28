@@ -883,6 +883,14 @@ function entityToNodeData(entity: ModelEntity): BayesNodeData {
         : undefined,
     },
     observationProcess: fromCoreObservationProcess(entity.observationProcess),
+    transform: entity.transform
+      ? {
+        kind: entity.transform.kind,
+        forward: entity.transform.forward?.source,
+        inverse: entity.transform.inverse?.source,
+        jacobianOwner: entity.transform.jacobianOwner,
+      }
+      : undefined,
   };
 }
 
@@ -898,6 +906,7 @@ function fromCoreObservationProcess(
       kind: 'missing',
       mechanism: process.mechanism ?? 'unspecified',
       strategy,
+      ...(process.selectionModel ? { selectionModelSymbol: process.selectionModel.source } : {}),
     };
   }
   if (process.kind === 'measurement_error') {
@@ -928,7 +937,18 @@ function fromCoreObservationProcess(
 }
 
 function isKnownBlockTypeId(value: string): value is NonNullable<BayesNodeData['blockTypeId']> {
-  return ['gp_regression', 'gam_smooth', 'mixture', 'state_space', 'hidden_markov'].includes(value);
+  return [
+    'gp_regression',
+    'gam_smooth',
+    'mixture',
+    'state_space',
+    'hidden_markov',
+    'survival',
+    'competing_risks',
+    'spatial_gmrf',
+    'differential_process',
+    'copula',
+  ].includes(value);
 }
 
 function inferLikelihoodFromLogDensity(logDensity: string): { distribution: DistributionSpec; observedSymbol: string } | undefined {

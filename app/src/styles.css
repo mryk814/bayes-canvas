@@ -1921,7 +1921,9 @@ pre {
 }
 
 .block-contract-editor,
-.block-port-list {
+.block-port-list,
+.block-config-list,
+.variable-transform-editor {
   display: grid;
   gap: var(--space-2);
   min-width: 0;
@@ -1934,13 +1936,15 @@ pre {
   border-radius: var(--radius-md);
 }
 
-.block-port-list input {
+.block-port-list input,
+.block-config-list input {
   width: 100%;
   min-width: 0;
   font-family: var(--font-mono);
 }
 
 .block-port-list label,
+.block-config-list label,
 .block-contract-editor label {
   min-width: 0;
 }
