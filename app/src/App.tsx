@@ -1610,7 +1610,20 @@ export function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
   const [importError, setImportError] = useState<ImportErrorState | null>(null);
-  const [undoState, setUndoState] = useState<UndoState | null>(null);
+  const [undoState, setUndoSnapshot] = useState<UndoState | null>(null);
+  const [redoState, setRedoState] = useState<UndoState | null>(null);
+  const preserveRedoOnRestoreRef = useRef(false);
+  const setUndoState = useCallback((snapshot: UndoState | null) => {
+    setUndoSnapshot(snapshot);
+    if (snapshot) setRedoState(null);
+  }, []);
+  useEffect(() => {
+    if (preserveRedoOnRestoreRef.current) {
+      preserveRedoOnRestoreRef.current = false;
+      return;
+    }
+    if (redoState) setRedoState(null);
+  }, [edges, nodes, redoState]);
   const {
     patchInput,
     setPatchInput,
@@ -1990,6 +2003,11 @@ export function App() {
       const column = (nodes.length % 4) * 210 + 120;
       const row = Math.floor(nodes.length / 4) * 150 + 80;
 
+      setUndoState({
+        message: `${NODE_KIND_LABELS[kind]}を追加しました。`,
+        nodes,
+        edges,
+      });
       setNodes((currentNodes) => [
         ...currentNodes.map((node) => ({ ...node, selected: false })),
         {
@@ -2005,7 +2023,7 @@ export function App() {
       setSelectedEdgeId(null);
       setActiveLeftPanel('inspector');
     },
-    [nodes, setEdges, setNodes],
+    [edges, nodes, setEdges, setNodes, setUndoState],
   );
 
   const onConnect = useCallback(
@@ -2257,12 +2275,32 @@ export function App() {
 
   const restoreUndo = useCallback(() => {
     if (!undoState) return;
+    preserveRedoOnRestoreRef.current = true;
+    setRedoState({
+      message: undoState.message,
+      nodes,
+      edges,
+    });
     setNodes(undoState.nodes);
     setEdges(undoState.edges);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
-    setUndoState(null);
-  }, [setEdges, setNodes, undoState]);
+    setUndoSnapshot(null);
+  }, [edges, nodes, setEdges, setNodes, undoState]);
+
+  const restoreRedo = useCallback(() => {
+    if (!redoState) return;
+    setUndoSnapshot({
+      message: redoState.message,
+      nodes,
+      edges,
+    });
+    setNodes(redoState.nodes);
+    setEdges(redoState.edges);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setRedoState(null);
+  }, [edges, nodes, redoState, setEdges, setNodes]);
 
   const cleanupAutosaveRecovery = useCallback(() => {
     void cleanupAutosaveRecords()
@@ -2822,6 +2860,19 @@ export function App() {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTyping = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT' || target?.isContentEditable;
+      const usesCommandModifier = event.ctrlKey || event.metaKey;
+      if (usesCommandModifier && event.key.toLowerCase() === 'z' && !isTyping) {
+        if (event.shiftKey) {
+          if (!redoState) return;
+          event.preventDefault();
+          restoreRedo();
+          return;
+        }
+        if (!undoState) return;
+        event.preventDefault();
+        restoreUndo();
+        return;
+      }
       if (event.key === '/' && !isTyping) {
         event.preventDefault();
         setCommandPaletteOpen(true);
@@ -2833,7 +2884,7 @@ export function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [redoState, restoreRedo, restoreUndo, undoState]);
 
   return (
     <main className="app-shell">
@@ -2884,8 +2935,14 @@ export function App() {
             <button type="button" onClick={copyExternalImportPrompt}>
               変換プロンプト
             </button>
-            <button type="button" onClick={() => setCommandPaletteOpen(true)}>
-              操作検索
+            <button
+              aria-keyshortcuts="/"
+              className="shortcut-button"
+              type="button"
+              onClick={() => setCommandPaletteOpen(true)}
+            >
+              <span>操作検索</span>
+              <kbd>/</kbd>
             </button>
           </div>
         </div>
@@ -2917,10 +2974,26 @@ export function App() {
         {undoState ? (
           <div className="status-banner status-undo" role="status">
             <span>{undoState.message}</span>
-            <button type="button" onClick={restoreUndo}>
-              元に戻す
+            <button aria-keyshortcuts="Control+Z Meta+Z" type="button" onClick={restoreUndo}>
+              元に戻す <kbd>Ctrl Z</kbd>
             </button>
             <button type="button" onClick={() => setUndoState(null)}>
+              確定
+            </button>
+          </div>
+        ) : null}
+
+        {redoState ? (
+          <div className="status-banner status-undo" role="status">
+            <span>操作を元に戻しました。</span>
+            <button
+              aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z"
+              type="button"
+              onClick={restoreRedo}
+            >
+              やり直す <kbd>Ctrl Shift Z</kbd>
+            </button>
+            <button type="button" onClick={() => setRedoState(null)}>
               確定
             </button>
           </div>
@@ -2987,6 +3060,11 @@ export function App() {
               value={commandQuery}
               onChange={(event) => setCommandQuery(event.target.value)}
             />
+            <div className="command-shortcuts" aria-label="キーボードショートカット">
+              <span>元に戻す <kbd>Ctrl Z</kbd></span>
+              <span>やり直す <kbd>Ctrl Shift Z</kbd></span>
+              <span>閉じる <kbd>Esc</kbd></span>
+            </div>
             <div className="command-list">
               {filteredCommands.length ? filteredCommands.map((command) => (
                 <button key={command.id} type="button" onClick={() => runCommand(command)}>
