@@ -34,4 +34,4 @@ assert.ok(css.includes(':focus-visible'), 'focus-visible styles must remain reac
 assert.ok(css.includes('.workspace-build'), 'build workspace must keep the canvas-first layout');
 assert.ok(css.includes('.work-stage-nav'), 'workflow stage navigation must remain visible');
 assert.ok(css.includes('.command-shortcuts'), 'command palette must expose shortcut guidance');
-assert.match(css, /\.status-stack\s*\{[^}]*position:\s*relative;/su, 'recovery status must not cover the canvas');
+assert.match(css, /\.status-stack\s*\{[^}]*position:\s*fixed;/su, 'status feedback must not shift the canvas');
