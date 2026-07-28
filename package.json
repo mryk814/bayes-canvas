@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "npm --prefix app run dev -- --host 127.0.0.1 --open",
     "dev": "npm --prefix app run dev --",
     "lint": "npm --prefix app run lint --",
     "format:check": "npm --prefix app run format:check --",
