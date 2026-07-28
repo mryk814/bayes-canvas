@@ -25,7 +25,12 @@ The current semantic coverage and the distinction between distributions, observa
 - Multi-view projections for canvas editing, generative story, equations, structure, and contract review
 - Model IR export as JSON/YAML
 - AI implementation prompt export
-- Portable package import with validation preview before replacing current work
+- AIの返答をそのまま貼り付けられるportable package / raw ModelDocument import
+- role・shape・欠測を含むデータ契約からのDataノード生成
+- 名前付きモデル案の保存とsemantic diff比較
+- 診断からの差分確認付きquick fixとUndo
+- prior predictive設計チェックと外部AI向け検証prompt
+- 実装receiptのfingerprint照合
 - IndexedDB autosave restore prompt for local-first recovery
 - PyMC/NumPyro code generation target later
 
@@ -38,6 +43,9 @@ The header keeps the current task explicit:
 3. **渡す** — export the canonical document or prepare an implementation prompt. NumPyro is the default prompt target.
 
 Use **新規・テンプレート** to start from an empty canvas, choose a teaching template, or reopen a saved snapshot. **スナップショット** stores named checkpoints in the browser. Autosave remains separate and is offered as a recovery action after reloading.
+
+外部AIとの往復、モデル案比較、診断修正、prior predictive、実装receiptは
+[`docs/model-workbench.md`](./docs/model-workbench.md) にまとめています。
 
 ## Prototype stack
 

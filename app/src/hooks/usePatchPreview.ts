@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { previewCanvasPatch as previewCanvasPatchProposal } from '../lib/canvasProjector';
-import type { PatchPreview } from '../lib/core/patch-proposal';
+import type { AiPatchProposal, PatchPreview } from '../lib/core/patch-proposal';
 import type { BayesNodeData } from '../lib/modelIr';
 
 export interface PendingPatchState {
@@ -16,9 +16,9 @@ export function usePatchPreview(nodes: Node<BayesNodeData>[], edges: Edge[]) {
   const [pendingPatch, setPendingPatch] = useState<PendingPatchState | null>(null);
   const [patchInbox, setPatchInbox] = useState<Array<{ id: string; label: string; value: string }>>([]);
 
-  const previewPatchInput = useCallback(() => {
-    const preview = previewCanvasPatchProposal(nodes, edges, JSON.parse(patchInput));
-    return {
+  const previewProposal = useCallback((proposal: AiPatchProposal) => {
+    const preview = previewCanvasPatchProposal(nodes, edges, proposal);
+    const pending = {
       preview,
       nodes: preview.projected.nodes,
       edges: preview.projected.edges,
@@ -28,7 +28,18 @@ export function usePatchPreview(nodes: Node<BayesNodeData>[], edges: Edge[]) {
         `${preview.after.diagnostics.length} diagnostics after`,
       ].join(' / '),
     };
-  }, [edges, nodes, patchInput]);
+    setPendingPatch(pending);
+    return pending;
+  }, [edges, nodes]);
+
+  const previewPatchInput = useCallback(() => {
+    return previewProposal(JSON.parse(patchInput));
+  }, [patchInput, previewProposal]);
+
+  const previewExternalProposal = useCallback((proposal: AiPatchProposal) => {
+    setPatchInput(JSON.stringify(proposal, null, 2));
+    return previewProposal(proposal);
+  }, [previewProposal]);
 
   return {
     patchInput,
@@ -38,5 +49,6 @@ export function usePatchPreview(nodes: Node<BayesNodeData>[], edges: Edge[]) {
     patchInbox,
     setPatchInbox,
     previewPatchInput,
+    previewProposal: previewExternalProposal,
   };
 }
