@@ -14,6 +14,8 @@ Visual graph → ModelDocument + LayoutDocument → View projections → Review 
 
 Canvas, Story, Equations, Structure, and Contract are synchronized projections of the same canonical document. They do not store independent semantic state.
 
+The current semantic coverage and the distinction between distributions, observation processes, structural blocks, and constraints are documented in [`docs/model-coverage.md`](./docs/model-coverage.md).
+
 ## MVP scope
 
 - Node-based visual model editor

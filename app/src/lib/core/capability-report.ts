@@ -46,6 +46,14 @@ export function buildCapabilityReport(document: ModelDocument, target: HandoffTa
         relatedEntityIds: [entity.id],
         note: backendName ? `Backend name: ${backendName}` : 'No backend-specific distribution name is registered.',
       });
+      if (entity.distribution.truncation) {
+        items.push({
+          feature: `${entity.distribution.distributionId} truncation`,
+          support: truncationSupportForTarget(target, entity.distribution.distributionId),
+          relatedEntityIds: [entity.id],
+          note: truncationNoteForTarget(target, entity.distribution.distributionId),
+        });
+      }
     }
     if (entity.kind === 'random_variable' && entity.distribution.distributionId === 'wishart') {
       items.push({
@@ -58,6 +66,25 @@ export function buildCapabilityReport(document: ModelDocument, target: HandoffTa
   }
 
   return items;
+}
+
+function truncationSupportForTarget(
+  target: HandoffTarget,
+  distributionId: string,
+): BackendCapabilityItem['support'] {
+  if (target === 'review') return 'native';
+  if (target === 'generic') return 'unknown';
+  if (target === 'stan') return 'native';
+  if (target === 'pymc' && distributionId === 'normal') return 'native';
+  return 'lowered';
+}
+
+function truncationNoteForTarget(target: HandoffTarget, distributionId: string): string {
+  if (target === 'stan') return 'Use Stan truncation syntax T[lower, upper].';
+  if (target === 'pymc' && distributionId === 'normal') return 'Use pm.TruncatedNormal with explicit bounds.';
+  if (target === 'pymc') return 'Lower to pm.Truncated around the declared base distribution.';
+  if (target === 'numpyro') return 'Lower to the matching one- or two-sided truncated distribution wrapper.';
+  return 'Preserve the base distribution and normalization bounds as distinct semantics.';
 }
 
 function distributionSupportForTarget(target: HandoffTarget): BackendCapabilityItem['support'] {

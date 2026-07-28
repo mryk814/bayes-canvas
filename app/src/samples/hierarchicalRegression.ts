@@ -121,7 +121,7 @@ export const initialNodes: Node<BayesNodeData>[] = [
       plate: 'obs',
       distribution: { id: 'normal', name: 'Normal', args: { mu: 'mu[i]', sigma: 'sigma' } },
       observed: true,
-      observationProcess: { kind: 'censored', direction: 'right', boundSymbol: 'y_limit' },
+      observationProcess: { kind: 'censored', direction: 'right', lower: 'y_limit' },
     },
   },
 ];

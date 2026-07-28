@@ -165,19 +165,22 @@ function nodeToEntity(node: Node<BayesNodeData>): ModelEntity {
   }
 
   if (data.kind === 'model_block') {
+    const blockTypeId = data.blockTypeId ?? 'gp_regression';
+    const blockInputs = data.blockInputs ?? { coordinates: data.expression ?? 'x' };
     return {
       ...common,
       kind: 'block_instance',
-      blockTypeId: symbol,
+      blockTypeId,
       blockVersion: '1.0.0',
-      inputs: Object.fromEntries(findLooseSymbols(data.expression ?? '').map((input) => [
-        input,
-        { portId: input, expression: source(input) },
+      inputs: Object.fromEntries(Object.entries(blockInputs).map(([portId, expression]) => [
+        portId,
+        { portId, expression: source(expression) },
       ])),
-      outputs: { value: node.id },
+      outputs: { [data.blockOutputPort ?? 'output']: node.id },
       config: {
         expression: data.expression ?? '',
         validationLevel: data.validationLevel ?? 'structured',
+        ...(data.blockConfig ?? {}),
       },
     };
   }
@@ -299,6 +302,12 @@ function toValueType(data: BayesNodeData): ValueType {
 }
 
 function distributionToDomain(distribution?: DistributionSpec): Domain | undefined {
+  if (distribution?.truncation?.lower || distribution?.truncation?.upper) {
+    return {
+      kind: 'custom',
+      description: `truncated interval [${distribution.truncation.lower ?? '-inf'}, ${distribution.truncation.upper ?? '+inf'}]`,
+    };
+  }
   const definition = findDistribution(distribution?.id ?? distribution?.name);
   return definition ? supportToDomain(definition.support) : undefined;
 }
@@ -315,6 +324,12 @@ function toDistributionCall(distribution?: DistributionSpec) {
     args: Object.fromEntries(
       Object.entries(distribution?.args ?? { mu: '0', sigma: '1' }).map(([key, value]) => [key, source(value)]),
     ),
+    truncation: distribution?.truncation
+      ? {
+        lower: distribution.truncation.lower ? source(distribution.truncation.lower) : undefined,
+        upper: distribution.truncation.upper ? source(distribution.truncation.upper) : undefined,
+      }
+      : undefined,
   };
 }
 
@@ -352,10 +367,19 @@ function toCoreObservationProcess(process?: ObservationProcess): CoreObservation
       errorScale: process.errorScaleSymbol ? source(process.errorScaleSymbol) : undefined,
     };
   }
-  if (process.kind === 'censored') return { kind: 'censored', direction: process.direction, upper: process.boundSymbol ? source(process.boundSymbol) : undefined };
+  if (process.kind === 'censored') {
+    return {
+      kind: 'censored',
+      direction: process.direction,
+      lower: process.lower ? source(process.lower) : undefined,
+      upper: process.upper ? source(process.upper) : undefined,
+    };
+  }
   if (process.kind === 'truncated') return { kind: 'truncated', lower: process.lower ? source(process.lower) : undefined, upper: process.upper ? source(process.upper) : undefined };
   if (process.kind === 'rounded') return { kind: 'rounded', unit: source(process.unit ?? 'unit') };
-  if (process.kind === 'missing') return { kind: 'missing', strategy: process.strategy };
+  if (process.kind === 'missing') {
+    return { kind: 'missing', mechanism: process.mechanism, strategy: process.strategy };
+  }
   if (process.kind === 'custom') return { kind: 'custom', description: process.description };
   return { kind: 'exact' };
 }

@@ -38,8 +38,16 @@ const FAMILY_LABELS: Record<string, string> = {
   categorical: 'カテゴリ',
 };
 
-function mergeDistributionSelection(id: string, currentArgs?: Record<string, string>): DistributionSpec {
-  const next = createDefaultDistribution(id);
+const TRUNCATED_NORMAL_PRESET = 'normal__truncated';
+
+function mergeDistributionSelection(
+  id: string,
+  currentArgs?: Record<string, string>,
+  currentTruncation?: DistributionSpec['truncation'],
+): DistributionSpec {
+  const isTruncatedNormal = id === TRUNCATED_NORMAL_PRESET;
+  const canonicalId = isTruncatedNormal ? 'normal' : id;
+  const next = createDefaultDistribution(canonicalId);
 
   return {
     ...next,
@@ -47,10 +55,13 @@ function mergeDistributionSelection(id: string, currentArgs?: Record<string, str
       ...next.args,
       ...Object.fromEntries(
         Object.entries(currentArgs ?? {}).filter(([key]) =>
-          Boolean(findDistribution(id)?.params.some((param) => param.name === key)),
+          Boolean(findDistribution(canonicalId)?.params.some((param) => param.name === key)),
         ),
       ),
     },
+    truncation: isTruncatedNormal
+      ? currentTruncation ?? { lower: 'lower', upper: 'upper' }
+      : undefined,
   };
 }
 
@@ -64,11 +75,19 @@ export function DistributionEditor({ distribution, onChange }: DistributionEdito
       <label>
         Distribution
         <select
-          value={normalized?.id ?? ''}
+          value={
+            normalized?.id === 'normal' && (normalized.truncation?.lower || normalized.truncation?.upper)
+              ? TRUNCATED_NORMAL_PRESET
+              : normalized?.id ?? ''
+          }
           onChange={(event) =>
             onChange(
               event.target.value
-                ? mergeDistributionSelection(event.target.value, distribution?.args)
+                ? mergeDistributionSelection(
+                  event.target.value,
+                  distribution?.args,
+                  distribution?.truncation,
+                )
                 : undefined,
             )
           }
@@ -79,6 +98,7 @@ export function DistributionEditor({ distribution, onChange }: DistributionEdito
               {dist.name}
             </option>
           ))}
+          <option value={TRUNCATED_NORMAL_PRESET}>TruncatedNormal</option>
         </select>
       </label>
 
@@ -117,6 +137,62 @@ export function DistributionEditor({ distribution, onChange }: DistributionEdito
               </label>
             ))}
           </fieldset>
+
+          {definition.family === 'continuous' ? (
+            <fieldset className="dist-params">
+              <legend>Truncation</legend>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={Boolean(normalized!.truncation)}
+                  onChange={(event) =>
+                    onChange({
+                      ...normalized!,
+                      truncation: event.target.checked ? { lower: 'lower', upper: 'upper' } : undefined,
+                    })
+                  }
+                />
+                分布自体を範囲内へ正規化
+              </label>
+              {normalized!.truncation ? (
+                <div className="field-grid">
+                  <label>
+                    下限
+                    <input
+                      placeholder="-inf（空欄）"
+                      value={normalized!.truncation!.lower ?? ''}
+                      onChange={(event) =>
+                        onChange({
+                          ...normalized!,
+                          truncation: {
+                            ...normalized!.truncation,
+                            lower: event.target.value || undefined,
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    上限
+                    <input
+                      placeholder="+inf（空欄）"
+                      value={normalized!.truncation!.upper ?? ''}
+                      onChange={(event) =>
+                        onChange({
+                          ...normalized!,
+                          truncation: {
+                            ...normalized!.truncation,
+                            upper: event.target.value || undefined,
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              ) : null}
+              <small className="dist-preview-note">打ち切り観測とは別です。少なくとも片方の境界を指定します。</small>
+            </fieldset>
+          ) : null}
 
           <div className="dist-preview">
             <div className="dist-preview-text">{formatDistributionText(normalized!)}</div>

@@ -824,7 +824,27 @@ function entityToNodeData(entity: ModelEntity): BayesNodeData {
   };
   if (entity.kind === 'data') return { ...base, kind: 'data', observed: entity.dataRole === 'observed_value' };
   if (entity.kind === 'deterministic') return { ...base, kind: 'deterministic', expression: entity.expression.source };
-  if (entity.kind === 'block_instance') return { ...base, kind: 'model_block', expression: String(entity.config.expression ?? ''), validationLevel: 'structured' };
+  if (entity.kind === 'block_instance') {
+    return {
+      ...base,
+      kind: 'model_block',
+      expression: String(entity.config.expression ?? ''),
+      blockTypeId: isKnownBlockTypeId(entity.blockTypeId) ? entity.blockTypeId : 'gp_regression',
+      blockInputs: Object.fromEntries(
+        Object.entries(entity.inputs)
+          .filter(([, binding]) => binding.expression)
+          .map(([portId, binding]) => [portId, binding.expression!.source]),
+      ),
+      blockOutputPort: Object.keys(entity.outputs)[0] ?? 'output',
+      blockConfig: Object.fromEntries(
+        Object.entries(entity.config)
+          .filter(([key, value]) => key !== 'expression' && key !== 'validationLevel' && (
+            typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+          )),
+      ) as Record<string, string | number | boolean>,
+      validationLevel: 'structured',
+    };
+  }
   if (entity.kind === 'query') return { ...base, kind: 'derived_quantity', expression: entity.expression.source };
   if (entity.kind === 'factor') {
     const likelihood = inferLikelihoodFromLogDensity(entity.logDensity.source);
@@ -855,8 +875,60 @@ function entityToNodeData(entity: ModelEntity): BayesNodeData {
       id: entity.distribution.distributionId,
       name: entity.distribution.distributionId,
       args: Object.fromEntries(Object.entries(entity.distribution.args).map(([key, value]) => [key, value.source])),
+      truncation: entity.distribution.truncation
+        ? {
+          lower: entity.distribution.truncation.lower?.source,
+          upper: entity.distribution.truncation.upper?.source,
+        }
+        : undefined,
     },
+    observationProcess: fromCoreObservationProcess(entity.observationProcess),
   };
+}
+
+function fromCoreObservationProcess(
+  process: RandomVariableEntity['observationProcess'],
+): BayesNodeData['observationProcess'] {
+  if (!process) return undefined;
+  if (process.kind === 'missing') {
+    const strategy = process.strategy === 'ignore' || process.strategy === 'note_only'
+      ? process.strategy
+      : 'latent_imputation';
+    return {
+      kind: 'missing',
+      mechanism: process.mechanism ?? 'unspecified',
+      strategy,
+    };
+  }
+  if (process.kind === 'measurement_error') {
+    return {
+      kind: 'measurement_error',
+      latentTrueSymbol: process.latentTrueEntityId,
+      errorScaleSymbol: process.errorScale?.source,
+    };
+  }
+  if (process.kind === 'censored') {
+    return {
+      kind: 'censored',
+      direction: process.direction,
+      lower: process.lower?.source,
+      upper: process.upper?.source,
+    };
+  }
+  if (process.kind === 'truncated') {
+    return {
+      kind: 'truncated',
+      lower: process.lower?.source,
+      upper: process.upper?.source,
+    };
+  }
+  if (process.kind === 'rounded') return { kind: 'rounded', unit: process.unit.source };
+  if (process.kind === 'custom') return { kind: 'custom', description: process.description };
+  return { kind: 'exact' };
+}
+
+function isKnownBlockTypeId(value: string): value is NonNullable<BayesNodeData['blockTypeId']> {
+  return ['gp_regression', 'gam_smooth', 'mixture', 'state_space', 'hidden_markov'].includes(value);
 }
 
 function inferLikelihoodFromLogDensity(logDensity: string): { distribution: DistributionSpec; observedSymbol: string } | undefined {

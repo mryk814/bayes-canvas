@@ -25,7 +25,13 @@ import { loadModelDocumentContract } from '../dist-test/lib/core/import-contract
 import { validateExternalDataContract } from '../dist-test/lib/core/security.js';
 import { TARGET_PROFILES } from '../dist-test/lib/core/target-profiles.js';
 import { createStableFingerprint, sha256Hex } from '../dist-test/lib/core/fingerprint.js';
-import { normalizeDistributionId, toCompilerDistributionDefinition } from '../dist-test/lib/distributionRegistry.js';
+import {
+  DISTRIBUTIONS,
+  formatDistributionTex,
+  formatDistributionText,
+  normalizeDistributionId,
+  toCompilerDistributionDefinition,
+} from '../dist-test/lib/distributionRegistry.js';
 import {
   validateImplementationReceiptEnvelope,
   validateAiPatchProposalEnvelope,
@@ -788,6 +794,135 @@ test('uses canonical distribution ids across registry and target profiles', () =
     && item.support === 'unsupported'
     && item.note === 'No backend-specific distribution name is registered.'
   )));
+});
+
+test('covers common continuous families and preserves canonical truncation', () => {
+  for (const distributionId of ['uniform', 'gamma', 'inverse_gamma', 'weibull', 'logistic']) {
+    assert.ok(DISTRIBUTIONS.some((distribution) => distribution.id === distributionId), distributionId);
+    assert.ok(TARGET_PROFILES.pymc.distributionNames[distributionId], `pymc:${distributionId}`);
+    assert.ok(TARGET_PROFILES.numpyro.distributionNames[distributionId], `numpyro:${distributionId}`);
+    assert.ok(TARGET_PROFILES.stan.distributionNames[distributionId], `stan:${distributionId}`);
+  }
+
+  const nodes = [{
+    id: 'bounded_theta',
+    type: 'bayesNode',
+    position: { x: 10, y: 20 },
+    data: {
+      kind: 'parameter',
+      name: 'theta',
+      distribution: {
+        id: 'normal',
+        name: 'Normal',
+        args: { mu: '0', sigma: '1' },
+        truncation: { lower: '0', upper: 'upper_bound' },
+      },
+    },
+  }];
+  const compiled = compileCanvas(nodes, []);
+  const entity = compiled.document.entities.bounded_theta;
+  assert.equal(entity.kind, 'random_variable');
+  assert.equal(entity.distribution.distributionId, 'normal');
+  assert.equal(entity.distribution.truncation.lower.source, '0');
+  assert.equal(entity.distribution.truncation.upper.source, 'upper_bound');
+  assert.equal(entity.valueType.domain.kind, 'custom');
+
+  const projected = projectToReactFlow({ document: compiled.document, layout: compiled.layout });
+  assert.deepEqual(projected.nodes[0].data.distribution.truncation, { lower: '0', upper: 'upper_bound' });
+  assert.equal(
+    formatDistributionText(projected.nodes[0].data.distribution),
+    'Normal(0, 1) T[0, upper_bound]',
+  );
+  assert.match(formatDistributionTex(projected.nodes[0].data.distribution), /\\mathcal\{T\}/u);
+
+  const pymcReport = buildCapabilityReport(compiled.document, 'pymc');
+  const stanReport = buildCapabilityReport(compiled.document, 'stan');
+  assert.ok(pymcReport.some((item) => item.feature === 'normal truncation' && item.support === 'native'));
+  assert.ok(stanReport.some((item) => item.feature === 'normal truncation' && item.support === 'native'));
+});
+
+test('round-trips detailed observation processes through the authoring contract', () => {
+  const nodes = [{
+    id: 'observed_y',
+    type: 'bayesNode',
+    position: { x: 10, y: 20 },
+    data: {
+      kind: 'likelihood',
+      name: 'y[i]',
+      shape: ['N'],
+      plate: 'obs',
+      observed: true,
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
+      observationProcess: {
+        kind: 'missing',
+        mechanism: 'MAR',
+        strategy: 'latent_imputation',
+      },
+    },
+  }];
+  const compiled = compileCanvas(nodes, []);
+  const entity = compiled.document.entities.observed_y;
+  assert.deepEqual(entity.observationProcess, {
+    kind: 'missing',
+    mechanism: 'MAR',
+    strategy: 'latent_imputation',
+  });
+
+  const projected = projectToReactFlow({ document: compiled.document, layout: compiled.layout });
+  assert.deepEqual(projected.nodes[0].data.observationProcess, {
+    kind: 'missing',
+    mechanism: 'MAR',
+    strategy: 'latent_imputation',
+  });
+});
+
+test('keeps structured block ports distinct and rejects empty truncation bounds', () => {
+  const nodes = [{
+    id: 'hmm',
+    type: 'bayesNode',
+    position: { x: 10, y: 20 },
+    data: {
+      kind: 'model_block',
+      name: 'state[t]',
+      shape: ['T'],
+      plate: 'time',
+      expression: 'state[t] ~ Categorical(transition_matrix[state[t-1]])',
+      blockTypeId: 'hidden_markov',
+      blockInputs: {
+        initial_probs: 'initial_probs',
+        transition_matrix: 'transition_matrix',
+        emission: 'emission[state[t]]',
+      },
+      blockOutputPort: 'state_sequence',
+      blockConfig: { state_count: 3, marginalize_states: true },
+      validationLevel: 'structured',
+    },
+  }];
+  const compiledBlock = compileCanvas(nodes, [], 'review');
+  const block = compiledBlock.document.entities.hmm;
+  assert.equal(block.blockTypeId, 'hidden_markov');
+  assert.deepEqual(Object.keys(block.inputs), ['initial_probs', 'transition_matrix', 'emission']);
+  assert.deepEqual(block.outputs, { state_sequence: 'hmm' });
+  assert.equal(
+    compiledBlock.semantic.diagnostics.some((item) => item.code === 'BC-BLOCK-MISSING-PORT'),
+    false,
+  );
+
+  const invalid = {
+    ...hierarchicalRegression,
+    entities: {
+      ...hierarchicalRegression.entities,
+      rv_alpha: {
+        ...hierarchicalRegression.entities.rv_alpha,
+        distribution: {
+          ...hierarchicalRegression.entities.rv_alpha.distribution,
+          truncation: {},
+        },
+      },
+    },
+  };
+  const compiledInvalid = compileModel(invalid, minimalDistributionRegistry);
+  assert.ok(compiledInvalid.diagnostics.some((item) => item.code === 'BC-DIST-005' && item.blocksHandoff));
 });
 
 test('validates block instances through compiler diagnostics', () => {

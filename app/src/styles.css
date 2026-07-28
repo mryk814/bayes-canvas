@@ -617,17 +617,22 @@ button.projection-row:active,
 
 .editor-panel {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
+  min-width: 0;
 }
 
 .node-editor {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
+  min-width: 0;
 }
 
 .inspector-section {
   display: grid;
   gap: var(--space-2);
+  min-width: 0;
   padding: var(--space-3);
   background: var(--color-surface-subtle);
   border: 1px solid var(--color-border-subtle);
@@ -1896,6 +1901,50 @@ pre {
   gap: var(--space-3);
 }
 
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.field-grid > * {
+  min-width: 0;
+}
+
+.observation-process-editor {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.observation-process-editor .field-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.block-contract-editor,
+.block-port-list {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.block-contract-editor {
+  padding: var(--space-3);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.block-port-list input {
+  width: 100%;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.block-port-list label,
+.block-contract-editor label {
+  min-width: 0;
+}
+
 .distribution-editor label {
   display: grid;
   gap: var(--space-1);
@@ -2028,11 +2077,13 @@ pre {
 .diagnostic-list {
   display: grid;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .diagnostic-item {
   display: grid;
   gap: 2px;
+  min-width: 0;
   padding: var(--space-2);
   background: var(--color-surface-subtle);
   border: 1px solid var(--color-border-subtle);
@@ -2040,6 +2091,12 @@ pre {
   color: var(--color-text-secondary);
   font-size: var(--text-xs);
   line-height: 1.35;
+}
+
+.diagnostic-item span,
+.diagnostic-item small {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .diagnostic-item strong {

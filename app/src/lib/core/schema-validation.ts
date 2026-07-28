@@ -338,6 +338,18 @@ function validateDistributionCall(value: unknown, path: string): SchemaValidatio
       issues.push(...validateSourceText(source, `${path}/args/${escapePointer(argName)}`));
     }
   }
+  if (value.truncation !== undefined) {
+    if (!isRecord(value.truncation)) {
+      issues.push({ path: `${path}/truncation`, message: 'Expected an object.' });
+    } else {
+      if (value.truncation.lower !== undefined) {
+        issues.push(...validateSourceText(value.truncation.lower, `${path}/truncation/lower`));
+      }
+      if (value.truncation.upper !== undefined) {
+        issues.push(...validateSourceText(value.truncation.upper, `${path}/truncation/upper`));
+      }
+    }
+  }
   return issues;
 }
 

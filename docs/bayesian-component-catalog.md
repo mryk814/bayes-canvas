@@ -9,6 +9,12 @@ Bayes Canvas treats Bayesian modeling parts as authoring components, not only as
 | Normal | Real-valued location-scale variable | Normal | `Normal(mu, sigma)` | `\mathcal{N}(\mu,\sigma)` | Preserve parameterization | Required args, positive scale |
 | StudentT | Robust real-valued variable | StudentT | `StudentT(nu, mu, sigma)` | `StudentT(\nu,\mu,\sigma)` | Note heavy tails | Required args, positive `nu`/scale |
 | HalfNormal | Positive scale prior | HalfNormal | `HalfNormal(sigma)` | `HalfNormal(\sigma)` | Use for constrained positive scales | Positive support |
+| Uniform | Bounded constant-density prior | Uniform | `Uniform(lower, upper)` | `Uniform(l,u)` | Preserve both declared bounds | Required bounds |
+| Gamma | Positive shape-rate variable | Gamma | `Gamma(alpha, beta)` | `Gamma(\alpha,\beta)` | Keep rate parameterization explicit | Positive shape/rate |
+| InverseGamma | Positive inverse-gamma variable | Inverse Gamma | `InverseGamma(alpha, beta)` | `InvGamma(\alpha,\beta)` | Keep scale parameterization explicit | Positive shape/scale |
+| Weibull | Positive duration variable | Weibull | `Weibull(alpha, beta)` | `Weibull(\alpha,\beta)` | Preserve shape and scale | Positive shape/scale |
+| Logistic | Real location-scale variable | Logistic | `Logistic(mu, s)` | `Logistic(\mu,s)` | Preserve positive scale | Required args |
+| Truncated base distribution | A base law renormalized within bounds | TruncatedNormal recipe / Truncation fields | `Normal(mu, sigma) T[lower, upper]` | `N(\mu,\sigma)\mathcal{T}[l,u]` | Keep base distribution and bounds distinct | At least one bound |
 | Laplace | Lasso-style shrinkage prior | Laplace | `Laplace(mu, b)` | `Laplace(\mu,b)` | Explain shrinkage intent | Required args, positive scale |
 | Cauchy | Heavy-tailed real prior | Cauchy | `Cauchy(alpha, beta)` | `Cauchy(\alpha,\beta)` | Flag tail behavior | Positive scale |
 | HalfCauchy | Heavy-tailed positive scale prior | HalfCauchy | `HalfCauchy(beta)` | `HalfCauchy(\beta)` | Common hierarchy scale prior | Positive support |
@@ -48,9 +54,9 @@ Bayes Canvas treats Bayesian modeling parts as authoring components, not only as
 | Component | Represents | UI label | IR expression | TeX | AI handoff | Lint |
 |---|---|---|---|---|---|---|
 | Exact | Direct observation | Exact | `{kind:"exact"}` | observation note | Default likelihood | No special lint |
-| Missing Imputation | Missing data modeled as latent | Missing | `{kind:"missing", strategy:"latent_imputation"}` | observation note | Ask implementation to impute | Strategy present |
+| Missing Imputation | Missing data modeled as latent | Missing | `{kind:"missing", mechanism:"MAR", strategy:"latent_imputation"}` | observation note | Keep mechanism and strategy separate | Mechanism and strategy present |
 | Measurement Error | Noisy observed covariate | Measurement error | latent true + error scale | observation note | Include `x_obs` and `x_true` relationship | Symbol refs |
-| Censored | Bounds hide true value | Censored | direction + bound | observation note | Use censoring likelihood | Bound when needed |
+| Censored | Bounds hide true value | Censored | direction + lower/upper | observation note | Use censoring likelihood | Bounds when needed |
 | Truncated | Sample restricted by bounds | Truncated | lower/upper | observation note | Use truncated distribution | Bound syntax |
 | Rounded | Observed after rounding | Rounded | unit | observation note | Preserve rounding mechanism | Unit optional |
 | Known Standard Error | Meta-analysis observation | Known SE | likelihood uses `se[i]` | likelihood line | Treat SE as data, not parameter | Symbol refs |
