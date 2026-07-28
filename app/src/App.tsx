@@ -80,7 +80,7 @@ const NODE_KIND_OPTIONS: BayesNodeData['kind'][] = [
 
 type PaletteItem =
   | { type: 'node'; kind: BayesNodeData['kind']; label: string; note: string }
-  | { type: 'preset'; preset: 'horseshoe_prior' | 'linear_term' | 'group_effect' | 'interaction_term'; label: string; note: string };
+  | { type: 'preset'; preset: 'linear_term' | 'group_effect' | 'interaction_term'; label: string; note: string };
 
 type LeftPanelTab = 'add' | 'structure' | 'inspector';
 type WorkStage = 'build' | 'review' | 'handoff';
@@ -119,9 +119,8 @@ const PALETTE_GROUPS: Array<{
     ],
   },
   {
-    title: '型',
+    title: '構造',
     items: [
-      { type: 'preset', preset: 'horseshoe_prior', label: 'Horseshoe事前分布', note: 'パラメータへ適用' },
       { type: 'preset', preset: 'linear_term', label: '線形項', note: '予測子へ追加' },
       { type: 'preset', preset: 'group_effect', label: 'グループ効果', note: '階層効果を追加' },
       { type: 'preset', preset: 'interaction_term', label: '交互作用', note: '積の項を追加' },
@@ -2169,47 +2168,6 @@ export function App() {
     updateSelectedNodeData({ plate: 'time', shape: ['T'] });
   }, [selectedNodeId, updateSelectedNodeData]);
 
-  const applyHorseshoePrior = useCallback(() => {
-    const horseshoeDistribution = {
-      id: 'horseshoe',
-      name: 'Horseshoe',
-      args: { scale: 'tau0' },
-    };
-
-    if (selectedNodeId && selectedData && ['parameter', 'latent'].includes(selectedData.kind)) {
-      updateSelectedNodeData({
-        distribution: horseshoeDistribution,
-        notes: selectedData.notes ?? 'Horseshoe prior. Connect or define tau0 when the scale should be explicit.',
-      });
-      return;
-    }
-
-    const count = nodes.filter((node) => node.data.kind === 'parameter').length + 1;
-    const id = `parameter_${Date.now()}`;
-    const column = (nodes.length % 4) * 210 + 120;
-    const row = Math.floor(nodes.length / 4) * 150 + 80;
-
-    setNodes((currentNodes) => [
-      ...currentNodes.map((node) => ({ ...node, selected: false })),
-      {
-        id,
-        type: 'bayesNode',
-        position: { x: column, y: row },
-        selected: true,
-        data: {
-          kind: 'parameter',
-          name: count === 1 ? 'beta' : `beta_${count}`,
-          distribution: horseshoeDistribution,
-          notes: 'Horseshoe prior. Connect or define tau0 when the scale should be explicit.',
-        },
-      },
-    ]);
-    setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
-    setSelectedNodeId(id);
-    setSelectedEdgeId(null);
-    setActiveLeftPanel('inspector');
-  }, [nodes, selectedData, selectedNodeId, setEdges, setNodes, updateSelectedNodeData]);
-
   const applyRegressionTermPreset = useCallback(
     (term: string) => {
       if (selectedNodeId && selectedData?.kind === 'deterministic') {
@@ -2253,11 +2211,6 @@ export function App() {
         return;
       }
 
-      if (item.preset === 'horseshoe_prior') {
-        applyHorseshoePrior();
-        return;
-      }
-
       if (item.preset === 'linear_term') {
         applyRegressionTermPreset('beta * x[i]');
         return;
@@ -2270,7 +2223,7 @@ export function App() {
 
       applyRegressionTermPreset('beta_interaction * x1[i] * x2[i]');
     },
-    [addNodeFromPalette, applyHorseshoePrior, applyRegressionTermPreset],
+    [addNodeFromPalette, applyRegressionTermPreset],
   );
 
   const restoreUndo = useCallback(() => {
@@ -2784,12 +2737,6 @@ export function App() {
       run: handleReceiptImport,
     },
     {
-      id: 'horseshoe-prior',
-      label: 'Horseshoe事前分布を適用',
-      group: '補助',
-      run: applyHorseshoePrior,
-    },
-    {
       id: 'schema-import',
       label: 'スキーマ取り込みを開く',
       group: '補助',
@@ -2823,7 +2770,6 @@ export function App() {
     addModelBlock,
     addNodeFromPalette,
     addQoIFromSelection,
-    applyHorseshoePrior,
     applyModelTemplate,
     copyExternalImportPrompt,
     handleExport,
