@@ -74,7 +74,7 @@ export interface ModelViewProjectionInput {
   handoff?: HandoffBundle;
 }
 
-const VIEW_ORDER: ModelViewProjectionId[] = ['canvas', 'story', 'equations', 'structure', 'contract'];
+const VIEW_ORDER: ModelViewProjectionId[] = ['canvas', 'equations', 'story', 'structure', 'contract'];
 
 export function buildModelViewProjections({
   document,
@@ -198,8 +198,8 @@ function buildStoryProjection(
 
   return {
     id: 'story',
-    title: '説明',
-    purpose: 'ModelDocumentとSemanticModelから生成した、読みやすい生成過程の説明。',
+    title: '生成過程',
+    purpose: 'モデルが値を生成する順番を、文章で追うビュー。',
     source,
     consumes: [
       { source: 'ModelDocument', fields: ['entities', 'entityOrder', 'plates', 'axes'] },
@@ -292,8 +292,8 @@ function buildEquationProjection(
 
   return {
     id: 'equations',
-    title: '数式',
-    purpose: 'compilerの式ソースと揃えて確認する、数式中心のビュー。',
+    title: '数式で読む',
+    purpose: 'モデル全体を、つながった数式として読むビュー。',
     source,
     consumes: [
       { source: 'ModelDocument', fields: ['entities.*.distribution', 'entities.*.expression', 'entities.*.valueType'] },
@@ -379,8 +379,8 @@ function buildStructureProjection(
 
   return {
     id: 'structure',
-    title: '構造',
-    purpose: '軸、反復範囲、shape、入れ子、index対応、意味的な依存関係を確認するビュー。',
+    title: '軸・plate',
+    purpose: '軸、shape、plate、index対応を確認する設計ビュー。',
     source,
     consumes: [
       { source: 'ModelDocument', fields: ['axes', 'plates', 'entities.*.valueType', 'entities.*.plateIds'] },
@@ -519,8 +519,8 @@ function buildContractProjection(
 
   return {
     id: 'contract',
-    title: '契約',
-    purpose: '同じ正本ドキュメントから生成される、実装・レビュー用の受け渡し情報。',
+    title: '実装契約',
+    purpose: '観測データ、確認量、仮定、出力先の対応状況を確認する受け渡しビュー。',
     source,
     consumes: [
       { source: 'ModelDocument', fields: ['entities', 'notes', 'noteOrder'] },

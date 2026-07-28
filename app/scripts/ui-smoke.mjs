@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const appSource = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const projectionSource = await readFile(new URL('../src/lib/modelViewProjections.ts', import.meta.url), 'utf8');
 const builtIndex = await readFile(new URL('../dist/index.html', import.meta.url), 'utf8');
 
 assert.match(builtIndex, /<div id="root"><\/div>/u);
@@ -18,8 +19,12 @@ for (const marker of [
   '空のモデルから始める',
   'workspace-${workStage}',
   'undoDeleteSnapshot',
+  '図で組む',
 ]) {
   assert.ok(appSource.includes(marker), `UI smoke marker missing: ${marker}`);
+}
+for (const marker of ['数式で読む', '生成過程', '軸・plate', '実装契約']) {
+  assert.ok(projectionSource.includes(marker), `Projection marker missing: ${marker}`);
 }
 
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');

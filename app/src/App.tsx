@@ -3450,14 +3450,16 @@ export function App() {
             <div className="model-view-tabs" role="tablist" aria-label="モデルビュー">
               {modelViewProjections.map((projection) => (
                 <button
+                  aria-label={`${projection.title}: ${projection.purpose}`}
                   aria-selected={activeModelView === projection.id}
                   className={activeModelView === projection.id ? 'is-active' : undefined}
+                  data-view-role={projection.id === 'canvas' || projection.id === 'equations' ? 'primary' : 'detail'}
                   key={projection.id}
                   onClick={() => setActiveModelView(projection.id)}
                   role="tab"
                   type="button"
                 >
-                  {projection.title}
+                  {projection.id === 'canvas' ? '図で組む' : projection.title}
                 </button>
               ))}
             </div>
@@ -3481,6 +3483,8 @@ export function App() {
           <CanvasPane
             activeModelView={activeModelView}
             activeProjection={activeProjection}
+            modelIr={modelIr}
+            document={compiledCanvas.document}
             nodes={visibleFlowNodes}
             edges={labeledEdges}
             nodeTypes={nodeTypes}
@@ -3500,6 +3504,7 @@ export function App() {
             onSelectPlateNodes={selectPlateNodes}
             onCopyProjection={copyText}
             onSelectProjectionEntity={selectProjectionEntity}
+            onSelectNode={(nodeId) => selectNodeForEditing(nodeId, { focusEditor: true })}
           />
         </section>
 

@@ -16,8 +16,10 @@ import {
 } from '@xyflow/react';
 
 import { ModelProjectionView } from './ModelProjectionView';
+import { MathView } from './MathView';
+import type { ModelDocument } from '../lib/core/model';
 import type { ModelViewProjection, ModelViewProjectionId } from '../lib/modelViewProjections';
-import type { BayesNodeData } from '../lib/modelIr';
+import type { BayesNodeData, ModelIr } from '../lib/modelIr';
 
 export interface FlowViewportControls {
   fitView: (options?: { padding?: number; duration?: number }) => Promise<boolean>;
@@ -43,6 +45,8 @@ interface PlateOverlayRect {
 interface CanvasPaneProps {
   activeModelView: ModelViewProjectionId;
   activeProjection: ModelViewProjection;
+  modelIr: ModelIr;
+  document: ModelDocument;
   nodes: Node<BayesNodeData>[];
   edges: Edge[];
   nodeTypes: NodeTypes;
@@ -59,11 +63,14 @@ interface CanvasPaneProps {
   onSelectPlateNodes: (nodeIds: string[], additive: boolean) => void;
   onCopyProjection: (value: string) => void;
   onSelectProjectionEntity: (entityId: string) => void;
+  onSelectNode: (nodeId: string) => void;
 }
 
 export function CanvasPane({
   activeModelView,
   activeProjection,
+  modelIr,
+  document,
   nodes,
   edges,
   nodeTypes,
@@ -80,7 +87,16 @@ export function CanvasPane({
   onSelectPlateNodes,
   onCopyProjection,
   onSelectProjectionEntity,
+  onSelectNode,
 }: CanvasPaneProps) {
+  if (activeModelView === 'equations') {
+    return (
+      <div className="equation-projection-view">
+        <MathView model={modelIr} document={document} onSelectNode={onSelectNode} />
+      </div>
+    );
+  }
+
   if (activeModelView !== 'canvas') {
     return (
       <ModelProjectionView

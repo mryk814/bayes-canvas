@@ -908,10 +908,9 @@ button:disabled {
 }
 
 .model-view-tabs {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(72px, 1fr));
+  display: flex;
+  align-items: center;
   gap: 3px;
-  min-width: min(420px, 100%);
   padding: 2px;
   background: color-mix(in srgb, var(--color-surface-muted) 74%, transparent);
   border: 1px solid var(--color-border-subtle);
@@ -919,7 +918,7 @@ button:disabled {
 }
 
 .model-view-tabs button {
-  min-width: 0;
+  min-width: 72px;
   padding: 6px 7px;
   border-color: transparent;
   background: transparent;
@@ -929,6 +928,21 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.model-view-tabs button[data-view-role='primary'] {
+  min-width: 92px;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface) 64%, transparent);
+}
+
+.model-view-tabs button:nth-child(3) {
+  margin-left: var(--space-2);
+}
+
+.model-view-tabs button[data-view-role='detail'] {
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-semibold);
 }
 
 .model-view-tabs button.is-active {
@@ -947,9 +961,30 @@ button:disabled {
 }
 
 .canvas > .react-flow,
-.canvas > .projection-view {
+.canvas > .projection-view,
+.canvas > .equation-projection-view {
   flex: 1;
   min-height: 0;
+}
+
+.equation-projection-view {
+  overflow: auto;
+  padding: var(--space-4);
+  background: var(--color-surface);
+}
+
+.equation-projection-view .math-view {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.equation-projection-view .math-section-lines {
+  padding: var(--space-4);
+  background: var(--color-surface-subtle);
+}
+
+.equation-projection-view .tex-math .katex {
+  font-size: var(--text-lg);
 }
 
 .canvas-empty-state {
