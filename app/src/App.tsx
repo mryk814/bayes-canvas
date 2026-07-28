@@ -42,6 +42,8 @@ import { TexMath } from './components/TexMath';
 import { DistributionEditor } from './components/DistributionEditor';
 import { CanvasPane, type FlowViewportControls } from './components/CanvasPane';
 import { OutputPanel, type AdvancedOutputMode, type HandoffPreviewFormat, type OutputMode } from './components/OutputPanel';
+import { ImportDialog } from './components/ImportDialog';
+import { WorkbenchPanel } from './components/WorkbenchPanel';
 import { assertJsonComplexity } from './lib/core/migrations.js';
 import type { HandoffBundle, HandoffTarget } from './lib/core/handoff.js';
 import type { Diagnostic } from './lib/core/diagnostics.js';
@@ -61,6 +63,19 @@ import {
 } from './lib/structureBlockPresets';
 import { useInspectorEditing } from './hooks/useInspectorEditing';
 import { usePatchPreview } from './hooks/usePatchPreview';
+import { dataContractToNodes, parseDataContractInput } from './lib/dataContract';
+import { projectToReactFlow } from './lib/canvasProjector';
+import {
+  applyModelingRecipe,
+  availableDiagnosticFixes,
+  buildPriorPredictivePlan,
+  compareModelVariant,
+  createModelVariant,
+  generatePriorPredictivePrompt,
+  loadModelVariants,
+  MODELING_RECIPES,
+  persistModelVariants,
+} from './lib/modelWorkbench';
 
 const NODE_KIND_LABELS: Record<BayesNodeData['kind'], string> = {
   data: 'データ',
@@ -1897,11 +1912,13 @@ export function App() {
     patchInbox,
     setPatchInbox,
     previewPatchInput,
+    previewProposal,
   } = usePatchPreview(nodes, edges);
   const {
     pendingImport,
     setPendingImport,
     parseFile: parseImportFile,
+    parseText: parseImportText,
   } = useImportPreview(prepareCanvasNode, {
     maxBytes: MAX_IMPORT_BYTES,
     maxDepth: MAX_IMPORT_DEPTH,
@@ -1914,7 +1931,13 @@ export function App() {
     setRestorePrompt,
     cleanupAutosaveRecovery: cleanupAutosaveRecords,
   } = useAutosaveRestore(compiledCanvas.document, compiledCanvas.layout, prepareCanvasNode, handleAutosaveNotice);
-  const [schemaInput, setSchemaInput] = useState('x, real, N\ny, real, N');
+  const [schemaInput, setSchemaInput] = useState(
+    'name,type,role,shape,unit,missing,levels\nx,real,predictor,N,,none,\ny,real,outcome,N,,none,',
+  );
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [variants, setVariants] = useState(loadModelVariants);
+  const [selectedVariantId, setSelectedVariantId] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ImplementationReceipt | null>(null);
   const [flowViewport, setFlowViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
@@ -1931,6 +1954,22 @@ export function App() {
       handoffBundle.manifest.specificationFingerprint,
       receipt,
     ],
+  );
+  const selectedVariant = useMemo(
+    () => variants.find((variant) => variant.id === selectedVariantId),
+    [selectedVariantId, variants],
+  );
+  const variantComparison = useMemo(
+    () => selectedVariant ? compareModelVariant(selectedVariant, compiledCanvas.document) : undefined,
+    [compiledCanvas.document, selectedVariant],
+  );
+  const priorPredictiveChecks = useMemo(
+    () => buildPriorPredictivePlan(compiledCanvas.document),
+    [compiledCanvas.document],
+  );
+  const diagnosticFixes = useMemo(
+    () => availableDiagnosticFixes(compiledCanvas.semantic.diagnostics),
+    [compiledCanvas.semantic.diagnostics],
   );
   const activeProjection = useMemo(
     () => modelViewProjections.find((projection) => projection.id === activeModelView) ?? modelViewProjections[0]!,
@@ -2610,6 +2649,71 @@ export function App() {
     });
   }, []);
 
+  const saveCurrentVariant = useCallback((suggestedLabel?: string) => {
+    const label = suggestedLabel ?? window.prompt(
+      'モデル案の名前:',
+      `${compiledCanvas.document.model.name} ${variants.length + 1}`,
+    );
+    if (!label) return undefined;
+    const variant = createModelVariant(label, compiledCanvas.document, compiledCanvas.layout);
+    setVariants((current) => persistModelVariants([variant, ...current]));
+    setSelectedVariantId(variant.id);
+    return variant;
+  }, [compiledCanvas.document, compiledCanvas.layout, variants.length]);
+
+  const deleteVariant = useCallback((variantId: string) => {
+    setVariants((current) => persistModelVariants(current.filter((variant) => variant.id !== variantId)));
+    setSelectedVariantId((current) => current === variantId ? '' : current);
+  }, []);
+
+  const restoreVariant = useCallback((variantId: string) => {
+    const variant = variants.find((candidate) => candidate.id === variantId);
+    if (!variant) return;
+    const projected = projectToReactFlow({ document: variant.document, layout: variant.layout });
+    setUndoState({ message: `${variant.label}を開きました。`, nodes, edges });
+    setNodes(projected.nodes.map(prepareCanvasNode));
+    setEdges(projected.edges);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+  }, [edges, nodes, setEdges, setNodes, setUndoState, variants]);
+
+  const copyPriorPredictivePrompt = useCallback(() => {
+    copyText(generatePriorPredictivePrompt(compiledCanvas.document));
+    setImportError({
+      title: 'Prior predictive検証promptをコピーしました',
+      detail: '推論は実行せず、priorと観測生成が作る値域を外部環境で確認するpromptです。',
+    });
+  }, [compiledCanvas.document]);
+
+  const applyRecipe = useCallback((recipeId: (typeof MODELING_RECIPES)[number]['id']) => {
+    try {
+      const result = applyModelingRecipe(recipeId, nodes, edges);
+      setUndoState({ message: result.message, nodes, edges });
+      setNodes(result.nodes);
+      setEdges(result.edges);
+      setImportError(null);
+    } catch (error) {
+      setImportError({
+        title: 'レシピを適用できません',
+        detail: error instanceof Error ? error.message : '対象となるモデル要素を確認してください。',
+      });
+    }
+  }, [edges, nodes, setEdges, setNodes, setUndoState]);
+
+  const previewPastedImport = useCallback(() => {
+    try {
+      setPendingImport(parseImportText('AI pasted JSON', importText));
+      setImportDialogOpen(false);
+      setImportError(null);
+    } catch (error) {
+      setPendingImport(null);
+      setImportError({
+        title: '貼り付け内容を読み込めません',
+        detail: error instanceof Error ? error.message : 'JSON形式を確認してください。',
+      });
+    }
+  }, [importText, parseImportText, setPendingImport]);
+
   const insertPatchTemplate = useCallback(() => {
     setPatchInput(JSON.stringify({
       proposalVersion: '1.0.0',
@@ -2638,6 +2742,27 @@ export function App() {
     }
   }, [previewPatchInput, setPendingPatch]);
 
+  const previewDiagnosticFix = useCallback((candidate: (typeof diagnosticFixes)[number]) => {
+    try {
+      previewProposal({
+        proposalVersion: '1.0.0',
+        baseDocumentId: compiledCanvas.document.documentId,
+        baseRevision: candidate.fix.expectedRevision,
+        intent: candidate.fix.title,
+        author: 'user',
+        operations: candidate.fix.patch,
+        reviewNotes: [`${candidate.diagnostic.code}: ${candidate.diagnostic.message}`],
+      });
+      setImportError(null);
+    } catch (error) {
+      setPendingPatch(null);
+      setImportError({
+        title: '修正案をプレビューできません',
+        detail: error instanceof Error ? error.message : '診断内容を再確認してください。',
+      });
+    }
+  }, [compiledCanvas.document.documentId, previewProposal, setPendingPatch]);
+
   const applyPendingPatch = useCallback(() => {
     if (!pendingPatch) return;
     setUndoState({ message: 'パッチを適用しました。', nodes, edges });
@@ -2650,6 +2775,7 @@ export function App() {
 
   const applyPendingImport = useCallback(() => {
     if (!pendingImport) return;
+    saveCurrentVariant(`Import前 ${new Date().toLocaleString()}`);
     setUndoState({ message: `${pendingImport.sourceName} を読み込みました。`, nodes, edges });
     setNodes(addImportProvenance(pendingImport.nodes, pendingImport.sourceName));
     setEdges(pendingImport.edges);
@@ -2659,7 +2785,7 @@ export function App() {
     setActiveLeftPanel('inspector');
     setWorkStage('review');
     setActiveOutput('review');
-  }, [edges, nodes, pendingImport, setEdges, setNodes]);
+  }, [edges, nodes, pendingImport, saveCurrentVariant, setEdges, setNodes]);
 
   const handleReceiptImport = useCallback(() => {
     const input = document.createElement('input');
@@ -2761,6 +2887,7 @@ export function App() {
       try {
         const state = await parseImportFile(file);
         setPendingImport(state);
+        setImportDialogOpen(false);
         setImportError(null);
       } catch (error) {
         setPendingImport(null);
@@ -2828,30 +2955,19 @@ export function App() {
   }, [blockNodes.length, edges, nodes, setNodes]);
 
   const importSchemaColumns = useCallback(() => {
-    const rows = schemaInput.split('\n').map((line) => line.trim()).filter(Boolean);
-    if (!rows.length) return;
-    setUndoState({ message: 'SchemaからDataノードを追加しました。', nodes, edges });
-    setNodes((currentNodes) => [
-      ...currentNodes,
-      ...rows.map((row, index) => {
-        const [name = `column_${index + 1}`, scalar = 'real', shape = 'N'] = row.split(',').map((item) => item.trim());
-        const id = `data_${name.replace(/[^a-zA-Z0-9_]/gu, '_')}_${Date.now()}_${index}`;
-        return {
-          id,
-          type: 'bayesNode' as const,
-          position: { x: 80 + (index % 2) * 220, y: 120 + Math.floor(index / 2) * 150 },
-          data: {
-            kind: 'data' as const,
-            name: shape ? `${name}[i]` : name,
-            shape: shape ? [shape] : undefined,
-            plate: shape ? 'obs' : undefined,
-            observed: true,
-            notes: `Imported column. Type: ${scalar}. Confirm role before handoff.`,
-          },
-        };
-      }),
-    ]);
-    setActiveLeftPanel('inspector');
+    try {
+      const contract = parseDataContractInput(schemaInput);
+      const importedNodes = dataContractToNodes(contract, nodes.map((node) => node.id));
+      setUndoState({ message: 'データ契約からDataノードを追加しました。', nodes, edges });
+      setNodes((currentNodes) => [...currentNodes, ...importedNodes]);
+      setActiveLeftPanel('inspector');
+      setImportError(null);
+    } catch (error) {
+      setImportError({
+        title: 'データ契約を読み込めません',
+        detail: error instanceof Error ? error.message : '列契約を確認してください。',
+      });
+    }
   }, [edges, nodes, schemaInput, setNodes]);
 
   const savePatchToInbox = useCallback(() => {
@@ -3015,7 +3131,7 @@ export function App() {
       id: 'import-canvas',
       label: 'キャンバスを読み込み',
       group: 'ファイル',
-      run: handleImport,
+      run: () => setImportDialogOpen(true),
     },
     {
       id: 'external-model-import-prompt',
@@ -3090,7 +3206,6 @@ export function App() {
     applyModelTemplate,
     copyExternalImportPrompt,
     handleExport,
-    handleImport,
     handleReceiptImport,
     handleSave,
     modelIr,
@@ -3143,6 +3258,7 @@ export function App() {
       if (event.key === 'Escape') {
         setCommandPaletteOpen(false);
         setStartDialogOpen(false);
+        setImportDialogOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -3189,7 +3305,7 @@ export function App() {
             <button type="button" onClick={handleSave}>
               スナップショット
             </button>
-            <button type="button" onClick={handleImport}>
+            <button type="button" onClick={() => setImportDialogOpen(true)}>
               読み込み
             </button>
             <button type="button" onClick={handleExport}>
@@ -3342,6 +3458,17 @@ export function App() {
         </div>
       ) : null}
 
+      {importDialogOpen ? (
+        <ImportDialog
+          input={importText}
+          onChangeInput={setImportText}
+          onClose={() => setImportDialogOpen(false)}
+          onCopyPrompt={copyExternalImportPrompt}
+          onOpenFile={handleImport}
+          onPreviewText={previewPastedImport}
+        />
+      ) : null}
+
       {startDialogOpen ? (
         <div className="start-backdrop" role="presentation" onMouseDown={() => setStartDialogOpen(false)}>
           <section
@@ -3474,6 +3601,19 @@ export function App() {
           ) : null}
           {activeLeftPanel === 'structure' ? (
             <div className="plate-panel">
+              <section className="data-contract-panel">
+                <div className="panel-title compact">
+                  <h2>データ契約</h2>
+                  <span>CSV</span>
+                </div>
+                <textarea
+                  aria-label="データ列契約"
+                  value={schemaInput}
+                  onChange={(event) => setSchemaInput(event.target.value)}
+                />
+                <small>name,type,role,shape,unit,missing,levels</small>
+                <button type="button" onClick={importSchemaColumns}>Dataノードを追加</button>
+              </section>
               <div className="panel-title compact">
                 <h2>反復範囲</h2>
                 <span>{plateRows.length}</span>
@@ -4071,6 +4211,29 @@ export function App() {
               ))}
             </div>
           </div>
+          <WorkbenchPanel
+            diagnosticFixes={diagnosticFixes}
+            pendingPatchSummary={pendingPatch?.summary ?? null}
+            variants={variants}
+            selectedVariantId={selectedVariantId}
+            comparison={variantComparison}
+            priorChecks={priorPredictiveChecks}
+            recipes={MODELING_RECIPES}
+            receipt={receipt}
+            receiptStatus={receiptFingerprintStatus}
+            onApplyRecipe={applyRecipe}
+            onCopyPriorPrompt={copyPriorPredictivePrompt}
+            onDeleteVariant={deleteVariant}
+            onDismissPatch={() => setPendingPatch(null)}
+            onImportReceipt={handleReceiptImport}
+            onPreviewDiagnosticFix={previewDiagnosticFix}
+            onApplyPendingPatch={applyPendingPatch}
+            onRestoreVariant={restoreVariant}
+            onSaveVariant={() => {
+              saveCurrentVariant();
+            }}
+            onSelectVariant={setSelectedVariantId}
+          />
             </>
           ) : null}
           {workStage === 'handoff' ? (

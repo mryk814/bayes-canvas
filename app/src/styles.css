@@ -2207,6 +2207,177 @@ pre {
   background: color-mix(in srgb, var(--color-text) 22%, transparent);
 }
 
+.import-dialog {
+  width: min(720px, calc(100vw - var(--space-6)));
+  max-height: calc(100vh - var(--space-6));
+  overflow: auto;
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.import-route-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-block: var(--space-4);
+}
+
+.import-route-grid button,
+.recipe-list button,
+.diagnostic-fix-list button {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-2);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+
+.import-route-grid button:hover,
+.recipe-list button:hover,
+.diagnostic-fix-list button:hover {
+  background: var(--color-surface-muted);
+  border-color: var(--color-accent-subtle-bd);
+}
+
+.import-route-grid button:active,
+.recipe-list button:active,
+.diagnostic-fix-list button:active {
+  background: var(--color-accent-subtle-bg);
+}
+
+.import-route-grid span,
+.recipe-list span,
+.diagnostic-fix-list span {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.import-paste-field {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.import-paste-field textarea {
+  min-height: 260px;
+  padding: var(--space-2);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  font-family: var(--font-mono);
+}
+
+.dialog-actions,
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.data-contract-panel,
+.workbench-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.data-contract-panel textarea {
+  min-height: 150px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.workbench-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.workbench-card label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.workbench-card select {
+  min-width: 0;
+  padding: var(--space-2);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.variant-summary,
+.receipt-status,
+.patch-review {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-surface);
+}
+
+.variant-diff-list,
+.prior-check-list,
+.recipe-list,
+.diagnostic-fix-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.variant-diff-list span,
+.prior-check {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+}
+
+.prior-check strong {
+  color: var(--color-text);
+}
+
+.prior-review {
+  border-left: 3px solid var(--color-warning-strong);
+}
+
+.prior-blocked,
+.receipt-status.is-mismatch {
+  border-left-color: var(--color-danger);
+}
+
+.prior-ready,
+.receipt-status.is-match {
+  border-left-color: var(--color-success-strong);
+}
+
+@media (max-width: 720px) {
+  .import-route-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .start-dialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);

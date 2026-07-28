@@ -339,7 +339,7 @@ function lintBlockInstances(
     diagnostics.push(...lintBlockPorts(document, entity.id, entity, definition, basePath));
     diagnostics.push(...lintBlockConfig(entity, definition, basePath));
     diagnostics.push(...lintBlockBackend(entity, definition, targetBackend, basePath));
-    diagnostics.push(...lintAdvancedBlockSemantics(entity, basePath));
+    diagnostics.push(...lintAdvancedBlockSemantics(entity, basePath, document.revision));
     diagnostics.push(...(definition.validateBoundary?.(entity.config) ?? []));
   }
   return diagnostics;
@@ -348,6 +348,7 @@ function lintBlockInstances(
 function lintAdvancedBlockSemantics(
   entity: Extract<ModelEntity, { kind: 'block_instance' }>,
   basePath: string,
+  revision: number,
 ): Diagnostic[] {
   const output: Diagnostic[] = [];
   const add = (
@@ -355,20 +356,44 @@ function lintAdvancedBlockSemantics(
     message: string,
     configKey: string,
     severity: Diagnostic['severity'] = 'error',
+    fix?: { title: string; value: unknown },
   ) => {
+    const configPath = `${basePath}/config/${escapePointer(configKey)}`;
     output.push(diagnostic({
       code,
       stage: 'portability',
       severity,
       message,
-      path: `${basePath}/config/${escapePointer(configKey)}`,
+      path: configPath,
       blocksHandoff: severity === 'error',
+      ...(fix
+        ? {
+            fixes: [{
+              id: `fix-${code.toLowerCase()}`,
+              title: fix.title,
+              kind: 'quickfix' as const,
+              expectedRevision: revision,
+              patch: [{
+                op: configKey in entity.config ? 'replace' as const : 'add' as const,
+                path: configPath,
+                value: fix.value,
+              }],
+              isPreferred: true,
+            }],
+          }
+        : {}),
     }));
   };
 
   if (entity.blockTypeId === 'survival' || entity.blockTypeId === 'competing_risks') {
     if (!['none', 'right', 'interval'].includes(String(entity.config.censoring))) {
-      add('BC-SURVIVAL-001', 'Survival censoring must be none, right, or interval.', 'censoring');
+      add(
+        'BC-SURVIVAL-001',
+        'Survival censoring must be none, right, or interval.',
+        'censoring',
+        'error',
+        { title: '右打ち切りへ設定', value: 'right' },
+      );
     }
     if (
       entity.config.censoring === 'interval'
@@ -377,38 +402,80 @@ function lintAdvancedBlockSemantics(
       add('BC-SURVIVAL-003', 'Interval censoring requires lower and upper time expressions.', 'censoring');
     }
     if (entity.blockTypeId === 'competing_risks' && Number(entity.config.risk_count) < 2) {
-      add('BC-SURVIVAL-002', 'Competing risks requires at least two causes.', 'risk_count');
+      add(
+        'BC-SURVIVAL-002',
+        'Competing risks requires at least two causes.',
+        'risk_count',
+        'error',
+        { title: '原因数を2へ設定', value: 2 },
+      );
     }
   }
 
   if (entity.blockTypeId === 'spatial_gmrf') {
     if (!['CAR', 'SAR', 'GMRF'].includes(String(entity.config.family))) {
-      add('BC-SPATIAL-003', 'Spatial family must be CAR, SAR, or GMRF.', 'family');
+      add(
+        'BC-SPATIAL-003',
+        'Spatial family must be CAR, SAR, or GMRF.',
+        'family',
+        'error',
+        { title: 'CARへ設定', value: 'CAR' },
+      );
     }
     const spatialAxis = String(entity.config.spatial_axis ?? '');
     if (!spatialAxis || !entity.valueType.axes.some((axis) => axis.axisId === spatialAxis)) {
       add('BC-SPATIAL-001', 'Spatial block output must declare the configured spatial axis.', 'spatial_axis');
     }
     if (entity.config.intrinsic === true && entity.config.constraint !== 'sum_to_zero') {
-      add('BC-SPATIAL-002', 'Intrinsic CAR/GMRF requires an explicit sum-to-zero identification constraint.', 'constraint');
+      add(
+        'BC-SPATIAL-002',
+        'Intrinsic CAR/GMRF requires an explicit sum-to-zero identification constraint.',
+        'constraint',
+        'error',
+        { title: 'sum-to-zero制約を設定', value: 'sum_to_zero' },
+      );
     }
   }
 
   if (entity.blockTypeId === 'differential_process') {
     if (!['ODE', 'SDE'].includes(String(entity.config.equation_type))) {
-      add('BC-DIFFERENTIAL-001', 'Differential process equation_type must be ODE or SDE.', 'equation_type');
+      add(
+        'BC-DIFFERENTIAL-001',
+        'Differential process equation_type must be ODE or SDE.',
+        'equation_type',
+        'error',
+        { title: 'ODEへ設定', value: 'ODE' },
+      );
     }
     if (!String(entity.config.solver ?? '').trim()) {
-      add('BC-DIFFERENTIAL-002', 'Differential process requires an explicit solver.', 'solver');
+      add(
+        'BC-DIFFERENTIAL-002',
+        'Differential process requires an explicit solver.',
+        'solver',
+        'error',
+        { title: 'rk45ソルバーを設定', value: 'rk45' },
+      );
     }
   }
 
   if (entity.blockTypeId === 'copula') {
     if (Number(entity.config.dimension) < 2) {
-      add('BC-COPULA-001', 'Copula dimension must be at least two.', 'dimension');
+      add(
+        'BC-COPULA-001',
+        'Copula dimension must be at least two.',
+        'dimension',
+        'error',
+        { title: '次元を2へ設定', value: 2 },
+      );
     }
     if (!['backend', 'model', 'not_required'].includes(String(entity.config.jacobian_owner))) {
-      add('BC-COPULA-002', 'Copula Jacobian ownership must be backend, model, or not_required.', 'jacobian_owner');
+      add(
+        'BC-COPULA-002',
+        'Copula Jacobian ownership must be backend, model, or not_required.',
+        'jacobian_owner',
+        'error',
+        { title: 'backend管理へ設定', value: 'backend' },
+      );
     }
   }
 

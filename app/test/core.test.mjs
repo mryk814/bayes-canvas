@@ -22,6 +22,15 @@ import { minimalDistributionRegistry } from '../dist-test/lib/core/registry.js';
 import { hierarchicalRegression } from '../dist-test/lib/core/example.js';
 import { builtInBlockRegistry } from '../dist-test/lib/core/block-registry.js';
 import { BLOCK_PRESETS } from '../dist-test/lib/structureBlockPresets.js';
+import { dataContractToNodes, formatDataContract, parseDataContractInput } from '../dist-test/lib/dataContract.js';
+import { extractJsonCandidates, parseImportJsonText } from '../dist-test/lib/importText.js';
+import {
+  applyModelingRecipe,
+  buildPriorPredictivePlan,
+  compareModelVariant,
+  createModelVariant,
+  generatePriorPredictivePrompt,
+} from '../dist-test/lib/modelWorkbench.js';
 import { compileModel } from '../dist-test/lib/core/compiler.js';
 import { loadModelDocumentContract } from '../dist-test/lib/core/import-contract.js';
 import { validateExternalDataContract } from '../dist-test/lib/core/security.js';
@@ -44,6 +53,66 @@ import {
 test('parses indexed Bayesian expressions', () => {
   const parsed = parseExpression('alpha[group_id[i]] + beta * x[i]');
   assert.equal(parsed.ok, true);
+});
+
+test('imports role-aware data contracts without inventing a model', () => {
+  const contract = parseDataContractInput([
+    'name,type,role,shape,unit,missing,levels',
+    'temperature,real,predictor,N,C,none,',
+    'failure,boolean,outcome,N,,possible,',
+    'batch_id,category,index,N,,none,A|B',
+  ].join('\n'));
+  assert.equal(contract.fields.length, 3);
+  assert.equal(contract.fields[1].role, 'outcome');
+  const nodes = dataContractToNodes(contract, ['data_temperature'], 0);
+  assert.equal(nodes[0].id, 'data_temperature_2');
+  assert.equal(nodes[1].data.observationProcess.mechanism, 'unspecified');
+  assert.match(nodes[2].data.notes, /Levels: A, B/u);
+  assert.match(formatDataContract(contract), /temperature,real,predictor,N,C,none/u);
+  assert.throws(
+    () => parseDataContractInput('x,real,predictor,N,,none,'),
+    /role=outcome/u,
+  );
+});
+
+test('extracts balanced import JSON from natural AI responses', () => {
+  const response = [
+    'Here is the model. The note {outside JSON} is not the payload.',
+    '```json',
+    '{"schemaVersion":"1.0.0","nested":{"text":"brace } inside string"}}',
+    '```',
+    'You can import it now.',
+  ].join('\n');
+  assert.equal(extractJsonCandidates(response).length >= 2, true);
+  assert.deepEqual(
+    parseImportJsonText(response, { maxBytes: 10000, maxDepth: 20 }),
+    { schemaVersion: '1.0.0', nested: { text: 'brace } inside string' } },
+  );
+});
+
+test('compares persisted model variants and builds prior predictive review prompts', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  const variant = createModelVariant('baseline', compiled.document, compiled.layout, 0);
+  const changed = structuredClone(compiled.document);
+  changed.entities.beta.distribution.args.sigma.source = '5';
+  const comparison = compareModelVariant(variant, changed);
+  assert.ok(comparison.changes.some((item) => item.kind === 'entity_distribution_changed'));
+  assert.equal(comparison.critical, 0);
+
+  const checks = buildPriorPredictivePlan(compiled.document);
+  assert.ok(checks.some((item) => item.id.startsWith('prior-')));
+  assert.ok(checks.some((item) => item.id.startsWith('likelihood-') && item.status === 'ready'));
+  assert.match(generatePriorPredictivePrompt(compiled.document), /Do not fit posterior inference/u);
+});
+
+test('applies reusable modeling recipes as reversible canvas replacements', () => {
+  const robust = applyModelingRecipe('robust_likelihood', initialNodes, initialEdges);
+  assert.equal(robust.nodes.find((node) => node.data.kind === 'likelihood').data.distribution.id, 'student_t');
+  assert.equal(initialNodes.find((node) => node.data.kind === 'likelihood').data.distribution.id, 'normal');
+
+  const nonCentered = applyModelingRecipe('non_centered_hierarchy', initialNodes, initialEdges);
+  assert.ok(nonCentered.nodes.some((node) =>
+    node.data.hints?.some((hint) => hint.kind === 'parameterization' && hint.value === 'non_centered')));
 });
 
 test('parses extended expression syntax used by model blocks', () => {
@@ -935,7 +1004,25 @@ test('diagnoses invalid advanced process semantics', () => {
       position: { x: 0, y: 0 },
       data: preset,
     }], []);
-    assert.ok(compiled.semantic.diagnostics.some((item) => item.code === code), `${blockTypeId}: ${code}`);
+    const issue = compiled.semantic.diagnostics.find((item) => item.code === code);
+    assert.ok(issue, `${blockTypeId}: ${code}`);
+    assert.ok(issue.fixes?.[0]?.patch.length, `${blockTypeId}: ${code} should provide an actionable patch`);
+    const preview = previewPatchProposal(
+      compiled.document,
+      {
+        proposalVersion: '1.0.0',
+        baseDocumentId: compiled.document.documentId,
+        baseRevision: issue.fixes[0].expectedRevision,
+        intent: issue.fixes[0].title,
+        author: 'user',
+        operations: issue.fixes[0].patch,
+      },
+      minimalDistributionRegistry,
+    );
+    assert.ok(
+      !preview.after.diagnostics.some((item) => item.code === code),
+      `${blockTypeId}: ${code} fix should clear the diagnostic`,
+    );
   }
 });
 
