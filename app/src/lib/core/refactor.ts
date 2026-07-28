@@ -68,6 +68,12 @@ export function renameEntitySymbol(
           `${basePath}/distribution/truncation/upper`,
         );
       }
+      if (current.transform?.forward) {
+        current.transform.forward = rewrite(current.transform.forward, `${basePath}/transform/forward`);
+      }
+      if (current.transform?.inverse) {
+        current.transform.inverse = rewrite(current.transform.inverse, `${basePath}/transform/inverse`);
+      }
       const process = current.observationProcess;
       if (process?.kind === 'measurement_error' && process.errorScale) {
         process.errorScale = rewrite(process.errorScale, `${basePath}/observationProcess/errorScale`);
@@ -79,6 +85,11 @@ export function renameEntitySymbol(
         if (process.upper) process.upper = rewrite(process.upper, `${basePath}/observationProcess/upper`);
       } else if (process?.kind === 'rounded') {
         process.unit = rewrite(process.unit, `${basePath}/observationProcess/unit`);
+      } else if (process?.kind === 'missing' && process.selectionModel) {
+        process.selectionModel = rewrite(
+          process.selectionModel,
+          `${basePath}/observationProcess/selectionModel`,
+        );
       }
     } else if (current.kind === 'block_instance') {
       for (const [portId, binding] of Object.entries(current.inputs)) {

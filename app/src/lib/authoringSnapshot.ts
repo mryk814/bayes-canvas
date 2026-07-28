@@ -13,10 +13,17 @@ import type {
   ObservationProcess as CoreObservationProcess,
   PlateDefinition,
   SourceText,
+  VariableTransform as CoreVariableTransform,
   ValueType,
 } from './core/model.js';
 import { findDistribution, normalizeDistributionId, supportToDomain, type DistributionSpec } from './distributionRegistry.js';
-import type { BayesNodeData, Constraint, ModelHint, ObservationProcess } from './modelIr.js';
+import type {
+  BayesNodeData,
+  Constraint,
+  ModelHint,
+  ObservationProcess,
+  VariableTransform,
+} from './modelIr.js';
 
 const SOURCE_LANGUAGE = 'bayes-expr@1' as const;
 
@@ -200,6 +207,7 @@ function nodeToEntity(node: Node<BayesNodeData>): ModelEntity {
     kind: 'random_variable',
     role: data.kind === 'likelihood' ? 'observation' : data.kind === 'latent' ? 'latent' : 'parameter',
     distribution: toDistributionCall(data.distribution),
+    transform: toCoreTransform(data.transform),
     observedDataId: data.kind === 'likelihood' && data.observed ? `obs_${node.id}` : undefined,
     observationProcess: toCoreObservationProcess(data.observationProcess),
     constraints: toCoreConstraints(data.constraints),
@@ -378,10 +386,25 @@ function toCoreObservationProcess(process?: ObservationProcess): CoreObservation
   if (process.kind === 'truncated') return { kind: 'truncated', lower: process.lower ? source(process.lower) : undefined, upper: process.upper ? source(process.upper) : undefined };
   if (process.kind === 'rounded') return { kind: 'rounded', unit: source(process.unit ?? 'unit') };
   if (process.kind === 'missing') {
-    return { kind: 'missing', mechanism: process.mechanism, strategy: process.strategy };
+    return {
+      kind: 'missing',
+      mechanism: process.mechanism,
+      strategy: process.strategy,
+      ...(process.selectionModelSymbol ? { selectionModel: source(process.selectionModelSymbol) } : {}),
+    };
   }
   if (process.kind === 'custom') return { kind: 'custom', description: process.description };
   return { kind: 'exact' };
+}
+
+function toCoreTransform(transform?: VariableTransform): CoreVariableTransform | undefined {
+  if (!transform) return undefined;
+  return {
+    kind: transform.kind,
+    forward: transform.forward ? source(transform.forward) : undefined,
+    inverse: transform.inverse ? source(transform.inverse) : undefined,
+    jacobianOwner: transform.jacobianOwner,
+  };
 }
 
 function constraintsToDomain(constraints?: Constraint[]): Domain | undefined {

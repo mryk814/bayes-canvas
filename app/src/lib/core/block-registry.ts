@@ -77,6 +77,75 @@ export const builtInBlockRegistry = new InMemoryBlockRegistry([
     ],
     ['state_count', 'marginalize_states'],
   ),
+  block(
+    'survival',
+    'Survival model',
+    'Hazard and cumulative-hazard contract with explicit event and censoring inputs.',
+    [
+      input('time', 'Observed time', 'data'),
+      input('event', 'Event indicator', 'data'),
+      optionalInput('interval_lower', 'Interval lower time', 'data'),
+      optionalInput('interval_upper', 'Interval upper time', 'data'),
+      input('hazard', 'Hazard function', 'parameter'),
+      input('cumulative_hazard', 'Cumulative hazard', 'parameter'),
+      output('log_likelihood', 'Survival log likelihood', 'log_density'),
+    ],
+    ['likelihood_family', 'censoring', 'time_axis'],
+  ),
+  block(
+    'competing_risks',
+    'Competing-risks model',
+    'Cause-specific hazard contract with all-cause cumulative hazard.',
+    [
+      input('time', 'Observed time', 'data'),
+      input('event', 'Event indicator', 'data'),
+      input('cause', 'Observed cause', 'data'),
+      optionalInput('interval_lower', 'Interval lower time', 'data'),
+      optionalInput('interval_upper', 'Interval upper time', 'data'),
+      input('cause_hazards', 'Cause-specific hazards', 'parameter'),
+      input('cumulative_hazard', 'All-cause cumulative hazard', 'parameter'),
+      output('cause_log_likelihood', 'Cause-specific log likelihood', 'log_density'),
+    ],
+    ['risk_count', 'censoring', 'time_axis'],
+  ),
+  block(
+    'spatial_gmrf',
+    'Spatial CAR / GMRF',
+    'Adjacency-aware spatial random effect with explicit intrinsic identification.',
+    [
+      input('adjacency', 'Adjacency structure', 'data'),
+      input('spatial_index', 'Observation-to-region index', 'data'),
+      input('precision', 'Spatial precision', 'parameter'),
+      output('spatial_effect', 'Spatial effect', 'latent_process'),
+    ],
+    ['family', 'intrinsic', 'constraint', 'spatial_axis'],
+  ),
+  block(
+    'differential_process',
+    'ODE / SDE process',
+    'Differential state process with solver and observation-model boundary.',
+    [
+      input('initial_state', 'Initial state', 'parameter'),
+      input('dynamics', 'Dynamics function', 'parameter'),
+      input('parameters', 'Dynamics parameters', 'parameter'),
+      input('time', 'Evaluation times', 'data'),
+      input('observation_model', 'Observation model', 'parameter'),
+      output('trajectory', 'State trajectory', 'latent_process'),
+    ],
+    ['equation_type', 'solver', 'relative_tolerance', 'absolute_tolerance'],
+  ),
+  block(
+    'copula',
+    'Copula dependence',
+    'Marginal-CDF and dependence contract with explicit Jacobian ownership.',
+    [
+      input('marginals', 'Marginal CDFs', 'parameter'),
+      input('uniforms', 'Uniform-scale values', 'data'),
+      input('dependence', 'Dependence parameters', 'parameter'),
+      output('joint_value', 'Joint value', 'latent_process'),
+    ],
+    ['family', 'dimension', 'jacobian_owner'],
+  ),
 ]);
 
 function block(
@@ -141,6 +210,14 @@ function output(
   semanticRole: BlockDefinition['ports'][number]['semanticRole'],
 ): BlockDefinition['ports'][number] {
   return { id, label, direction: 'output', required: true, multiplicity: 'one', semanticRole };
+}
+
+function optionalInput(
+  id: string,
+  label: string,
+  semanticRole: BlockDefinition['ports'][number]['semanticRole'],
+): BlockDefinition['ports'][number] {
+  return { id, label, direction: 'input', required: false, multiplicity: 'one', semanticRole };
 }
 
 function key(typeId: string, version: string): string {

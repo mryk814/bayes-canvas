@@ -20,6 +20,8 @@ import { modelTemplates } from '../dist-test/samples/modelTemplates.js';
 import { modelCorpus } from '../dist-test/samples/modelCorpus.js';
 import { minimalDistributionRegistry } from '../dist-test/lib/core/registry.js';
 import { hierarchicalRegression } from '../dist-test/lib/core/example.js';
+import { builtInBlockRegistry } from '../dist-test/lib/core/block-registry.js';
+import { BLOCK_PRESETS } from '../dist-test/lib/structureBlockPresets.js';
 import { compileModel } from '../dist-test/lib/core/compiler.js';
 import { loadModelDocumentContract } from '../dist-test/lib/core/import-contract.js';
 import { validateExternalDataContract } from '../dist-test/lib/core/security.js';
@@ -874,6 +876,130 @@ test('round-trips detailed observation processes through the authoring contract'
     mechanism: 'MAR',
     strategy: 'latent_imputation',
   });
+});
+
+test('registers and round-trips every advanced process contract', () => {
+  const advancedTypes = ['survival', 'competing_risks', 'spatial_gmrf', 'differential_process', 'copula'];
+  for (const [index, blockTypeId] of advancedTypes.entries()) {
+    const definition = builtInBlockRegistry.get(blockTypeId, '1.0.0');
+    assert.ok(definition, blockTypeId);
+    assert.ok(definition.ports.some((port) => port.direction === 'input'), blockTypeId);
+    assert.ok(definition.ports.some((port) => port.direction === 'output'), blockTypeId);
+
+    const nodes = [{
+      id: `advanced_${blockTypeId}`,
+      type: 'bayesNode',
+      position: { x: 20 + index * 10, y: 30 },
+      data: structuredClone(BLOCK_PRESETS[blockTypeId]),
+    }];
+    const compiled = compileCanvas(nodes, []);
+    const entity = compiled.document.entities[`advanced_${blockTypeId}`];
+    assert.equal(entity.kind, 'block_instance');
+    assert.equal(entity.blockTypeId, blockTypeId);
+    assert.deepEqual(entity.config, {
+      expression: BLOCK_PRESETS[blockTypeId].expression,
+      validationLevel: 'structured',
+      ...BLOCK_PRESETS[blockTypeId].blockConfig,
+    });
+
+    const projected = projectToReactFlow({ document: compiled.document, layout: compiled.layout });
+    assert.equal(projected.nodes[0].data.blockTypeId, blockTypeId);
+    assert.deepEqual(projected.nodes[0].data.blockConfig, BLOCK_PRESETS[blockTypeId].blockConfig);
+
+    const projections = buildModelViewProjections({
+      document: compiled.document,
+      semantic: compiled.semantic,
+      handoff: buildCanvasHandoff(nodes, [], 'pymc'),
+    });
+    assert.match(projections.find((projection) => projection.id === 'equations').copyText, new RegExp(blockTypeId, 'u'));
+    assert.match(projections.find((projection) => projection.id === 'story').copyText, new RegExp(blockTypeId, 'u'));
+    assert.ok(buildCapabilityReport(compiled.document, 'pymc').some((item) =>
+      item.feature === `${blockTypeId} block` && item.support === 'approximate'));
+  }
+});
+
+test('diagnoses invalid advanced process semantics', () => {
+  const cases = [
+    ['survival', { censoring: 'future' }, 'BC-SURVIVAL-001'],
+    ['competing_risks', { risk_count: 1 }, 'BC-SURVIVAL-002'],
+    ['spatial_gmrf', { intrinsic: true, constraint: 'none' }, 'BC-SPATIAL-002'],
+    ['differential_process', { equation_type: 'PDE' }, 'BC-DIFFERENTIAL-001'],
+    ['copula', { dimension: 1 }, 'BC-COPULA-001'],
+  ];
+  for (const [blockTypeId, configPatch, code] of cases) {
+    const preset = structuredClone(BLOCK_PRESETS[blockTypeId]);
+    preset.blockConfig = { ...preset.blockConfig, ...configPatch };
+    const compiled = compileCanvas([{
+      id: `invalid_${blockTypeId}`,
+      type: 'bayesNode',
+      position: { x: 0, y: 0 },
+      data: preset,
+    }], []);
+    assert.ok(compiled.semantic.diagnostics.some((item) => item.code === code), `${blockTypeId}: ${code}`);
+  }
+});
+
+test('keeps explicit transforms and MNAR selection assumptions across all projections', () => {
+  const nodes = [{
+    id: 'mnar_y',
+    type: 'bayesNode',
+    position: { x: 10, y: 20 },
+    data: {
+      kind: 'likelihood',
+      name: 'y[i]',
+      shape: ['N'],
+      plate: 'obs',
+      observed: true,
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
+      transform: {
+        kind: 'log',
+        forward: 'log(y)',
+        inverse: 'exp(y)',
+        jacobianOwner: 'model',
+      },
+      observationProcess: {
+        kind: 'missing',
+        mechanism: 'MNAR',
+        strategy: 'latent_imputation',
+        selectionModelSymbol: 'alpha_missing + beta_missing * y',
+      },
+    },
+  }];
+  const compiled = compileCanvas(nodes, []);
+  const entity = compiled.document.entities.mnar_y;
+  assert.equal(entity.transform.kind, 'log');
+  assert.equal(entity.transform.jacobianOwner, 'model');
+  assert.equal(entity.observationProcess.selectionModel.source, 'alpha_missing + beta_missing * y');
+  assert.ok(!compiled.semantic.diagnostics.some((item) => item.code === 'BC-OBS-001'));
+
+  const projected = projectToReactFlow({ document: compiled.document, layout: compiled.layout });
+  assert.deepEqual(projected.nodes[0].data.transform, nodes[0].data.transform);
+  assert.deepEqual(projected.nodes[0].data.observationProcess, nodes[0].data.observationProcess);
+
+  const handoff = buildCanvasHandoff(nodes, [], 'pymc');
+  const projections = buildModelViewProjections({
+    document: compiled.document,
+    semantic: compiled.semantic,
+    handoff,
+  });
+  assert.match(projections.find((projection) => projection.id === 'equations').copyText, /Jacobian model/u);
+  assert.match(projections.find((projection) => projection.id === 'story').copyText, /selection alpha_missing/u);
+  assert.match(projections.find((projection) => projection.id === 'contract').copyText, /MNAR selection model/u);
+  assert.ok(handoff.capabilityReport.some((item) => item.feature === 'log transform' && item.support === 'lowered'));
+  assert.ok(handoff.capabilityReport.some((item) => item.feature === 'MNAR selection model'));
+});
+
+test('blocks MNAR handoff when its selection equation is absent', () => {
+  const document = structuredClone(hierarchicalRegression);
+  document.entities.obs_y.observationProcess = {
+    kind: 'missing',
+    mechanism: 'MNAR',
+    strategy: 'latent_imputation',
+  };
+  const compiled = compileModel(document, minimalDistributionRegistry);
+  const diagnostic = compiled.diagnostics.find((item) => item.code === 'BC-OBS-001');
+  assert.ok(diagnostic);
+  assert.equal(diagnostic.blocksHandoff, true);
 });
 
 test('keeps structured block ports distinct and rejects empty truncation bounds', () => {

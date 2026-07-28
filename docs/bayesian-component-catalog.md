@@ -55,6 +55,7 @@ Bayes Canvas treats Bayesian modeling parts as authoring components, not only as
 |---|---|---|---|---|---|---|
 | Exact | Direct observation | Exact | `{kind:"exact"}` | observation note | Default likelihood | No special lint |
 | Missing Imputation | Missing data modeled as latent | Missing | `{kind:"missing", mechanism:"MAR", strategy:"latent_imputation"}` | observation note | Keep mechanism and strategy separate | Mechanism and strategy present |
+| MNAR Selection | Missingness depends on unobserved value | Missing / MNAR | mechanism + strategy + selection equation | selection equation note | Preserve selection assumption separately from imputation | Selection equation required |
 | Measurement Error | Noisy observed covariate | Measurement error | latent true + error scale | observation note | Include `x_obs` and `x_true` relationship | Symbol refs |
 | Censored | Bounds hide true value | Censored | direction + lower/upper | observation note | Use censoring likelihood | Bounds when needed |
 | Truncated | Sample restricted by bounds | Truncated | lower/upper | observation note | Use truncated distribution | Bound syntax |
@@ -68,7 +69,11 @@ Bayes Canvas treats Bayesian modeling parts as authoring components, not only as
 | State Space | Latent dynamic state | State-space | transition + observation blocks | recurrence | Include transition and observation equations | Structured block |
 | HMM | Discrete latent state sequence | HMM | transition/emission blocks | recurrence | Mention discrete marginalization if needed | Opaque/structured |
 | GP Latent Function | Latent function prior | GP latent | `f ~ GP(...)` | GP notation | Include kernel and input domain | Structured block |
-| ODE Process | Deterministic latent dynamics | ODE | state derivative block | differential equation | Include solver and parameters | Opaque |
+| Survival | Time-to-event process | Survival | hazard + cumulative hazard + event | survival log likelihood | Preserve censoring and hazard boundary | Ports, censoring |
+| Competing Risks | Cause-specific event process | Competing risks | cause hazards + all-cause cumulative hazard | cause log likelihood | Preserve cause count and cause index | Ports, cause count |
+| Spatial CAR/GMRF | Adjacency-dependent spatial effect | Spatial CAR / GMRF | adjacency + index + precision | GMRF notation | Preserve intrinsic constraint and spatial axis | Ports, shape, identification |
+| ODE/SDE Process | Differential latent dynamics | ODE / SDE | state derivative/drift block | differential equation | Include solver, tolerances, parameters, observation model | Ports, equation type, solver |
+| Copula | Dependence separated from marginals | Copula | marginal CDFs + uniforms + dependence | joint dependence equation | Preserve marginal transforms and Jacobian owner | Ports, dimension, Jacobian |
 | Mixture Assignment | Latent component assignment | Mixture assignment | categorical latent plus component likelihood | mixture notation | Prefer marginalization where backend supports it | Partial |
 
 ## Constraint / Transform
@@ -82,6 +87,7 @@ Bayes Canvas treats Bayesian modeling parts as authoring components, not only as
 | Sum-to-zero | Identifiability constraint | Sum-to-zero | `{kind:"sum_to_zero"}` | sum note | Preserve contrast constraint | Plate target present |
 | Correlation Matrix | Valid correlation matrix | Correlation matrix | `{kind:"correlation_matrix"}` | correlation note | Prefer Cholesky implementation | Distribution support |
 | Non-centered | Parameterization hint | Non-centered | hint block | note | Implement hierarchy non-centered | Handoff only |
+| Explicit Transform | Forward/inverse parameter transform | Transform | kind + forward + inverse + Jacobian owner | transform equation | Do not duplicate Jacobian correction | Expressions and owner |
 
 ## Implementation Hint
 

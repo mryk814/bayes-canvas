@@ -225,6 +225,7 @@ function buildEquationProjection(
   const deterministic = entities.filter((entity): entity is Extract<ModelEntity, { kind: 'deterministic' }> => entity.kind === 'deterministic');
   const queries = entities.filter((entity): entity is Extract<ModelEntity, { kind: 'query' }> => entity.kind === 'query');
   const factors = entities.filter((entity): entity is Extract<ModelEntity, { kind: 'factor' }> => entity.kind === 'factor');
+  const blocks = entities.filter((entity): entity is Extract<ModelEntity, { kind: 'block_instance' }> => entity.kind === 'block_instance');
   const compilerExpressions = Object.values(semantic.expressions).sort((a, b) => a.path.localeCompare(b.path));
   const sections = compactSections([
     {
@@ -234,7 +235,23 @@ function buildEquationProjection(
       rows: randomVariables.map((entity) => ({
         id: `equation-rv-${entity.id}`,
         text: `${entity.symbol} ~ ${formatDistributionCall(entity.distribution.distributionId, entity.distribution.args)}`,
-        detail: entity.observedDataId ? `observed binding: ${entity.observedDataId}` : entity.role,
+        detail: [
+          entity.observedDataId ? `observed binding: ${entity.observedDataId}` : entity.role,
+          entity.transform ? formatTransform(entity.transform) : undefined,
+          entity.observationProcess ? formatObservationProcess(entity.observationProcess) : undefined,
+        ].filter(Boolean).join('; '),
+        entityId: entity.id,
+        monospace: true,
+      })),
+    },
+    {
+      id: 'equation-blocks',
+      title: '構造過程',
+      summary: `${blocks.length}個の構造ブロック`,
+      rows: blocks.map((entity) => ({
+        id: `equation-block-${entity.id}`,
+        text: `${Object.values(entity.outputs).map((outputId) => entitySymbol(document, outputId)).join(', ') || entity.symbol} := ${sourceTextFromConfig(entity.config.expression) ?? entity.blockTypeId}`,
+        detail: `${entity.blockTypeId}; ${formatBlockConfig(entity.config)}`,
         entityId: entity.id,
         monospace: true,
       })),
@@ -424,7 +441,7 @@ function buildContractProjection(
         ? observedBindings.map((entity) => ({
             id: `binding-${entity.id}`,
             text: `${entity.symbol} -> ${entity.observedDataId}`,
-            detail: entity.observationProcess ? formatObservationProcess(entity.observationProcess.kind) : 'そのまま観測',
+            detail: entity.observationProcess ? formatObservationProcess(entity.observationProcess) : 'そのまま観測',
             entityIds: [entity.id, entity.observedDataId!],
             monospace: true,
           }))
@@ -432,7 +449,20 @@ function buildContractProjection(
             id: 'binding-empty',
             text: '観測データに対応する確率変数が宣言されていません。',
             tone: 'warning',
-          }],
+        }],
+    },
+    {
+      id: 'contract-transforms',
+      title: '変換とJacobian',
+      summary: `${randomVariables.filter((entity) => entity.transform).length}件の明示変換`,
+      rows: randomVariables
+        .filter((entity) => entity.transform)
+        .map((entity) => ({
+          id: `transform-${entity.id}`,
+          text: `${entity.symbol}: ${formatTransform(entity.transform!)}`,
+          entityId: entity.id,
+          monospace: true,
+        })),
     },
     {
       id: 'contract-qoi',
@@ -581,7 +611,9 @@ function formatStoryLine(document: ModelDocument, entity: ModelEntity): string {
   }
   if (entity.kind === 'random_variable') {
     const binding = entity.observedDataId ? ` observed as ${entitySymbol(document, entity.observedDataId)}` : '';
-    return `${entity.symbol} ~ ${formatDistributionCall(entity.distribution.distributionId, entity.distribution.args)}${binding}.`;
+    const process = entity.observationProcess ? ` Observation: ${formatObservationProcess(entity.observationProcess)}.` : '';
+    const transform = entity.transform ? ` Transform: ${formatTransform(entity.transform)}.` : '';
+    return `${entity.symbol} ~ ${formatDistributionCall(entity.distribution.distributionId, entity.distribution.args)}${binding}.${process}${transform}`;
   }
   if (entity.kind === 'deterministic') {
     return `${entity.symbol} = ${entity.expression.source}.`;
@@ -592,7 +624,7 @@ function formatStoryLine(document: ModelDocument, entity: ModelEntity): string {
   if (entity.kind === 'factor') {
     return `Add factor ${entity.symbol}: ${entity.logDensity.source}.`;
   }
-  return `Apply ${entity.blockTypeId} block with inputs ${Object.keys(entity.inputs).join(', ') || 'none'}.`;
+  return `Apply ${entity.blockTypeId} block with inputs ${Object.keys(entity.inputs).join(', ') || 'none'}; ${sourceTextFromConfig(entity.config.expression) ?? formatBlockConfig(entity.config)}.`;
 }
 
 function inferIndexMappings(document: ModelDocument): ProjectionLine[] {
@@ -730,8 +762,35 @@ function formatEntityKind(entity: ModelEntity): string {
   return entity.kind;
 }
 
-function formatObservationProcess(kind: string): string {
-  return kind.replaceAll('_', ' ');
+function formatObservationProcess(process: NonNullable<Extract<ModelEntity, { kind: 'random_variable' }>['observationProcess']>): string {
+  if (process.kind === 'missing') {
+    const selection = process.selectionModel ? `; selection ${process.selectionModel.source}` : '';
+    return `missing (${process.mechanism ?? 'unspecified'}; strategy ${process.strategy ?? 'unspecified'}${selection})`;
+  }
+  if (process.kind === 'censored') {
+    return `${process.direction} censored${process.lower ? `; lower ${process.lower.source}` : ''}${process.upper ? `; upper ${process.upper.source}` : ''}`;
+  }
+  return process.kind.replaceAll('_', ' ');
+}
+
+function formatTransform(transform: NonNullable<Extract<ModelEntity, { kind: 'random_variable' }>['transform']>): string {
+  const forward = transform.forward ? `forward ${transform.forward.source}` : transform.kind;
+  const inverse = transform.inverse ? `; inverse ${transform.inverse.source}` : '';
+  return `${forward}${inverse}; Jacobian ${transform.jacobianOwner}`;
+}
+
+function sourceTextFromConfig(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return undefined;
+  const source = (value as { source?: unknown }).source;
+  return typeof source === 'string' ? source : undefined;
+}
+
+function formatBlockConfig(config: Record<string, unknown>): string {
+  return Object.entries(config)
+    .filter(([key]) => key !== 'expression')
+    .map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : String(value)}`)
+    .join(', ');
 }
 
 function entitySymbol(document: ModelDocument, entityId: EntityId): string {

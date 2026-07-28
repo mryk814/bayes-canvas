@@ -75,7 +75,19 @@ export function generateTexFromDocument(document: ModelDocument): string {
 
 function texLinesForEntity(entity: ModelEntity): string[] {
   if (entity.kind === 'random_variable') {
-    return [`${formatTexExpression(entity.symbol)} &\\sim ${formatDistributionTex(toDistributionSpec(entity))}`];
+    const lines = [`${formatTexExpression(entity.symbol)} &\\sim ${formatDistributionTex(toDistributionSpec(entity))}`];
+    if (entity.transform) {
+      const forward = entity.transform.forward?.source ?? entity.transform.kind;
+      lines.push(`${formatTexExpression(`T_${entity.symbol}`)} &= ${formatTexExpression(forward)} \\quad \\text{Jacobian: ${texText(entity.transform.jacobianOwner)}}`);
+    }
+    if (
+      entity.observationProcess?.kind === 'missing'
+      && entity.observationProcess.mechanism === 'MNAR'
+      && entity.observationProcess.selectionModel
+    ) {
+      lines.push(`${formatTexExpression(`missing_${entity.symbol}`)} &: ${formatTexExpression(entity.observationProcess.selectionModel.source)}`);
+    }
+    return lines;
   }
   if (entity.kind === 'deterministic') {
     return [`${formatTexExpression(entity.symbol)} &= ${formatTexExpression(entity.expression.source)}`];
@@ -86,7 +98,17 @@ function texLinesForEntity(entity: ModelEntity): string[] {
   if (entity.kind === 'query') {
     return [`${formatTexExpression(entity.symbol)} &= ${formatTexExpression(entity.expression.source)}`];
   }
+  if (entity.kind === 'block_instance') {
+    const expression = typeof entity.config.expression === 'string'
+      ? entity.config.expression
+      : entity.blockTypeId;
+    return [`${formatTexExpression(entity.symbol)} &:= ${formatTexExpression(expression)} \\quad \\text{${texText(entity.blockTypeId)}}`];
+  }
   return [];
+}
+
+function texText(value: string): string {
+  return value.replaceAll('\\', '\\textbackslash{}').replaceAll('_', '\\_').replaceAll('{', '\\{').replaceAll('}', '\\}');
 }
 
 function toDistributionSpec(entity: RandomVariableEntity) {
@@ -106,10 +128,18 @@ function orderedEntities(document: ModelDocument): ModelEntity[] {
 }
 
 function entitySummary(entity: ModelEntity): string {
-  if (entity.kind === 'random_variable') return `; ${entity.role}; ${entity.distribution.distributionId}`;
+  if (entity.kind === 'random_variable') {
+    const transform = entity.transform ? `; transform ${entity.transform.kind}; Jacobian ${entity.transform.jacobianOwner}` : '';
+    const observation = entity.observationProcess?.kind === 'missing'
+      ? `; missing ${entity.observationProcess.mechanism ?? 'unspecified'}; strategy ${entity.observationProcess.strategy ?? 'unspecified'}${entity.observationProcess.selectionModel ? `; selection ${entity.observationProcess.selectionModel.source}` : ''}`
+      : '';
+    return `; ${entity.role}; ${entity.distribution.distributionId}${transform}${observation}`;
+  }
   if (entity.kind === 'deterministic') return `; ${entity.expression.source}`;
   if (entity.kind === 'factor') return `; ${entity.logDensity.source}`;
-  if (entity.kind === 'block_instance') return `; ${entity.blockTypeId}@${entity.blockVersion}`;
+  if (entity.kind === 'block_instance') {
+    return `; ${entity.blockTypeId}@${entity.blockVersion}; config ${JSON.stringify(entity.config)}`;
+  }
   if (entity.kind === 'query') return `; ${entity.expression.source}`;
   return '';
 }

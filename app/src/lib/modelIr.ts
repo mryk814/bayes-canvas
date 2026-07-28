@@ -38,10 +38,21 @@ export interface BayesNodeData extends Record<string, unknown> {
   plate?: string;
   distribution?: DistributionSpec;
   expression?: string;
-  blockTypeId?: 'gp_regression' | 'gam_smooth' | 'mixture' | 'state_space' | 'hidden_markov';
+  blockTypeId?:
+    | 'gp_regression'
+    | 'gam_smooth'
+    | 'mixture'
+    | 'state_space'
+    | 'hidden_markov'
+    | 'survival'
+    | 'competing_risks'
+    | 'spatial_gmrf'
+    | 'differential_process'
+    | 'copula';
   blockInputs?: Record<string, string>;
   blockOutputPort?: string;
   blockConfig?: Record<string, string | number | boolean>;
+  transform?: VariableTransform;
   constraints?: Constraint[];
   hints?: ModelHint[];
   observationProcess?: ObservationProcess;
@@ -137,6 +148,7 @@ export type ObservationProcess =
     kind: 'missing';
     mechanism: 'MCAR' | 'MAR' | 'MNAR' | 'unspecified';
     strategy: 'ignore' | 'latent_imputation' | 'note_only';
+    selectionModelSymbol?: string;
   }
   | { kind: 'measurement_error'; latentTrueSymbol: string; errorScaleSymbol?: string }
   | { kind: 'censored'; direction: 'left' | 'right' | 'interval'; lower?: string; upper?: string }
@@ -145,6 +157,13 @@ export type ObservationProcess =
   | { kind: 'custom'; description: string };
 
 export type ValidationLevel = 'opaque' | 'structured' | 'expanded' | 'linted';
+
+export interface VariableTransform {
+  kind: 'log' | 'logit' | 'ordered' | 'cholesky' | 'custom';
+  forward?: string;
+  inverse?: string;
+  jacobianOwner: 'backend' | 'model' | 'not_required';
+}
 
 export interface IndexMapping {
   id: string;
@@ -1201,7 +1220,7 @@ function formatObservationProcesses(nodes: ModelIr['nodes']): string {
 }
 
 function formatObservationProcess(process: ObservationProcess): string {
-  if (process.kind === 'missing') return `missing (${process.mechanism}; ${process.strategy})`;
+  if (process.kind === 'missing') return `missing (${process.mechanism}; ${process.strategy}${process.selectionModelSymbol ? `; selection ${process.selectionModelSymbol}` : ''})`;
   if (process.kind === 'measurement_error') {
     return `measurement error; latent true ${process.latentTrueSymbol}${process.errorScaleSymbol ? `; scale ${process.errorScaleSymbol}` : ''}`;
   }
@@ -1216,7 +1235,10 @@ function formatObservationProcess(process: ObservationProcess): string {
 
 function formatObservationProcessTex(process: ObservationProcess): string {
   const sym = (s: string) => formatTexExpression(s);
-  if (process.kind === 'missing') return `\\text{missing (${process.mechanism}; ${process.strategy})}`;
+  if (process.kind === 'missing') {
+    const selection = process.selectionModelSymbol ? `;\\; \\text{selection } ${sym(process.selectionModelSymbol)}` : '';
+    return `\\text{missing (${process.mechanism}; ${process.strategy})}${selection}`;
+  }
   if (process.kind === 'measurement_error') {
     const scale = process.errorScaleSymbol ? `,\\; \\text{scale } ${sym(process.errorScaleSymbol)}` : '';
     return `\\text{measurement error; latent } ${sym(process.latentTrueSymbol)}${scale}`;
@@ -1240,7 +1262,10 @@ function formatConstraintsAndHints(nodes: ModelIr['nodes']): string {
   const lines = nodes.flatMap((node) => {
     const constraints = (node.constraints ?? []).map((constraint) => `${node.name}: constraint ${formatConstraint(constraint)}`);
     const hints = (node.hints ?? []).map((hint) => `${node.name}: hint ${formatHint(hint)}`);
-    return [...constraints, ...hints].map((line) => `- ${line}`);
+    const transform = node.transform
+      ? [`${node.name}: transform ${node.transform.kind}; forward ${node.transform.forward ?? 'backend'}; inverse ${node.transform.inverse ?? 'backend'}; Jacobian ${node.transform.jacobianOwner}`]
+      : [];
+    return [...constraints, ...hints, ...transform].map((line) => `- ${line}`);
   });
 
   return lines.length ? lines.join('\n') : '- No constraints or implementation hints declared';

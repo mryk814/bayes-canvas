@@ -69,6 +69,13 @@ export interface DistributionCall {
   };
 }
 
+export interface VariableTransform {
+  kind: 'log' | 'logit' | 'ordered' | 'cholesky' | 'custom';
+  forward?: SourceText;
+  inverse?: SourceText;
+  jacobianOwner: 'backend' | 'model' | 'not_required';
+}
+
 export type ModelConstraint =
   | { kind: 'sum_to_zero'; axisId: AxisId }
   | { kind: 'monotonic'; axisId: AxisId; direction: 'increasing' | 'decreasing' }
@@ -82,7 +89,12 @@ export type ImplementationHint =
 
 export type ObservationProcess =
   | { kind: 'exact' }
-  | { kind: 'missing'; mechanism?: 'MCAR' | 'MAR' | 'MNAR' | 'unspecified'; strategy?: string }
+  | {
+    kind: 'missing';
+    mechanism?: 'MCAR' | 'MAR' | 'MNAR' | 'unspecified';
+    strategy?: string;
+    selectionModel?: SourceText;
+  }
   | { kind: 'measurement_error'; latentTrueEntityId: EntityId; errorScale?: SourceText }
   | { kind: 'censored'; direction: 'left' | 'right' | 'interval'; lower?: SourceText; upper?: SourceText }
   | { kind: 'truncated'; lower?: SourceText; upper?: SourceText }
@@ -111,6 +123,7 @@ export interface RandomVariableEntity extends BaseEntity {
   kind: 'random_variable';
   role: 'parameter' | 'latent' | 'observation';
   distribution: DistributionCall;
+  transform?: VariableTransform;
   observedDataId?: EntityId;
   observationProcess?: ObservationProcess;
   constraints?: ModelConstraint[];

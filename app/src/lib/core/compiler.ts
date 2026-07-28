@@ -339,9 +339,80 @@ function lintBlockInstances(
     diagnostics.push(...lintBlockPorts(document, entity.id, entity, definition, basePath));
     diagnostics.push(...lintBlockConfig(entity, definition, basePath));
     diagnostics.push(...lintBlockBackend(entity, definition, targetBackend, basePath));
+    diagnostics.push(...lintAdvancedBlockSemantics(entity, basePath));
     diagnostics.push(...(definition.validateBoundary?.(entity.config) ?? []));
   }
   return diagnostics;
+}
+
+function lintAdvancedBlockSemantics(
+  entity: Extract<ModelEntity, { kind: 'block_instance' }>,
+  basePath: string,
+): Diagnostic[] {
+  const output: Diagnostic[] = [];
+  const add = (
+    code: string,
+    message: string,
+    configKey: string,
+    severity: Diagnostic['severity'] = 'error',
+  ) => {
+    output.push(diagnostic({
+      code,
+      stage: 'portability',
+      severity,
+      message,
+      path: `${basePath}/config/${escapePointer(configKey)}`,
+      blocksHandoff: severity === 'error',
+    }));
+  };
+
+  if (entity.blockTypeId === 'survival' || entity.blockTypeId === 'competing_risks') {
+    if (!['none', 'right', 'interval'].includes(String(entity.config.censoring))) {
+      add('BC-SURVIVAL-001', 'Survival censoring must be none, right, or interval.', 'censoring');
+    }
+    if (
+      entity.config.censoring === 'interval'
+      && (!entity.inputs.interval_lower?.expression?.source.trim() || !entity.inputs.interval_upper?.expression?.source.trim())
+    ) {
+      add('BC-SURVIVAL-003', 'Interval censoring requires lower and upper time expressions.', 'censoring');
+    }
+    if (entity.blockTypeId === 'competing_risks' && Number(entity.config.risk_count) < 2) {
+      add('BC-SURVIVAL-002', 'Competing risks requires at least two causes.', 'risk_count');
+    }
+  }
+
+  if (entity.blockTypeId === 'spatial_gmrf') {
+    if (!['CAR', 'SAR', 'GMRF'].includes(String(entity.config.family))) {
+      add('BC-SPATIAL-003', 'Spatial family must be CAR, SAR, or GMRF.', 'family');
+    }
+    const spatialAxis = String(entity.config.spatial_axis ?? '');
+    if (!spatialAxis || !entity.valueType.axes.some((axis) => axis.axisId === spatialAxis)) {
+      add('BC-SPATIAL-001', 'Spatial block output must declare the configured spatial axis.', 'spatial_axis');
+    }
+    if (entity.config.intrinsic === true && entity.config.constraint !== 'sum_to_zero') {
+      add('BC-SPATIAL-002', 'Intrinsic CAR/GMRF requires an explicit sum-to-zero identification constraint.', 'constraint');
+    }
+  }
+
+  if (entity.blockTypeId === 'differential_process') {
+    if (!['ODE', 'SDE'].includes(String(entity.config.equation_type))) {
+      add('BC-DIFFERENTIAL-001', 'Differential process equation_type must be ODE or SDE.', 'equation_type');
+    }
+    if (!String(entity.config.solver ?? '').trim()) {
+      add('BC-DIFFERENTIAL-002', 'Differential process requires an explicit solver.', 'solver');
+    }
+  }
+
+  if (entity.blockTypeId === 'copula') {
+    if (Number(entity.config.dimension) < 2) {
+      add('BC-COPULA-001', 'Copula dimension must be at least two.', 'dimension');
+    }
+    if (!['backend', 'model', 'not_required'].includes(String(entity.config.jacobian_owner))) {
+      add('BC-COPULA-002', 'Copula Jacobian ownership must be backend, model, or not_required.', 'jacobian_owner');
+    }
+  }
+
+  return output;
 }
 
 function remapLoweredDiagnostics(diagnostics: Diagnostic[], document: ModelDocument): Diagnostic[] {
@@ -739,6 +810,59 @@ function lintRandomVariable(
     }));
   }
 
+  const observationProcess = entity.observationProcess;
+  if (
+    observationProcess?.kind === 'missing'
+    && observationProcess.mechanism === 'MNAR'
+    && !observationProcess.selectionModel?.source.trim()
+  ) {
+    output.push(diagnostic({
+      code: 'BC-OBS-001',
+      stage: 'schema',
+      severity: 'error',
+      message: 'MNAR requires an explicit selection-model expression.',
+      path: `${basePath}/observationProcess/selectionModel`,
+      blocksHandoff: true,
+    }));
+  }
+  if (
+    observationProcess?.kind === 'missing'
+    && observationProcess.mechanism !== 'MNAR'
+    && observationProcess.selectionModel?.source.trim()
+  ) {
+    output.push(diagnostic({
+      code: 'BC-OBS-002',
+      stage: 'schema',
+      severity: 'warning',
+      message: 'A selection model is declared while the missingness mechanism is not MNAR.',
+      path: `${basePath}/observationProcess/selectionModel`,
+      blocksHandoff: false,
+    }));
+  }
+
+  if (entity.transform) {
+    if (entity.transform.kind === 'custom' && !entity.transform.forward?.source.trim()) {
+      output.push(diagnostic({
+        code: 'BC-TRANSFORM-001',
+        stage: 'schema',
+        severity: 'error',
+        message: 'Custom transform requires a forward expression.',
+        path: `${basePath}/transform/forward`,
+        blocksHandoff: true,
+      }));
+    }
+    if (!['backend', 'model', 'not_required'].includes(entity.transform.jacobianOwner)) {
+      output.push(diagnostic({
+        code: 'BC-TRANSFORM-002',
+        stage: 'schema',
+        severity: 'error',
+        message: 'Transform must declare who owns the Jacobian adjustment.',
+        path: `${basePath}/transform/jacobianOwner`,
+        blocksHandoff: true,
+      }));
+    }
+  }
+
   const declaredDomain = entity.valueType.domain;
   if (declaredDomain && !domainsCompatible(declaredDomain, definition)) {
     output.push(diagnostic({
@@ -941,6 +1065,20 @@ function collectExpressionEntries(document: ModelDocument): ExpressionEntry[] {
       }
       if (entity.distribution.truncation?.upper) {
         output.push({ path: `${basePath}/distribution/truncation/upper`, source: entity.distribution.truncation.upper, ownerEntityId: entityId, role: 'distribution' });
+      }
+      if (entity.transform?.forward) {
+        output.push({ path: `${basePath}/transform/forward`, source: entity.transform.forward, ownerEntityId: entityId, role: 'expression' });
+      }
+      if (entity.transform?.inverse) {
+        output.push({ path: `${basePath}/transform/inverse`, source: entity.transform.inverse, ownerEntityId: entityId, role: 'expression' });
+      }
+      if (entity.observationProcess?.kind === 'missing' && entity.observationProcess.selectionModel) {
+        output.push({
+          path: `${basePath}/observationProcess/selectionModel`,
+          source: entity.observationProcess.selectionModel,
+          ownerEntityId: entityId,
+          role: 'expression',
+        });
       }
     }
     if (entity.kind === 'block_instance') {

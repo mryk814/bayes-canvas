@@ -10,6 +10,7 @@ export type SemanticDiffKind =
   | 'entity_expression_changed'
   | 'observation_binding_changed'
   | 'observation_process_changed'
+  | 'transform_changed'
   | 'constraint_changed'
   | 'hint_changed'
   | 'query_contract_changed'
@@ -72,6 +73,9 @@ function diffEntities(before: Record<string, ModelEntity>, after: Record<string,
       }
       if (JSON.stringify(left.observationProcess) !== JSON.stringify(right.observationProcess)) {
         output.push(change('observation_process_changed', id, '/observationProcess', `Changed observation process for ${right.symbol}`, left.observationProcess, right.observationProcess, 'critical'));
+      }
+      if (JSON.stringify(left.transform) !== JSON.stringify(right.transform)) {
+        output.push(change('transform_changed', id, '/transform', `Changed transform for ${right.symbol}`, left.transform, right.transform, 'critical'));
       }
       if (JSON.stringify(left.constraints) !== JSON.stringify(right.constraints)) {
         output.push(change('constraint_changed', id, '/constraints', `Changed constraints for ${right.symbol}`, left.constraints, right.constraints, 'warning'));

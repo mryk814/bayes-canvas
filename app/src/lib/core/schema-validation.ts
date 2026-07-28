@@ -306,6 +306,9 @@ function validateEntityDeepShape(entity: Record<string, unknown>, path: string):
     if (entity.observationProcess !== undefined) {
       issues.push(...validateObservationProcess(entity.observationProcess, `${path}/observationProcess`));
     }
+    if (entity.transform !== undefined) {
+      issues.push(...validateVariableTransform(entity.transform, `${path}/transform`));
+    }
   }
   if (entity.kind === 'deterministic') issues.push(...validateSourceText(entity.expression, `${path}/expression`));
   if (entity.kind === 'factor') {
@@ -389,7 +392,38 @@ function validateObservationProcess(value: unknown, path: string): SchemaValidat
   if (!['exact', 'missing', 'measurement_error', 'censored', 'truncated', 'rounded', 'custom'].includes(String(value.kind))) {
     return [{ path: `${path}/kind`, message: 'Expected a valid observation process kind.' }];
   }
-  return [];
+  const issues: SchemaValidationIssue[] = [];
+  if (value.kind === 'missing') {
+    if (value.mechanism !== undefined && !['MCAR', 'MAR', 'MNAR', 'unspecified'].includes(String(value.mechanism))) {
+      issues.push({ path: `${path}/mechanism`, message: 'Expected MCAR, MAR, MNAR, or unspecified.' });
+    }
+    if (value.selectionModel !== undefined) {
+      issues.push(...validateSourceText(value.selectionModel, `${path}/selectionModel`));
+    }
+  }
+  if (value.kind === 'measurement_error' && value.errorScale !== undefined) {
+    issues.push(...validateSourceText(value.errorScale, `${path}/errorScale`));
+  }
+  if (value.kind === 'censored' || value.kind === 'truncated') {
+    if (value.lower !== undefined) issues.push(...validateSourceText(value.lower, `${path}/lower`));
+    if (value.upper !== undefined) issues.push(...validateSourceText(value.upper, `${path}/upper`));
+  }
+  if (value.kind === 'rounded') issues.push(...validateSourceText(value.unit, `${path}/unit`));
+  return issues;
+}
+
+function validateVariableTransform(value: unknown, path: string): SchemaValidationIssue[] {
+  if (!isRecord(value)) return [{ path, message: 'Expected an object.' }];
+  const issues: SchemaValidationIssue[] = [];
+  if (!['log', 'logit', 'ordered', 'cholesky', 'custom'].includes(String(value.kind))) {
+    issues.push({ path: `${path}/kind`, message: 'Expected a valid transform kind.' });
+  }
+  if (!['backend', 'model', 'not_required'].includes(String(value.jacobianOwner))) {
+    issues.push({ path: `${path}/jacobianOwner`, message: 'Expected backend, model, or not_required.' });
+  }
+  if (value.forward !== undefined) issues.push(...validateSourceText(value.forward, `${path}/forward`));
+  if (value.inverse !== undefined) issues.push(...validateSourceText(value.inverse, `${path}/inverse`));
+  return issues;
 }
 
 function requireString(value: Record<string, unknown>, path: string, key: string): SchemaValidationIssue[] {

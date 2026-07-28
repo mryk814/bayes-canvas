@@ -34,6 +34,7 @@ import {
   type ModelHint,
   type ObservationProcess,
   type PromptTarget,
+  type VariableTransform,
 } from './lib/modelIr';
 import { initialEdges, initialNodes } from './samples/hierarchicalRegression';
 import { modelTemplates, type ModelTemplate } from './samples/modelTemplates';
@@ -53,6 +54,11 @@ import { makePortablePackage, type CanvasPortablePackage } from './lib/packageEx
 import { useCompiledCanvas } from './hooks/useCompiledCanvas';
 import { useAutosaveRestore, type AutosaveNotice } from './hooks/useAutosaveRestore';
 import { useImportPreview } from './hooks/useImportPreview';
+import {
+  ADVANCED_STRUCTURE_BLOCK_PALETTE,
+  BLOCK_PRESETS,
+  STRUCTURE_BLOCK_PALETTE,
+} from './lib/structureBlockPresets';
 import { useInspectorEditing } from './hooks/useInspectorEditing';
 import { usePatchPreview } from './hooks/usePatchPreview';
 
@@ -137,12 +143,11 @@ const PALETTE_GROUPS: Array<{
   },
   {
     title: '潜在構造',
-    items: [
-      { type: 'block', blockTypeId: 'gp_regression', label: 'Gaussian process', note: '座標に沿う相関' },
-      { type: 'block', blockTypeId: 'state_space', label: 'State space', note: '連続状態の時間発展' },
-      { type: 'block', blockTypeId: 'hidden_markov', label: 'Hidden Markov', note: '離散状態の遷移' },
-      { type: 'block', blockTypeId: 'mixture', label: 'Mixture', note: '複数の生成成分' },
-    ],
+    items: STRUCTURE_BLOCK_PALETTE.map((item) => ({ type: 'block' as const, ...item })),
+  },
+  {
+    title: '高度な過程',
+    items: ADVANCED_STRUCTURE_BLOCK_PALETTE.map((item) => ({ type: 'block' as const, ...item })),
   },
   {
     title: '出力',
@@ -150,6 +155,12 @@ const PALETTE_GROUPS: Array<{
       { type: 'node', kind: 'derived_quantity', label: '確認量', note: '見たい指標や目的量' },
     ],
   },
+];
+
+const BLOCK_TYPE_OPTIONS = [
+  ...STRUCTURE_BLOCK_PALETTE,
+  { blockTypeId: 'gam_smooth' as const, label: 'GAM smooth', note: '基底による平滑項' },
+  ...ADVANCED_STRUCTURE_BLOCK_PALETTE,
 ];
 
 const LEGACY_STORAGE_KEY = 'bayes-canvas:model';
@@ -188,70 +199,6 @@ const OBSERVATION_OPTIONS = [
   { value: 'truncated', label: '切断あり' },
   { value: 'rounded', label: '丸められた値' },
 ] as const;
-
-const BLOCK_PRESETS: Record<NonNullable<BayesNodeData['blockTypeId']>, BayesNodeData> = {
-  gp_regression: {
-    kind: 'model_block',
-    name: 'f_gp[i]',
-    shape: ['N'],
-    plate: 'obs',
-    expression: 'f_gp = GP(coordinates; kernel)',
-    blockTypeId: 'gp_regression',
-    blockInputs: { coordinates: 'x[i]', kernel: 'RBF(ell, rho)' },
-    blockOutputPort: 'latent_function',
-    blockConfig: { approximation: 'exact' },
-    validationLevel: 'structured',
-    notes: 'Kernel family and approximation choice remain explicit for implementation.',
-  },
-  gam_smooth: {
-    kind: 'model_block',
-    name: 'f_smooth[i]',
-    shape: ['N'],
-    plate: 'obs',
-    expression: 'f_smooth = basis(x) @ coefficients',
-    blockTypeId: 'gam_smooth',
-    blockInputs: { predictor: 'x[i]', basis: 'B(x) @ beta_smooth' },
-    blockOutputPort: 'smooth_effect',
-    blockConfig: { basis_family: 'spline', basis_count: 10 },
-    validationLevel: 'structured',
-  },
-  mixture: {
-    kind: 'model_block',
-    name: 'mixture_value[i]',
-    shape: ['N'],
-    plate: 'obs',
-    expression: 'mixture_value ~ Mixture(weights, components)',
-    blockTypeId: 'mixture',
-    blockInputs: { weights: 'weights', components: 'components' },
-    blockOutputPort: 'mixture_value',
-    blockConfig: { component_count: 2, marginalize_assignments: true },
-    validationLevel: 'structured',
-  },
-  state_space: {
-    kind: 'model_block',
-    name: 'state[t]',
-    shape: ['T'],
-    plate: 'time',
-    expression: 'state[t] = transition(state[t-1]) + innovation[t]',
-    blockTypeId: 'state_space',
-    blockInputs: { initial_state: 'state[1]', transition: 'transition(state[t-1])', innovation: 'sigma_state' },
-    blockOutputPort: 'state',
-    blockConfig: { transition_family: 'linear_gaussian', time_axis: 'time' },
-    validationLevel: 'structured',
-  },
-  hidden_markov: {
-    kind: 'model_block',
-    name: 'state[t]',
-    shape: ['T'],
-    plate: 'time',
-    expression: 'state[t] ~ Categorical(transition_matrix[state[t-1]])',
-    blockTypeId: 'hidden_markov',
-    blockInputs: { initial_probs: 'initial_probs', transition_matrix: 'transition_matrix', emission: 'emission[state[t]]' },
-    blockOutputPort: 'state_sequence',
-    blockConfig: { state_count: 2, marginalize_states: true },
-    validationLevel: 'structured',
-  },
-};
 
 const EDGE_ROUTE_SPACING = 18;
 const EDGE_ENDPOINT_SPACING = 12;
@@ -1414,6 +1361,7 @@ function ObservationProcessEditor({
                 onChange({
                   ...process,
                   mechanism: event.target.value as Extract<ObservationProcess, { kind: 'missing' }>['mechanism'],
+                  selectionModelSymbol: event.target.value === 'MNAR' ? process.selectionModelSymbol : undefined,
                 })
               }
             >
@@ -1439,6 +1387,21 @@ function ObservationProcessEditor({
               <option value="note_only">判断を保留</option>
             </select>
           </label>
+          {process.mechanism === 'MNAR' ? (
+            <label>
+              選択式
+              <input
+                placeholder="logit(p_missing) = alpha_m + beta_m * y"
+                value={process.selectionModelSymbol ?? ''}
+                onChange={(event) =>
+                  onChange({
+                    ...process,
+                    selectionModelSymbol: event.target.value || undefined,
+                  })
+                }
+              />
+            </label>
+          ) : null}
         </div>
       ) : null}
       {process?.kind === 'measurement_error' ? (
@@ -1533,6 +1496,80 @@ function ObservationProcessEditor({
             onChange={(event) => onChange({ ...process, description: event.target.value })}
           />
         </label>
+      ) : null}
+    </div>
+  );
+}
+
+function createVariableTransform(kind: string): VariableTransform | undefined {
+  if (!kind) return undefined;
+  if (kind === 'log') return { kind, forward: 'log(value)', inverse: 'exp(value)', jacobianOwner: 'backend' };
+  if (kind === 'logit') return { kind, forward: 'logit(value)', inverse: 'inv_logit(value)', jacobianOwner: 'backend' };
+  if (kind === 'ordered') return { kind, jacobianOwner: 'backend' };
+  if (kind === 'cholesky') return { kind, jacobianOwner: 'backend' };
+  return { kind: 'custom', forward: 'transform(value)', inverse: 'inverse(value)', jacobianOwner: 'model' };
+}
+
+function VariableTransformEditor({
+  transform,
+  onChange,
+}: {
+  transform?: VariableTransform;
+  onChange: (transform: VariableTransform | undefined) => void;
+}) {
+  return (
+    <div className="variable-transform-editor">
+      <label>
+        変換
+        <select
+          value={transform?.kind ?? ''}
+          onChange={(event) => onChange(createVariableTransform(event.target.value))}
+        >
+          <option value="">なし</option>
+          <option value="log">log</option>
+          <option value="logit">logit</option>
+          <option value="ordered">ordered</option>
+          <option value="cholesky">Cholesky</option>
+          <option value="custom">custom</option>
+        </select>
+      </label>
+      {transform ? (
+        <>
+          <div className="field-grid">
+            <label>
+              順変換
+              <input
+                placeholder="log(value)"
+                value={transform.forward ?? ''}
+                onChange={(event) => onChange({ ...transform, forward: event.target.value || undefined })}
+              />
+            </label>
+            <label>
+              逆変換
+              <input
+                placeholder="exp(value)"
+                value={transform.inverse ?? ''}
+                onChange={(event) => onChange({ ...transform, inverse: event.target.value || undefined })}
+              />
+            </label>
+          </div>
+          <label>
+            Jacobianを担う側
+            <select
+              value={transform.jacobianOwner}
+              onChange={(event) =>
+                onChange({
+                  ...transform,
+                  jacobianOwner: event.target.value as VariableTransform['jacobianOwner'],
+                })
+              }
+            >
+              <option value="backend">backend</option>
+              <option value="model">model</option>
+              <option value="not_required">不要</option>
+            </select>
+          </label>
+        </>
       ) : null}
     </div>
   );
@@ -1991,6 +2028,7 @@ export function App() {
   const showsConstraintsEditor = Boolean(
     selectedData && ['parameter', 'hyperparameter', 'latent'].includes(selectedData.kind),
   );
+  const showsTransformEditor = showsDistributionEditor;
   const selectedDistributionSupportLabel = selectedData?.distribution
     ? formatSupportLabel(getDistributionSupport(selectedData.distribution))
     : undefined;
@@ -3645,6 +3683,12 @@ export function App() {
                       ) : null}
                     </>
                   ) : null}
+                  {showsTransformEditor ? (
+                    <VariableTransformEditor
+                      transform={selectedData.transform}
+                      onChange={(transform) => updateSelectedNodeData({ transform })}
+                    />
+                  ) : null}
                   {showsBlockEditor && selectedData ? (
                     <div className="block-contract-editor">
                       <label>
@@ -3659,11 +3703,11 @@ export function App() {
                             )
                           }
                         >
-                          <option value="gp_regression">Gaussian process</option>
-                          <option value="gam_smooth">GAM smooth</option>
-                          <option value="state_space">State space</option>
-                          <option value="hidden_markov">Hidden Markov</option>
-                          <option value="mixture">Mixture</option>
+                          {BLOCK_TYPE_OPTIONS.map((option) => (
+                            <option key={option.blockTypeId} value={option.blockTypeId}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </label>
                       <div className="block-port-list">
@@ -3684,6 +3728,42 @@ export function App() {
                           </label>
                         ))}
                       </div>
+                      <div className="block-config-list">
+                        {Object.entries(selectedData.blockConfig ?? {}).map(([configKey, configValue]) => (
+                          <label key={configKey}>
+                            {configKey}
+                            {typeof configValue === 'boolean' ? (
+                              <input
+                                type="checkbox"
+                                checked={configValue}
+                                onChange={(event) =>
+                                  updateSelectedNodeData({
+                                    blockConfig: {
+                                      ...(selectedData.blockConfig ?? {}),
+                                      [configKey]: event.target.checked,
+                                    },
+                                  })
+                                }
+                              />
+                            ) : (
+                              <input
+                                type={typeof configValue === 'number' ? 'number' : 'text'}
+                                value={String(configValue)}
+                                onChange={(event) =>
+                                  updateSelectedNodeData({
+                                    blockConfig: {
+                                      ...(selectedData.blockConfig ?? {}),
+                                      [configKey]: typeof configValue === 'number'
+                                        ? Number(event.target.value)
+                                        : event.target.value,
+                                    },
+                                  })
+                                }
+                              />
+                            )}
+                          </label>
+                        ))}
+                      </div>
                       <div className="shape-readout">
                         <span className="shape-readout-label">出力port</span>
                         <strong className="shape-readout-formula">{selectedData.blockOutputPort ?? 'output'}</strong>
@@ -3701,7 +3781,7 @@ export function App() {
                       />
                     </label>
                   ) : null}
-                  {!showsObservedEditor && !showsDistributionEditor && !showsExpressionEditor ? (
+                  {!showsObservedEditor && !showsDistributionEditor && !showsExpressionEditor && !showsBlockEditor ? (
                     <p className="empty-note">この種類に追加のモデル定義はありません。</p>
                   ) : null}
                 </div>
