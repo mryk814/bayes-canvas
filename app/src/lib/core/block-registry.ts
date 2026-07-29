@@ -146,6 +146,38 @@ export const builtInBlockRegistry = new InMemoryBlockRegistry([
     ],
     ['family', 'dimension', 'jacobian_owner'],
   ),
+  block(
+    'causal_estimand',
+    'Causal estimand',
+    'Intervention contrast with explicit treatment, outcome model, identification strategy, and assumptions.',
+    [
+      input('treatment', 'Treatment', 'data'),
+      input('outcome_model', 'Outcome model', 'prediction'),
+      optionalInput('confounders', 'Adjustment set', 'data'),
+      optionalInput('instrument', 'Instrument', 'data'),
+      output('estimand', 'Causal contrast', 'deterministic_value'),
+    ],
+    [
+      'estimand',
+      'identification_strategy',
+      'intervention_reference',
+      'intervention_active',
+      'positivity_reviewed',
+      'consistency_reviewed',
+    ],
+  ),
+  block(
+    'dirichlet_process_mixture',
+    'Dirichlet-process mixture',
+    'Nonparametric mixture boundary with base measure, concentration, and explicit finite approximation policy.',
+    [
+      input('observations', 'Observations', 'data'),
+      input('base_measure', 'Base measure', 'parameter'),
+      input('concentration', 'Concentration', 'parameter'),
+      output('random_measure', 'Random measure', 'latent_process'),
+    ],
+    ['representation', 'truncation_level', 'marginalize_assignments', 'cluster_axis'],
+  ),
 ]);
 
 function block(

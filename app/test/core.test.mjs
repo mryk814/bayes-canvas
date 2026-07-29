@@ -23,7 +23,16 @@ import { hierarchicalRegression } from '../dist-test/lib/core/example.js';
 import { builtInBlockRegistry } from '../dist-test/lib/core/block-registry.js';
 import { BLOCK_PRESETS } from '../dist-test/lib/structureBlockPresets.js';
 import { dataContractToNodes, formatDataContract, parseDataContractInput } from '../dist-test/lib/dataContract.js';
+import { formatProfileContract, profileDelimitedData } from '../dist-test/lib/dataProfiler.js';
 import { extractJsonCandidates, parseImportJsonText } from '../dist-test/lib/importText.js';
+import {
+  buildModelScorecard,
+  buildSensitivityScenarios,
+  generateCriticismPrompt,
+  generateModelCardMarkdown,
+  persistModelEvidence,
+  validateModelEvidence,
+} from '../dist-test/lib/modelEvidence.js';
 import {
   applyModelingRecipe,
   buildPriorPredictivePlan,
@@ -88,6 +97,114 @@ test('extracts balanced import JSON from natural AI responses', () => {
     parseImportJsonText(response, { maxBytes: 10000, maxDepth: 20 }),
     { schemaVersion: '1.0.0', nested: { text: 'brace } inside string' } },
   );
+});
+
+test('profiles CSV data into an editable canonical data contract', () => {
+  const profile = profileDelimitedData([
+    'outcome,temperature,group_id,known_se,note',
+    '12.5,20.1,A,0.3,"stable, measured"',
+    'NA,21.4,B,0.4,"repeat"',
+    '10.2,19.8,A,0.2,"stable, measured"',
+  ].join('\n'));
+  assert.equal(profile.rowCount, 3);
+  assert.equal(profile.columns[0].field.role, 'outcome');
+  assert.equal(profile.columns[0].field.missing, 'possible');
+  assert.equal(profile.columns[2].field.role, 'index');
+  assert.equal(profile.columns[3].field.role, 'known_error');
+  assert.deepEqual(profile.columns[2].field.levels, ['A', 'B']);
+  assert.match(formatProfileContract(profile), /known_se,positive,known_error,N,,none/u);
+
+  const nodes = dataContractToNodes(profile.contract, [], 0);
+  const compiled = compileCanvas(nodes, []);
+  assert.equal(compiled.document.entities.data_outcome.dataRole, 'observed_value');
+  assert.equal(compiled.document.entities.data_group_id.valueType.scalar, 'category');
+  assert.equal(compiled.document.entities.data_known_se.dataRole, 'known_error');
+  const projected = projectToReactFlow({ document: compiled.document, layout: compiled.layout });
+  assert.equal(projected.nodes.find((node) => node.id === 'data_known_se').data.scalarType, 'real');
+  assert.equal(projected.nodes.find((node) => node.id === 'data_known_se').data.dataRole, 'known_error');
+  const roundTripped = compileCanvas(projected.nodes, projected.edges);
+  assert.equal(roundTripped.document.entities.data_known_se.valueType.domain.kind, 'positive');
+});
+
+test('validates model evidence and builds scorecard, sensitivity, and model card outputs', () => {
+  const compiled = compileCanvas(initialNodes, initialEdges);
+  const fingerprint = 'abc123';
+  const evidence = validateModelEvidence({
+    evidenceVersion: 'bayes-canvas-evidence@1',
+    specificationFingerprint: fingerprint,
+    runType: 'prior_predictive',
+    createdAt: '2026-07-29T00:00:00.000Z',
+    backend: 'numpyro',
+    status: 'review',
+    metrics: [{
+      id: 'range-y',
+      label: 'y range',
+      value: '[-3, 3]',
+      status: 'pass',
+      entityIds: ['y'],
+    }],
+    findings: [{
+      id: 'wide-beta',
+      severity: 'warning',
+      title: 'beta prior is wide',
+      detail: 'Prior predictive tails exceed the plausible range.',
+      entityIds: ['beta'],
+      suggestedPatch: [{
+        op: 'replace',
+        path: '/entities/beta/distribution/args/sigma/source',
+        value: '0.5',
+      }],
+    }],
+    notes: [],
+  });
+  assert.equal(evidence.metrics[0].status, 'pass');
+  const scorecard = buildModelScorecard(compiled.document, compiled.semantic.diagnostics);
+  assert.equal(scorecard.dimensions.length, 5);
+  assert.ok(scorecard.overall > 0);
+  const scenarios = buildSensitivityScenarios(compiled.document);
+  assert.ok(scenarios.some((scenario) => scenario.id.includes('beta')));
+  assert.ok(scenarios.some((scenario) => scenario.id.includes('student-t')));
+  assert.match(generateCriticismPrompt(compiled.document, fingerprint, scenarios), /bayes-canvas-evidence@1/u);
+  assert.match(generateModelCardMarkdown(compiled.document, [], scorecard, [evidence]), /Validation evidence/u);
+});
+
+test('bounds the local Evidence ledger while preserving the newest runs', () => {
+  const previousLocalStorage = globalThis.localStorage;
+  let stored = '';
+  globalThis.localStorage = {
+    getItem: () => stored || null,
+    removeItem: () => {
+      stored = '';
+    },
+    setItem: (_key, value) => {
+      stored = value;
+    },
+  };
+  try {
+    const runs = Array.from({ length: 31 }, (_, index) => ({
+      evidenceVersion: 'bayes-canvas-evidence@1',
+      specificationFingerprint: `fingerprint-${index}`,
+      runType: 'prior_predictive',
+      createdAt: '2026-07-29T00:00:00.000Z',
+      backend: 'numpyro',
+      status: 'passed',
+      metrics: [],
+      findings: [],
+      notes: [],
+    }));
+    const bounded = persistModelEvidence(runs);
+    assert.equal(bounded.length, 30);
+    assert.equal(bounded[0].specificationFingerprint, 'fingerprint-0');
+    assert.equal(JSON.parse(stored).at(-1).specificationFingerprint, 'fingerprint-29');
+
+    const largeRuns = runs.slice(0, 3).map((run) => ({ ...run, notes: ['x'.repeat(900_000)] }));
+    const sizeBounded = persistModelEvidence(largeRuns);
+    assert.equal(sizeBounded.length, 2);
+    assert.equal(sizeBounded[0].specificationFingerprint, 'fingerprint-0');
+  } finally {
+    if (previousLocalStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previousLocalStorage;
+  }
 });
 
 test('compares persisted model variants and builds prior predictive review prompts', () => {
@@ -994,6 +1111,8 @@ test('diagnoses invalid advanced process semantics', () => {
     ['spatial_gmrf', { intrinsic: true, constraint: 'none' }, 'BC-SPATIAL-002'],
     ['differential_process', { equation_type: 'PDE' }, 'BC-DIFFERENTIAL-001'],
     ['copula', { dimension: 1 }, 'BC-COPULA-001'],
+    ['causal_estimand', { estimand: 'effect' }, 'BC-CAUSAL-001'],
+    ['dirichlet_process_mixture', { truncation_level: 1 }, 'BC-DP-002'],
   ];
   for (const [blockTypeId, configPatch, code] of cases) {
     const preset = structuredClone(BLOCK_PRESETS[blockTypeId]);

@@ -479,6 +479,89 @@ function lintAdvancedBlockSemantics(
     }
   }
 
+  if (entity.blockTypeId === 'causal_estimand') {
+    if (!['ATE', 'ATT', 'CATE'].includes(String(entity.config.estimand))) {
+      add(
+        'BC-CAUSAL-001',
+        'Causal estimand must be ATE, ATT, or CATE.',
+        'estimand',
+        'error',
+        { title: 'ATEへ設定', value: 'ATE' },
+      );
+    }
+    const strategy = String(entity.config.identification_strategy);
+    if (!['randomized', 'backdoor', 'frontdoor', 'instrumental_variable'].includes(strategy)) {
+      add(
+        'BC-CAUSAL-002',
+        'Identification strategy must be randomized, backdoor, frontdoor, or instrumental_variable.',
+        'identification_strategy',
+        'error',
+        { title: 'backdoor調整へ設定', value: 'backdoor' },
+      );
+    }
+    if (strategy === 'backdoor' && !entity.inputs.confounders?.expression?.source.trim()) {
+      add('BC-CAUSAL-003', 'Backdoor identification requires an explicit adjustment set.', 'identification_strategy');
+    }
+    if (strategy === 'instrumental_variable' && !entity.inputs.instrument?.expression?.source.trim()) {
+      add('BC-CAUSAL-004', 'Instrumental-variable identification requires an explicit instrument.', 'identification_strategy');
+    }
+    if (entity.config.positivity_reviewed !== true) {
+      add(
+        'BC-CAUSAL-005',
+        'Positivity has not been reviewed for the declared intervention.',
+        'positivity_reviewed',
+        'warning',
+        { title: 'positivity確認済みにする', value: true },
+      );
+    }
+    if (entity.config.consistency_reviewed !== true) {
+      add(
+        'BC-CAUSAL-006',
+        'Consistency/SUTVA has not been reviewed for the declared intervention.',
+        'consistency_reviewed',
+        'warning',
+        { title: 'consistency確認済みにする', value: true },
+      );
+    }
+  }
+
+  if (entity.blockTypeId === 'dirichlet_process_mixture') {
+    const representation = String(entity.config.representation);
+    if (!['truncated_stick_breaking', 'collapsed', 'crp'].includes(representation)) {
+      add(
+        'BC-DP-001',
+        'DP representation must be truncated_stick_breaking, collapsed, or crp.',
+        'representation',
+        'error',
+        { title: 'truncated stick-breakingへ設定', value: 'truncated_stick_breaking' },
+      );
+    }
+    if (
+      representation === 'truncated_stick_breaking'
+      && (!Number.isInteger(Number(entity.config.truncation_level)) || Number(entity.config.truncation_level) < 2)
+    ) {
+      add(
+        'BC-DP-002',
+        'Truncated stick-breaking requires an integer truncation level of at least two.',
+        'truncation_level',
+        'error',
+        { title: '打切りレベルを20へ設定', value: 20 },
+      );
+    }
+    if (
+      representation === 'truncated_stick_breaking'
+      && String(entity.config.cluster_axis ?? '').trim() === ''
+    ) {
+      add(
+        'BC-DP-003',
+        'Truncated stick-breaking requires a declared cluster axis.',
+        'cluster_axis',
+        'error',
+        { title: 'cluster軸をKへ設定', value: 'K' },
+      );
+    }
+  }
+
   return output;
 }
 

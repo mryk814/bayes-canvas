@@ -295,7 +295,7 @@ function validateModelDocumentDeepShape(value: Record<string, unknown>): SchemaV
 
 function validateEntityDeepShape(entity: Record<string, unknown>, path: string): SchemaValidationIssue[] {
   const issues: SchemaValidationIssue[] = [];
-  if (entity.kind === 'data' && !['observed_value', 'predictor', 'index', 'constant', 'coordinate', 'metadata'].includes(String(entity.dataRole))) {
+  if (entity.kind === 'data' && !['observed_value', 'predictor', 'index', 'constant', 'coordinate', 'known_error', 'metadata'].includes(String(entity.dataRole))) {
     issues.push({ path: `${path}/dataRole`, message: 'Expected a valid data role.' });
   }
   if (entity.kind === 'random_variable') {

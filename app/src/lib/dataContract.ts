@@ -74,6 +74,10 @@ export function dataContractToNodes(
       data: {
         kind: 'data',
         name: shape ? `${field.name}[${inferIndex(plate)}]` : field.name,
+        scalarType: field.scalar === 'positive' ? 'real' : field.scalar,
+        dataRole: toDataRole(field.role),
+        unit: field.unit,
+        missingValuePolicy: field.missing === 'none' ? undefined : `missing=${field.missing}`,
         shape: shape ? [shape] : undefined,
         plate,
         observed: true,
@@ -160,4 +164,10 @@ function formatFieldNotes(field: DataFieldContract, timestamp: number): string {
 
 function stableId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9_]+/gu, '_').replace(/^_+|_+$/gu, '') || 'column';
+}
+
+function toDataRole(role: DataFieldRole): NonNullable<BayesNodeData['dataRole']> {
+  if (role === 'outcome') return 'observed_value';
+  if (role === 'known_error') return 'known_error';
+  return role;
 }

@@ -21,6 +21,8 @@ export const ADVANCED_STRUCTURE_BLOCK_PALETTE: StructureBlockPaletteItem[] = [
   { blockTypeId: 'spatial_gmrf', label: 'Spatial CAR / GMRF', note: '隣接する空間効果' },
   { blockTypeId: 'differential_process', label: 'ODE / SDE', note: '微分方程式の状態' },
   { blockTypeId: 'copula', label: 'Copula', note: '周辺分布間の依存' },
+  { blockTypeId: 'causal_estimand', label: 'Causal estimand', note: '介入と識別仮定' },
+  { blockTypeId: 'dirichlet_process_mixture', label: 'DP mixture', note: '成分数を固定しない混合' },
 ];
 
 export const BLOCK_PRESETS: Record<StructureBlockTypeId, BayesNodeData> = {
@@ -200,5 +202,49 @@ export const BLOCK_PRESETS: Record<StructureBlockTypeId, BayesNodeData> = {
     },
     validationLevel: 'structured',
     notes: 'Marginal transforms, dependence parameters, and Jacobian ownership remain separate.',
+  },
+  causal_estimand: {
+    kind: 'model_block',
+    name: 'causal_contrast',
+    expression: 'E[outcome | do(treatment=1)] - E[outcome | do(treatment=0)]',
+    blockTypeId: 'causal_estimand',
+    blockInputs: {
+      treatment: 'treatment[i]',
+      outcome_model: 'mu[i]',
+      confounders: 'X[i]',
+    },
+    blockOutputPort: 'estimand',
+    blockConfig: {
+      estimand: 'ATE',
+      identification_strategy: 'backdoor',
+      intervention_reference: 0,
+      intervention_active: 1,
+      positivity_reviewed: false,
+      consistency_reviewed: false,
+    },
+    validationLevel: 'structured',
+    notes: 'Estimand, intervention values, adjustment set, and identification assumptions remain explicit.',
+  },
+  dirichlet_process_mixture: {
+    kind: 'model_block',
+    name: 'random_measure[i]',
+    shape: ['N'],
+    plate: 'obs',
+    expression: 'G ~ DP(concentration, base_measure); observation[i] ~ G',
+    blockTypeId: 'dirichlet_process_mixture',
+    blockInputs: {
+      observations: 'y[i]',
+      base_measure: 'Normal(mu_base, sigma_base)',
+      concentration: 'alpha_dp',
+    },
+    blockOutputPort: 'random_measure',
+    blockConfig: {
+      representation: 'truncated_stick_breaking',
+      truncation_level: 20,
+      marginalize_assignments: true,
+      cluster_axis: 'K',
+    },
+    validationLevel: 'structured',
+    notes: 'The infinite random measure and its finite computational approximation are kept distinct.',
   },
 };
