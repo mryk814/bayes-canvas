@@ -263,6 +263,9 @@ test('compiles model templates into canvas documents', () => {
     assert.ok(template.track.length > 0, template.id);
     assert.ok(template.learningGoals.length > 0 && template.learningGoals.length <= 2, template.id);
     assert.ok(template.description.length > 0, template.id);
+    for (const node of template.nodes.filter((candidate) => candidate.data.kind === 'hyperparameter')) {
+      assert.ok(node.data.distribution, `${template.id}:${node.id} hyperparameter must have a prior`);
+    }
     const compiled = compileCanvas(template.nodes, template.edges);
     assert.equal(compiled.layout.modelDocumentId, compiled.document.documentId, template.id);
     assert.ok(compiled.document.entityOrder.length >= 4, template.id);
@@ -335,6 +338,10 @@ test('keeps template model semantics explicit enough for handoff', () => {
   assert.match(String(measurementById.get('mu')?.data.expression), /x_true\[i\]/u);
 
   const bnnById = new Map(smallBnn.nodes.map((node) => [node.id, node]));
+  assert.equal(bnnById.get('tau_hidden')?.data.kind, 'hyperparameter');
+  assert.equal(bnnById.get('tau_output')?.data.kind, 'hyperparameter');
+  assert.equal(bnnById.get('hidden_weight')?.data.distribution?.args.sigma, 'tau_hidden');
+  assert.equal(bnnById.get('output_weight')?.data.distribution?.args.sigma, 'tau_output');
   assert.deepEqual(bnnById.get('hidden')?.data.eventShape, ['H']);
   assert.match(String(bnnById.get('hidden')?.data.expression), /inv_logit/u);
   assert.match(String(bnnById.get('mu')?.data.expression), /dot\(hidden\[i\], output_weight\)/u);
