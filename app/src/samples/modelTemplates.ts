@@ -6,7 +6,11 @@ export interface ModelTemplate {
   id: string;
   name: string;
   family: string;
+  track: '基礎' | '観測過程' | '潜在構造' | '多変量・選択' | '非線形' | '統合例';
+  level: '入門' | '中級' | '発展';
+  sampleKind: 'teaching' | 'case-study';
   description: string;
+  learningGoals: string[];
   status: 'clean' | 'draft';
   expectedDiagnostics: {
     errors: number;
@@ -16,6 +20,15 @@ export interface ModelTemplate {
   nodes: Node<BayesNodeData>[];
   edges: Edge[];
 }
+
+export const modelTemplateTracks: ModelTemplate['track'][] = [
+  '基礎',
+  '観測過程',
+  '潜在構造',
+  '多変量・選択',
+  '非線形',
+  '統合例',
+];
 
 const retailDemandNodes: Node<BayesNodeData>[] = [
   {
@@ -1215,26 +1228,234 @@ const itemResponseEdges: Edge[] = [
   { id: 'difficulty-qoi_item_hardness', source: 'difficulty', target: 'qoi_item_hardness', data: { role: 'query-source' } },
 ];
 
+const measurementErrorNodes: Node<BayesNodeData>[] = [
+  {
+    id: 'x_obs',
+    position: { x: 96, y: 596 },
+    data: {
+      kind: 'data',
+      name: 'x_obs[i]',
+      shape: ['N'],
+      plate: 'obs',
+      observed: true,
+      observationProcess: { kind: 'measurement_error', latentTrueSymbol: 'x_true[i]', errorScaleSymbol: 'sigma_x' },
+      notes: '誤差を含んで観測された説明変数。既知または校正実験から得た sigma_x と組にする。',
+    },
+  },
+  {
+    id: 'sigma_x',
+    position: { x: 96, y: 110 },
+    data: {
+      kind: 'hyperparameter',
+      name: 'sigma_x',
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.5' } },
+    },
+  },
+  {
+    id: 'x_true',
+    position: { x: 432, y: 596 },
+    data: {
+      kind: 'latent',
+      name: 'x_true[i]',
+      shape: ['N'],
+      plate: 'obs',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: 'x_obs[i]', sigma: 'sigma_x' } },
+      notes: '回帰へ渡す真の説明変数。観測値をそのまま共変量にしない。',
+    },
+  },
+  {
+    id: 'alpha',
+    position: { x: 96, y: 278 },
+    data: { kind: 'parameter', name: 'alpha', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '2' } } },
+  },
+  {
+    id: 'beta',
+    position: { x: 432, y: 110 },
+    data: { kind: 'parameter', name: 'beta', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } } },
+  },
+  {
+    id: 'sigma_y',
+    position: { x: 768, y: 110 },
+    data: { kind: 'parameter', name: 'sigma_y', distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } } },
+  },
+  {
+    id: 'mu',
+    position: { x: 768, y: 596 },
+    data: {
+      kind: 'deterministic',
+      name: 'mu[i]',
+      shape: ['N'],
+      plate: 'obs',
+      expression: 'alpha + beta * x_true[i]',
+    },
+  },
+  {
+    id: 'y',
+    position: { x: 1104, y: 596 },
+    data: {
+      kind: 'likelihood',
+      name: 'y[i]',
+      plate: 'obs',
+      observed: true,
+      distribution: { id: 'normal', name: 'Normal', args: { mu: 'mu[i]', sigma: 'sigma_y' } },
+    },
+  },
+];
+
+const measurementErrorEdges: Edge[] = [
+  { id: 'x_obs-x_true', source: 'x_obs', target: 'x_true', data: { role: 'observed-value' } },
+  { id: 'sigma_x-x_true', source: 'sigma_x', target: 'x_true', data: { role: 'likelihood-parameter' } },
+  { id: 'x_true-mu', source: 'x_true', target: 'mu', data: { role: 'latent-input' } },
+  { id: 'alpha-mu', source: 'alpha', target: 'mu', data: { role: 'deterministic-input' } },
+  { id: 'beta-mu', source: 'beta', target: 'mu', data: { role: 'deterministic-input' } },
+  { id: 'mu-y', source: 'mu', target: 'y', data: { role: 'likelihood-parameter' } },
+  { id: 'sigma_y-y', source: 'sigma_y', target: 'y', data: { role: 'likelihood-parameter' } },
+];
+
+const smallBnnNodes: Node<BayesNodeData>[] = [
+  {
+    id: 'x',
+    position: { x: 96, y: 764 },
+    data: { kind: 'data', name: 'x[i]', shape: ['N'], plate: 'obs', observed: true },
+  },
+  {
+    id: 'hidden_weight',
+    position: { x: 96, y: 110 },
+    data: {
+      kind: 'parameter',
+      name: 'hidden_weight[h]',
+      shape: ['H'],
+      plate: 'hidden',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
+      notes: '隠れ層の幅 H は小さく保ち、入力スケールを標準化してから事前分布を決める。',
+    },
+  },
+  {
+    id: 'hidden_bias',
+    position: { x: 96, y: 278 },
+    data: {
+      kind: 'parameter',
+      name: 'hidden_bias[h]',
+      shape: ['H'],
+      plate: 'hidden',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
+    },
+  },
+  {
+    id: 'hidden',
+    position: { x: 432, y: 764 },
+    data: {
+      kind: 'deterministic',
+      name: 'hidden[i]',
+      shape: ['N'],
+      eventShape: ['H'],
+      plate: 'obs',
+      expression: 'inv_logit(hidden_bias + hidden_weight * x[i])',
+      notes: '1入力・1隠れ層の活性。構造を追える小規模 BNN として明示的に書く。',
+    },
+  },
+  {
+    id: 'output_weight',
+    position: { x: 432, y: 110 },
+    data: {
+      kind: 'parameter',
+      name: 'output_weight[h]',
+      shape: ['H'],
+      plate: 'hidden',
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
+    },
+  },
+  {
+    id: 'output_bias',
+    position: { x: 432, y: 278 },
+    data: { kind: 'parameter', name: 'output_bias', distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '2' } } },
+  },
+  {
+    id: 'sigma',
+    position: { x: 768, y: 110 },
+    data: { kind: 'parameter', name: 'sigma', distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } } },
+  },
+  {
+    id: 'mu',
+    position: { x: 768, y: 764 },
+    data: {
+      kind: 'deterministic',
+      name: 'mu[i]',
+      shape: ['N'],
+      plate: 'obs',
+      expression: 'dot(hidden[i], output_weight) + output_bias',
+    },
+  },
+  {
+    id: 'y',
+    position: { x: 1104, y: 764 },
+    data: {
+      kind: 'likelihood',
+      name: 'y[i]',
+      plate: 'obs',
+      observed: true,
+      distribution: { id: 'normal', name: 'Normal', args: { mu: 'mu[i]', sigma: 'sigma' } },
+    },
+  },
+];
+
+const smallBnnEdges: Edge[] = [
+  { id: 'x-hidden', source: 'x', target: 'hidden', data: { role: 'data-input' } },
+  { id: 'hidden_weight-hidden', source: 'hidden_weight', target: 'hidden', data: { role: 'deterministic-input' } },
+  { id: 'hidden_bias-hidden', source: 'hidden_bias', target: 'hidden', data: { role: 'deterministic-input' } },
+  { id: 'hidden-mu', source: 'hidden', target: 'mu', data: { role: 'deterministic-input' } },
+  { id: 'output_weight-mu', source: 'output_weight', target: 'mu', data: { role: 'deterministic-input' } },
+  { id: 'output_bias-mu', source: 'output_bias', target: 'mu', data: { role: 'deterministic-input' } },
+  { id: 'mu-y', source: 'mu', target: 'y', data: { role: 'likelihood-parameter' } },
+  { id: 'sigma-y', source: 'sigma', target: 'y', data: { role: 'likelihood-parameter' } },
+];
+
 export const modelTemplates: ModelTemplate[] = [
   {
     id: 'hierarchical-regression',
     name: '階層回帰',
     family: '回帰',
-    description: 'グループ別切片、観測アウトカム、関心量として扱いやすい傾きを持つ基本モデル。',
+    track: '基礎',
+    level: '入門',
+    sampleKind: 'teaching',
+    description: 'グループ別切片を部分プーリングする、論点を絞った階層 Gaussian 回帰。',
+    learningGoals: ['部分プーリング', 'group index と階層事前分布'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
       'この研究設計ではグループを exchangeable と見なせますか？',
-      '観測過程は打ち切り、丸め、完全観測のどれですか？',
+      'グループ数と各群の観測数は階層分散を識別するのに十分ですか？',
     ],
     nodes: initialNodes,
     edges: initialEdges,
   },
   {
+    id: 'measurement-error-regression',
+    name: '説明変数の測定誤差',
+    family: '回帰',
+    track: '観測過程',
+    level: '中級',
+    sampleKind: 'teaching',
+    description: '観測された説明変数と真の潜在値を分けて回帰へ接続する errors-in-variables モデル。',
+    learningGoals: ['観測値と潜在真値の分離', '測定誤差スケールの明示'],
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
+    reviewQuestions: [
+      '測定誤差の大きさは校正データから既知ですか、それとも同時に推定しますか？',
+      '真の説明変数に追加の母集団分布が必要ですか？',
+    ],
+    nodes: measurementErrorNodes,
+    edges: measurementErrorEdges,
+  },
+  {
     id: 'logistic-regression',
     name: 'ロジスティック回帰',
     family: '二値アウトカム',
+    track: '基礎',
+    level: '入門',
+    sampleKind: 'teaching',
     description: '線形予測子と処置効果係数を持つ二値尤度モデル。',
+    learningGoals: ['Bernoulli 尤度と logit link', '係数から関心量を切り出す'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
@@ -1311,7 +1532,11 @@ export const modelTemplates: ModelTemplate[] = [
     id: 'poisson-count',
     name: 'Poisson count モデル',
     family: 'count アウトカム',
+    track: '基礎',
+    level: '入門',
+    sampleKind: 'teaching',
     description: 'exposure offset を持つ count データ向けの log-rate モデル。',
+    learningGoals: ['Poisson 尤度と log link', 'exposure offset'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
@@ -1374,7 +1599,11 @@ export const modelTemplates: ModelTemplate[] = [
     id: 'uneven-binomial-survey',
     name: '分母が不均一な Binomial 調査',
     family: '調査応答',
+    track: '観測過程',
+    level: '中級',
+    sampleKind: 'teaching',
     description: '行ごとに分母が異なり、一部 predictor に欠測方針が必要な階層 Binomial モデル。',
+    learningGoals: ['行ごとに異なる試行数', '欠測方針と site 階層'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
@@ -1389,7 +1618,11 @@ export const modelTemplates: ModelTemplate[] = [
     id: 'censored-lab-assay',
     name: '打ち切りつき lab assay',
     family: '測定過程',
+    track: '観測過程',
+    level: '中級',
+    sampleKind: 'teaching',
     description: '行ごとの希釈率、batch 効果、検出限界での左打ち切りを持つ LogNormal assay モデル。',
+    learningGoals: ['検出限界による左打ち切り', '希釈補正と batch 効果'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
@@ -1404,7 +1637,11 @@ export const modelTemplates: ModelTemplate[] = [
     id: 'variable-choice-set',
     name: '可変 choice set',
     family: '離散選択',
+    track: '多変量・選択',
+    level: '発展',
+    sampleKind: 'teaching',
     description: '候補属性を行列データとして持ち、利用可能な選択肢が課題ごとに変わる Categorical choice モデル。',
+    learningGoals: ['Categorical choice と候補 mask', '回答者 heterogeneity'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
@@ -1419,7 +1656,11 @@ export const modelTemplates: ModelTemplate[] = [
     id: 'latent-class-mixture',
     name: '潜在クラス混合',
     family: '潜在混合',
+    track: '潜在構造',
+    level: '発展',
+    sampleKind: 'teaching',
     description: '潜在クラス割当、simplex のクラス重み、クラス別アウトカムを持つ有限混合モデル。',
+    learningGoals: ['有限混合と潜在クラス割当', 'simplex と label switching'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
@@ -1434,7 +1675,11 @@ export const modelTemplates: ModelTemplate[] = [
     id: 'latent-trajectory-series',
     name: '潜在軌跡の時系列',
     family: '状態空間',
+    track: '潜在構造',
+    level: '発展',
+    sampleKind: 'teaching',
     description: '観測欠損、頑健な尤度、時変 covariate を持つ time-indexed latent level モデル。',
+    learningGoals: ['random-walk 潜在状態', '欠測と頑健尤度'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
@@ -1449,7 +1694,11 @@ export const modelTemplates: ModelTemplate[] = [
     id: 'two-parameter-irt',
     name: '2パラメータ IRT',
     family: '潜在特性',
+    track: '潜在構造',
+    level: '発展',
+    sampleKind: 'teaching',
     description: '潜在能力、item difficulty、正の discrimination を持つ疎な person-item 反応モデル。',
+    learningGoals: ['person-item の交差 index', '潜在尺度の識別'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
@@ -1464,7 +1713,11 @@ export const modelTemplates: ModelTemplate[] = [
     id: 'correlated-outcome-panel',
     name: '相関アウトカムパネル',
     family: '多変量アウトカム',
+    track: '多変量・選択',
+    level: '発展',
+    sampleKind: 'teaching',
     description: 'ベクトル係数、Cholesky 事前分布、多変量尤度を持つコンパクトな MVN モデル。',
+    learningGoals: ['event 軸を持つ多変量尤度', 'LKJ Cholesky 事前分布'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
@@ -1476,10 +1729,33 @@ export const modelTemplates: ModelTemplate[] = [
     edges: correlatedPanelEdges,
   },
   {
+    id: 'small-bnn-regression',
+    name: '小規模 BNN 回帰',
+    family: '非線形回帰',
+    track: '非線形',
+    level: '発展',
+    sampleKind: 'teaching',
+    description: '1入力・1隠れ層を明示的な重みと活性で書く、追跡可能な Bayesian neural network。',
+    learningGoals: ['隠れ層を deterministic として表す', '重み事前分布による正則化'],
+    status: 'clean',
+    expectedDiagnostics: { errors: 0, warnings: 0 },
+    reviewQuestions: [
+      '線形回帰や spline より BNN を使うだけの非線形性とデータ量がありますか？',
+      '入力の標準化と隠れ幅 H に対して重み事前分布は強すぎませんか？',
+      '予測分布を検証できる train/test の分け方になっていますか？',
+    ],
+    nodes: smallBnnNodes,
+    edges: smallBnnEdges,
+  },
+  {
     id: 'hierarchical-retail-demand',
     name: '階層 retail demand',
     family: '需要予測',
+    track: '統合例',
+    level: '発展',
+    sampleKind: 'case-study',
     description: '市場、時間、チャネル、メディア、測定誤差、QoI を含む ZINB 需要モデル。',
+    learningGoals: ['複数のモデル部品を1つへ統合', '実装 handoff 前の論点棚卸し'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [

@@ -21,15 +21,6 @@ export const initialNodes: Node<BayesNodeData>[] = [
     },
   },
   {
-    id: 'sigma_x',
-    position: { x: 96, y: 446 },
-    data: {
-      kind: 'hyperparameter',
-      name: 'sigma_x',
-      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '0.5' } },
-    },
-  },
-  {
     id: 'alpha',
     position: { x: 432, y: 764 },
     data: {
@@ -38,7 +29,6 @@ export const initialNodes: Node<BayesNodeData>[] = [
       shape: ['J'],
       plate: 'group',
       distribution: { id: 'normal', name: 'Normal', args: { mu: 'alpha_bar', sigma: 'tau_alpha' } },
-      hints: [{ kind: 'parameterization', value: 'non_centered' }],
     },
   },
   {
@@ -68,38 +58,12 @@ export const initialNodes: Node<BayesNodeData>[] = [
       shape: ['N'],
       observed: true,
       plate: 'obs',
-      observationProcess: { kind: 'measurement_error', latentTrueSymbol: 'x_true[i]', errorScaleSymbol: 'sigma_x' },
-    },
-  },
-  {
-    id: 'x_true',
-    position: { x: 432, y: 1250 },
-    data: {
-      kind: 'latent',
-      name: 'x_true[i]',
-      shape: ['N'],
-      observed: false,
-      plate: 'obs',
-      distribution: { id: 'normal', name: 'Normal', args: { mu: 'x[i]', sigma: 'sigma_x' } },
-      notes: '測定誤差を含む観測 x から推定する真の covariate。',
     },
   },
   {
     id: 'group_id',
     position: { x: 432, y: 1082 },
     data: { kind: 'data', name: 'group_id[i]', shape: ['N'], observed: true, plate: 'obs' },
-  },
-  {
-    id: 'y_limit',
-    position: { x: 768, y: 1082 },
-    data: {
-      kind: 'data',
-      name: 'y_limit[i]',
-      shape: ['N'],
-      observed: true,
-      plate: 'obs',
-      notes: '右打ち切りの上限。打ち切りがない行では十分大きい値または欠測規則を確認する。',
-    },
   },
   {
     id: 'mu',
@@ -109,7 +73,7 @@ export const initialNodes: Node<BayesNodeData>[] = [
       name: 'mu[i]',
       shape: ['N'],
       plate: 'obs',
-      expression: 'alpha[group_id[i]] + beta * x_true[i]',
+      expression: 'alpha[group_id[i]] + beta * x[i]',
     },
   },
   {
@@ -121,7 +85,6 @@ export const initialNodes: Node<BayesNodeData>[] = [
       plate: 'obs',
       distribution: { id: 'normal', name: 'Normal', args: { mu: 'mu[i]', sigma: 'sigma' } },
       observed: true,
-      observationProcess: { kind: 'censored', direction: 'right', lower: 'y_limit' },
     },
   },
 ];
@@ -129,13 +92,10 @@ export const initialNodes: Node<BayesNodeData>[] = [
 export const initialEdges: Edge[] = [
   { id: 'alpha_bar-alpha', source: 'alpha_bar', target: 'alpha', data: { role: 'prior-parameter' } },
   { id: 'tau_alpha-alpha', source: 'tau_alpha', target: 'alpha', data: { role: 'prior-parameter' } },
-  { id: 'x-x_true', source: 'x', target: 'x_true', data: { role: 'observed-value' } },
-  { id: 'sigma_x-x_true', source: 'sigma_x', target: 'x_true', data: { role: 'likelihood-parameter' } },
   { id: 'alpha-mu', source: 'alpha', target: 'mu', data: { role: 'deterministic-input' } },
   { id: 'beta-mu', source: 'beta', target: 'mu', data: { role: 'deterministic-input' } },
-  { id: 'x_true-mu', source: 'x_true', target: 'mu', data: { role: 'latent-input' } },
+  { id: 'x-mu', source: 'x', target: 'mu', data: { role: 'data-input' } },
   { id: 'group_id-mu', source: 'group_id', target: 'mu', data: { role: 'index' } },
   { id: 'mu-y', source: 'mu', target: 'y', data: { role: 'likelihood-parameter' } },
   { id: 'sigma-y', source: 'sigma', target: 'y', data: { role: 'likelihood-parameter' } },
-  { id: 'y_limit-y', source: 'y_limit', target: 'y', data: { role: 'observed-value' } },
 ];

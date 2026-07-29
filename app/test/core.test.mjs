@@ -257,8 +257,12 @@ test('compiles the canvas sample through ModelDocument and LayoutDocument', () =
 
 test('compiles model templates into canvas documents', () => {
   assert.ok(modelTemplates.length >= 3);
+  assert.equal(new Set(modelTemplates.map((template) => template.id)).size, modelTemplates.length);
   const handoffTargets = ['review', 'pymc', 'numpyro', 'stan'];
   for (const template of modelTemplates) {
+    assert.ok(template.track.length > 0, template.id);
+    assert.ok(template.learningGoals.length > 0 && template.learningGoals.length <= 2, template.id);
+    assert.ok(template.description.length > 0, template.id);
     const compiled = compileCanvas(template.nodes, template.edges);
     assert.equal(compiled.layout.modelDocumentId, compiled.document.documentId, template.id);
     assert.ok(compiled.document.entityOrder.length >= 4, template.id);
@@ -272,6 +276,7 @@ test('compiles model templates into canvas documents', () => {
       assert.equal(targetCompiled.semantic.readiness.handoff, 'ready', `${template.id}:${target}`);
     }
   }
+  assert.equal(modelTemplates.filter((template) => template.sampleKind === 'case-study').length, 1);
 });
 
 test('preserves event axes for multivariate template nodes', () => {
@@ -308,18 +313,31 @@ test('preserves event axes for multivariate template nodes', () => {
 
 test('keeps template model semantics explicit enough for handoff', () => {
   const hierarchical = modelTemplates.find((candidate) => candidate.id === 'hierarchical-regression');
+  const measurementError = modelTemplates.find((candidate) => candidate.id === 'measurement-error-regression');
+  const smallBnn = modelTemplates.find((candidate) => candidate.id === 'small-bnn-regression');
   const choiceSet = modelTemplates.find((candidate) => candidate.id === 'variable-choice-set');
   const trajectory = modelTemplates.find((candidate) => candidate.id === 'latent-trajectory-series');
   assert.ok(hierarchical);
+  assert.ok(measurementError);
+  assert.ok(smallBnn);
   assert.ok(choiceSet);
   assert.ok(trajectory);
 
   const hierarchicalById = new Map(hierarchical.nodes.map((node) => [node.id, node]));
-  assert.equal(hierarchicalById.get('x_true')?.data.kind, 'latent');
-  assert.equal(hierarchicalById.get('sigma_x')?.data.kind, 'hyperparameter');
-  assert.equal(hierarchicalById.get('sigma_x')?.data.constraints, undefined);
-  assert.match(String(hierarchicalById.get('mu')?.data.expression), /x_true\[i\]/u);
-  assert.ok(hierarchical.edges.some((edge) => edge.source === 'y_limit' && edge.target === 'y'));
+  assert.equal(hierarchicalById.get('alpha')?.data.plate, 'group');
+  assert.equal(hierarchicalById.has('x_true'), false);
+  assert.equal(hierarchicalById.has('y_limit'), false);
+  assert.match(String(hierarchicalById.get('mu')?.data.expression), /x\[i\]/u);
+
+  const measurementById = new Map(measurementError.nodes.map((node) => [node.id, node]));
+  assert.equal(measurementById.get('x_true')?.data.kind, 'latent');
+  assert.equal(measurementById.get('x_obs')?.data.observationProcess?.kind, 'measurement_error');
+  assert.match(String(measurementById.get('mu')?.data.expression), /x_true\[i\]/u);
+
+  const bnnById = new Map(smallBnn.nodes.map((node) => [node.id, node]));
+  assert.deepEqual(bnnById.get('hidden')?.data.eventShape, ['H']);
+  assert.match(String(bnnById.get('hidden')?.data.expression), /inv_logit/u);
+  assert.match(String(bnnById.get('mu')?.data.expression), /dot\(hidden\[i\], output_weight\)/u);
 
   const choiceById = new Map(choiceSet.nodes.map((node) => [node.id, node]));
   assert.equal(choiceById.has('person_bias'), false);

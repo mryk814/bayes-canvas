@@ -47,6 +47,9 @@ The header keeps the current task explicit:
 
 Use **新規・テンプレート** to start from an empty canvas, choose a teaching template, or reopen a saved snapshot. **スナップショット** stores named checkpoints in the browser. Autosave remains separate and is offered as a recovery action after reloading.
 
+各サンプルが何の書き方を示すか、追加・統合するときの基準は
+[`docs/teaching-samples.md`](./docs/teaching-samples.md) にまとめています。
+
 外部AIとの往復、モデル案比較、診断修正、prior predictive、実装receiptは
 [`docs/model-workbench.md`](./docs/model-workbench.md) にまとめています。
 

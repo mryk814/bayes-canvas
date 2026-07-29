@@ -37,7 +37,7 @@ import {
   type VariableTransform,
 } from './lib/modelIr';
 import { initialEdges, initialNodes } from './samples/hierarchicalRegression';
-import { modelTemplates, type ModelTemplate } from './samples/modelTemplates';
+import { modelTemplateTracks, modelTemplates, type ModelTemplate } from './samples/modelTemplates';
 import { TexMath } from './components/TexMath';
 import { DistributionEditor } from './components/DistributionEditor';
 import { CanvasPane, type FlowViewportControls } from './components/CanvasPane';
@@ -3855,14 +3855,28 @@ export function App() {
                   <h2>テンプレート</h2>
                   <span>{modelTemplates.length}</span>
                 </div>
-                <div className="template-list template-grid">
-                  {modelTemplates.map((template) => (
-                    <button key={template.id} type="button" onClick={() => applyModelTemplate(template)}>
-                      <strong>{template.name}</strong>
-                      <span>{template.family} / {template.status}</span>
-                      <small>{template.reviewQuestions[0]}</small>
-                    </button>
-                  ))}
+                <div className="template-catalog">
+                  {modelTemplateTracks.map((track) => {
+                    const templates = modelTemplates.filter((template) => template.track === track);
+                    if (templates.length === 0) return null;
+                    return (
+                      <section className="template-track" key={track}>
+                        <div className="template-track-heading">
+                          <h3>{track}</h3>
+                          <span>{templates.length}</span>
+                        </div>
+                        <div className="template-list template-grid">
+                          {templates.map((template) => (
+                            <button key={template.id} type="button" onClick={() => applyModelTemplate(template)}>
+                              <strong>{template.name}</strong>
+                              <span>{template.level}</span>
+                              <small>{template.learningGoals.join(' · ')}</small>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    );
+                  })}
                 </div>
               </section>
               <section className="snapshots-panel">
