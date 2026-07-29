@@ -26,6 +26,8 @@ portable packageの正式な契約は[Handoff and portable format](./handoff-and
 
 ## データ契約から始める
 
+「読み込み → データ」へCSV / TSVファイルまたは代表行を渡すと、型、role、欠測、category level、数値範囲を推定して編集可能なデータ契約を作ります。推定は先頭500行までで、outcomeを特定できない場合は明示的に確認を求めます。
+
 「組む → 構造」のデータ契約欄は次のCSV headerを使います。
 
 ```csv
@@ -36,6 +38,8 @@ group_id,category,index,N,,none,A|B|C
 ```
 
 `role`は`outcome / predictor / index / coordinate / known_error / metadata`、`type`は`real / integer / boolean / category / positive`です。ここではDataノードと観測契約だけを作り、尤度やpriorを勝手に発明しません。
+
+role、scalar type、unit、missing policyはDataノードの表示メモだけでなく、`ModelDocument`とportable round-tripにも保存されます。
 
 ## モデル案を比較する
 
@@ -48,6 +52,23 @@ group_id,category,index,N,,none,A|B|C
 ## Prior predictiveを設計する
 
 prior、likelihood、制約、shape、単位の確認項目を`ModelDocument`から生成します。「検証promptをコピー」は外部AIへモデル仕様を渡し、posterior fittingをせずprior predictiveだけを評価するよう求めます。
+
+## Model criticismと感度分析
+
+Model ScoreはData binding、Prior intent、Identification、Estimand/QoI、Handoffの5面を別々に示します。単一scoreは入口であり、各面の不足理由を隠しません。
+
+数値scaleを持つpriorには0.5倍・2倍、Normal観測にはStudent-tの感度scenarioを生成します。scenarioは即時適用せず、JSON Patchとしてsandbox compileした差分を確認してから適用し、Undoできます。
+
+「検証protocolをコピー」はModelDocument、仕様fingerprint、感度scenario、Evidence返却schemaを外部AIやnotebookへ渡します。返ってきた`bayes-canvas-evidence@1`は貼り付けまたはJSONファイルで取り込みます。metric、finding、実行したbackendをfingerprintごとに保存し、findingの`suggestedPatch`も差分確認を通します。
+
+Evidenceはブラウザへ新しい順に最大30件、全体約2MBを上限として保存します。容量を超える場合は古いrunから外れます。各runの`JSON`コピーを外部backupとして使えます。
+取り込みと削除は画面上のUndoおよび`Ctrl+Z`、やり直しは`Ctrl+Shift+Z`で戻せます。
+
+Evidenceの正式形式は[Model Evidence format](./model-evidence-format.md)を参照してください。
+
+## Model Card
+
+Model Cardはデータ契約、priorとその意図、観測モデル、QoI、診断、現在のEvidenceをMarkdownへまとめます。モデルそのものの正本にはせず、現在の`ModelDocument`から毎回生成します。
 
 ## 実装receiptを戻す
 

@@ -74,6 +74,8 @@ Bayes Canvas treats Bayesian modeling parts as authoring components, not only as
 | Spatial CAR/GMRF | Adjacency-dependent spatial effect | Spatial CAR / GMRF | adjacency + index + precision | GMRF notation | Preserve intrinsic constraint and spatial axis | Ports, shape, identification |
 | ODE/SDE Process | Differential latent dynamics | ODE / SDE | state derivative/drift block | differential equation | Include solver, tolerances, parameters, observation model | Ports, equation type, solver |
 | Copula | Dependence separated from marginals | Copula | marginal CDFs + uniforms + dependence | joint dependence equation | Preserve marginal transforms and Jacobian owner | Ports, dimension, Jacobian |
+| Causal estimand | Point-intervention contrast under an identification strategy | Causal estimand | treatment + outcome model + adjustment set → contrast | do-operator contrast | Preserve estimand, intervention values, adjustment/instrument, positivity, and consistency | Estimand, strategy, required inputs, reviewed assumptions |
+| Dirichlet-process mixture | Random measure with data-driven effective component count | DP mixture | observations + base measure + concentration → random measure | \(G \sim DP(\alpha, G_0)\) | Keep the infinite model distinct from truncation/collapsed implementation | Representation, truncation level, cluster axis |
 | Mixture Assignment | Latent component assignment | Mixture assignment | categorical latent plus component likelihood | mixture notation | Prefer marginalization where backend supports it | Partial |
 
 ## Constraint / Transform
@@ -81,11 +83,14 @@ Bayes Canvas treats Bayesian modeling parts as authoring components, not only as
 | Component | Represents | UI label | IR expression | TeX | AI handoff | Lint |
 |---|---|---|---|---|---|---|
 | Positive | Positive variable | Positive | `{kind:"positive"}` | `>0` | Declare constrained parameter | Prior support warning |
+| Nonnegative | Zero-or-positive variable | Nonnegative | `{kind:"nonnegative"}` | `\geq 0` | Preserve zero-inclusive support | Prior support warning |
 | Unit Interval | Probability variable | Unit interval | `{kind:"unit_interval"}` | `[0,1]` | Use bounded/logit transform | Support warning |
 | Simplex | Probability vector | Simplex | `{kind:"simplex"}` | simplex note | Use simplex declaration | Support warning |
 | Ordered | Ordered cutpoints | Ordered | `{kind:"ordered"}` | ordered note | Use ordered transform | Ordered likelihood compatibility |
 | Sum-to-zero | Identifiability constraint | Sum-to-zero | `{kind:"sum_to_zero"}` | sum note | Preserve contrast constraint | Plate target present |
 | Correlation Matrix | Valid correlation matrix | Correlation matrix | `{kind:"correlation_matrix"}` | correlation note | Prefer Cholesky implementation | Distribution support |
+| Cholesky Correlation | Cholesky factor of a correlation matrix | Cholesky correlation factor | `{kind:"cholesky_factor_corr"}` | lower-triangular note | Keep factorized representation | Distribution support |
+| Positive-definite Matrix | Covariance/precision matrix | Positive-definite matrix | `{kind:"positive_definite_matrix"}` | positive-definite note | Use backend-native constrained matrix | Distribution support |
 | Non-centered | Parameterization hint | Non-centered | hint block | note | Implement hierarchy non-centered | Handoff only |
 | Explicit Transform | Forward/inverse parameter transform | Transform | kind + forward + inverse + Jacobian owner | transform equation | Do not duplicate Jacobian correction | Expressions and owner |
 
