@@ -1239,7 +1239,7 @@ const measurementErrorNodes: Node<BayesNodeData>[] = [
       plate: 'obs',
       observed: true,
       observationProcess: { kind: 'measurement_error', latentTrueSymbol: 'x_true[i]', errorScaleSymbol: 'sigma_x' },
-      notes: '誤差を含んで観測された説明変数。既知または校正実験から得た sigma_x と組にする。',
+      notes: '誤差を含んで観測された説明変数。校正情報があれば sigma_x の事前分布へ反映する。',
     },
   },
   {
@@ -1319,6 +1319,26 @@ const smallBnnNodes: Node<BayesNodeData>[] = [
     data: { kind: 'data', name: 'x[i]', shape: ['N'], plate: 'obs', observed: true },
   },
   {
+    id: 'tau_hidden',
+    position: { x: 96, y: -226 },
+    data: {
+      kind: 'hyperparameter',
+      name: 'tau_hidden',
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
+      notes: '隠れ層の重みとbiasに共有するscale。固定せず、データと事前分布から推定する。',
+    },
+  },
+  {
+    id: 'tau_output',
+    position: { x: 432, y: -226 },
+    data: {
+      kind: 'hyperparameter',
+      name: 'tau_output',
+      distribution: { id: 'halfnormal', name: 'HalfNormal', args: { sigma: '1' } },
+      notes: '出力層の重みscale。小規模BNNの正則化強度として推定する。',
+    },
+  },
+  {
     id: 'hidden_weight',
     position: { x: 96, y: 110 },
     data: {
@@ -1326,7 +1346,7 @@ const smallBnnNodes: Node<BayesNodeData>[] = [
       name: 'hidden_weight[h]',
       shape: ['H'],
       plate: 'hidden',
-      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: 'tau_hidden' } },
       notes: '隠れ層の幅 H は小さく保ち、入力スケールを標準化してから事前分布を決める。',
     },
   },
@@ -1338,7 +1358,7 @@ const smallBnnNodes: Node<BayesNodeData>[] = [
       name: 'hidden_bias[h]',
       shape: ['H'],
       plate: 'hidden',
-      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: 'tau_hidden' } },
     },
   },
   {
@@ -1362,7 +1382,7 @@ const smallBnnNodes: Node<BayesNodeData>[] = [
       name: 'output_weight[h]',
       shape: ['H'],
       plate: 'hidden',
-      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: '1' } },
+      distribution: { id: 'normal', name: 'Normal', args: { mu: '0', sigma: 'tau_output' } },
     },
   },
   {
@@ -1400,6 +1420,9 @@ const smallBnnNodes: Node<BayesNodeData>[] = [
 ];
 
 const smallBnnEdges: Edge[] = [
+  { id: 'tau_hidden-hidden_weight', source: 'tau_hidden', target: 'hidden_weight', data: { role: 'prior-parameter' } },
+  { id: 'tau_hidden-hidden_bias', source: 'tau_hidden', target: 'hidden_bias', data: { role: 'prior-parameter' } },
+  { id: 'tau_output-output_weight', source: 'tau_output', target: 'output_weight', data: { role: 'prior-parameter' } },
   { id: 'x-hidden', source: 'x', target: 'hidden', data: { role: 'data-input' } },
   { id: 'hidden_weight-hidden', source: 'hidden_weight', target: 'hidden', data: { role: 'deterministic-input' } },
   { id: 'hidden_bias-hidden', source: 'hidden_bias', target: 'hidden', data: { role: 'deterministic-input' } },
@@ -1736,12 +1759,12 @@ export const modelTemplates: ModelTemplate[] = [
     level: '発展',
     sampleKind: 'teaching',
     description: '1入力・1隠れ層を明示的な重みと活性で書く、追跡可能な Bayesian neural network。',
-    learningGoals: ['隠れ層を deterministic として表す', '重み事前分布による正則化'],
+    learningGoals: ['隠れ層を deterministic として表す', '重みscaleも階層的に推定する'],
     status: 'clean',
     expectedDiagnostics: { errors: 0, warnings: 0 },
     reviewQuestions: [
       '線形回帰や spline より BNN を使うだけの非線形性とデータ量がありますか？',
-      '入力の標準化と隠れ幅 H に対して重み事前分布は強すぎませんか？',
+      '入力の標準化と隠れ幅 H に対して tau_hidden / tau_output の事前分布は強すぎませんか？',
       '予測分布を検証できる train/test の分け方になっていますか？',
     ],
     nodes: smallBnnNodes,

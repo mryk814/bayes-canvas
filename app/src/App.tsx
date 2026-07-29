@@ -157,7 +157,7 @@ const PALETTE_GROUPS: Array<{
       { type: 'node', kind: 'latent', label: '潜在変数', note: '直接は観測しない値' },
       { type: 'node', kind: 'deterministic', label: '決定式', note: '式から決まる値' },
       { type: 'node', kind: 'likelihood', label: '尤度', note: '観測データの生成過程' },
-      { type: 'node', kind: 'hyperparameter', label: 'ハイパーパラメータ', note: '事前分布の調整値' },
+      { type: 'node', kind: 'hyperparameter', label: 'ハイパーパラメータ', note: '事前分布を調整する推定値' },
     ],
   },
   {
@@ -1201,6 +1201,7 @@ ModelDocument requirements:
 - data entities must declare dataRole as "observed_value", "predictor", "index", "constant", "coordinate", "known_error", or "metadata"; preserve unit and missingValuePolicy when known.
 - random_variable entities need role and distribution: { "distributionId": "...", "args": { "mu": { "language": "bayes-expr@1", "source": "0" } } }.
 - Distinguish primary model parameters from hyperparameters. Use role "parameter" for both because ModelDocument has no separate hyperparameter role, but add tags: ["hyperparameter"] to random variables that tune a prior, hierarchy, concentration, scale, lengthscale, amplitude, cutpoint prior, or shrinkage strength rather than directly entering the likelihood or deterministic predictor of the outcome.
+- Estimate hyperparameters by default: give each unknown hyperparameter its own prior and keep it as a random_variable. Represent it as data/constant only when it is genuinely known from design, calibration, or external evidence, and record that reason in notes.
 - Do not tag coefficients, intercepts, group effects, latent states, or likelihood scales as hyperparameters when they are substantive unknowns to estimate or directly enter the outcome model.
 - When a hyperparameter feeds another parameter's prior, keep it as a separate random_variable with tags: ["hyperparameter"] and connect it with a canvas edge role like "prior-parameter" when canvasEdges are provided.
 - For ordinary observed likelihoods, prefer a random_variable entity with role "observation", observedDataId pointing to the observed data entity, and a distribution. Use an id like "y_likelihood" so Bayes Canvas imports it as an editable likelihood block.
@@ -1244,7 +1245,12 @@ function createNodeData(kind: BayesNodeData['kind'], count: number): BayesNodeDa
   }
 
   if (kind === 'hyperparameter') {
-    return { kind, name: baseName, distribution: createDefaultDistribution('normal') };
+    return {
+      kind,
+      name: `tau_${count}`,
+      distribution: createDefaultDistribution('halfnormal'),
+      notes: '他の事前分布を調整する未知量。既知値でない限り、この事前分布から推定する。',
+    };
   }
 
   if (kind === 'model_block') {

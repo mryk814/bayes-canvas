@@ -18,7 +18,7 @@ Bayes Canvas のサンプルは、完成モデルのコレクションではな�
 | 潜在構造 | 2パラメータ IRT | person-item の交差 index、潜在尺度の識別 | 発展 |
 | 多変量・選択 | 可変 choice set | Categorical choice と候補 mask、回答者差 | 発展 |
 | 多変量・選択 | 相関アウトカムパネル | event 軸、多変量尤度と LKJ Cholesky | 発展 |
-| 非線形 | 小規模 BNN 回帰 | 明示的な隠れ層、重み事前分布による正則化 | 発展 |
+| 非線形 | 小規模 BNN 回帰 | 明示的な隠れ層、重みscaleの階層推定 | 発展 |
 | 統合例 | 階層 retail demand | 部品の統合、実装 handoff 前の論点棚卸し | 発展 |
 
 ## 整理の基準
@@ -26,6 +26,8 @@ Bayes Canvas のサンプルは、完成モデルのコレクションではな�
 - 同じ likelihood でも、link、offset、分母、mask など書き方の主眼が違えば別教材にする。
 - 観測過程は基礎モデルへ混ぜず、測定誤差、打ち切り、欠測を明示できる例へ置く。
 - 高度な例は「何を追加したか」だけでなく、識別、事前分布、backend handoff の確認質問を持つ。
+- prior、階層分布、shrinkageを調整する未知のscaleは、固定値ではなく事前分布を持つハイパーパラメータとして推定する。
+- likelihoodの残差scaleは、アウトカムへ直接入る未知量なので通常のパラメータとして区別する。設計・校正から既知のscaleだけをdata/constantにする。
 - 大規模な統合例は入門例として扱わない。個々の部品を学んだ後に、接続関係を確認するために使う。
 - 全サンプルは `review`、`pymc`、`numpyro`、`stan` target で blocking diagnostics がないことをテストする。
 
