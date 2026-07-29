@@ -114,7 +114,7 @@ export interface BaseEntity {
 
 export interface DataEntity extends BaseEntity {
   kind: 'data';
-  dataRole: 'observed_value' | 'predictor' | 'index' | 'constant' | 'coordinate' | 'metadata';
+  dataRole: 'observed_value' | 'predictor' | 'index' | 'constant' | 'coordinate' | 'known_error' | 'metadata';
   unit?: string;
   missingValuePolicy?: string;
 }

@@ -158,8 +158,10 @@ function nodeToEntity(node: Node<BayesNodeData>): ModelEntity {
     return {
       ...common,
       kind: 'data',
-      dataRole: symbol.endsWith('_id') ? 'index' : 'predictor',
-      missingValuePolicy: data.observationProcess?.kind === 'missing' ? 'declared in observation process' : undefined,
+      dataRole: data.dataRole ?? (symbol.endsWith('_id') ? 'index' : 'predictor'),
+      unit: data.unit,
+      missingValuePolicy: data.missingValuePolicy
+        ?? (data.observationProcess?.kind === 'missing' ? 'declared in observation process' : undefined),
     };
   }
 
@@ -303,7 +305,8 @@ function toValueType(data: BayesNodeData): ValueType {
   })));
 
   return {
-    scalar: data.kind === 'data' && parseNodeSymbol(data.name).endsWith('_id') ? 'integer' : 'real',
+    scalar: data.scalarType
+      ?? (data.kind === 'data' && parseNodeSymbol(data.name).endsWith('_id') ? 'integer' : 'real'),
     axes,
     domain: constraintsToDomain(data.constraints) ?? distributionToDomain(data.distribution),
   };
@@ -409,6 +412,7 @@ function toCoreTransform(transform?: VariableTransform): CoreVariableTransform |
 
 function constraintsToDomain(constraints?: Constraint[]): Domain | undefined {
   if (constraints?.some((constraint) => constraint.kind === 'positive')) return { kind: 'positive' };
+  if (constraints?.some((constraint) => constraint.kind === 'nonnegative')) return { kind: 'nonnegative' };
   if (constraints?.some((constraint) => constraint.kind === 'unit_interval')) return { kind: 'unit_interval' };
   if (constraints?.some((constraint) => constraint.kind === 'simplex')) return { kind: 'simplex', axisId: 'component' };
   if (constraints?.some((constraint) => constraint.kind === 'ordered')) return { kind: 'ordered', axisId: 'category' };
@@ -416,6 +420,11 @@ function constraintsToDomain(constraints?: Constraint[]): Domain | undefined {
   if (constraints?.some((constraint) => constraint.kind === 'cholesky_factor_corr')) {
     return { kind: 'cholesky_factor_corr', axisId: 'dimension' };
   }
+  if (constraints?.some((constraint) => constraint.kind === 'positive_definite_matrix')) {
+    return { kind: 'positive_definite_matrix', axisId: 'dimension' };
+  }
+  const custom = constraints?.find((constraint) => constraint.kind === 'custom');
+  if (custom?.kind === 'custom') return { kind: 'custom', description: custom.description };
   return undefined;
 }
 

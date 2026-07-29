@@ -35,6 +35,10 @@ export interface BayesNodeData extends Record<string, unknown> {
   shape?: string[];
   eventShape?: string[];
   observed?: boolean;
+  scalarType?: 'real' | 'integer' | 'boolean' | 'category';
+  dataRole?: 'observed_value' | 'predictor' | 'index' | 'constant' | 'coordinate' | 'known_error' | 'metadata';
+  unit?: string;
+  missingValuePolicy?: string;
   plate?: string;
   distribution?: DistributionSpec;
   expression?: string;
@@ -48,7 +52,9 @@ export interface BayesNodeData extends Record<string, unknown> {
     | 'competing_risks'
     | 'spatial_gmrf'
     | 'differential_process'
-    | 'copula';
+    | 'copula'
+    | 'causal_estimand'
+    | 'dirichlet_process_mixture';
   blockInputs?: Record<string, string>;
   blockOutputPort?: string;
   blockConfig?: Record<string, string | number | boolean>;
@@ -129,12 +135,14 @@ export interface SymbolTable {
 
 export type Constraint =
   | { kind: 'positive' }
+  | { kind: 'nonnegative' }
   | { kind: 'unit_interval' }
   | { kind: 'simplex' }
   | { kind: 'ordered' }
   | { kind: 'sum_to_zero'; overPlateId?: string }
   | { kind: 'correlation_matrix' }
   | { kind: 'cholesky_factor_corr' }
+  | { kind: 'positive_definite_matrix' }
   | { kind: 'custom'; description: string };
 
 export type ModelHint =

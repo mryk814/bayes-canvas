@@ -26,10 +26,13 @@ The current semantic coverage and the distinction between distributions, observa
 - Model IR export as JSON/YAML
 - AI implementation prompt export
 - AIの返答をそのまま貼り付けられるportable package / raw ModelDocument import
-- role・shape・欠測を含むデータ契約からのDataノード生成
+- role・shape・unit・欠測を含むデータ契約からのDataノード生成
+- CSV / TSVの代表行から型・role・欠測候補を推定
 - 名前付きモデル案の保存とsemantic diff比較
 - 診断からの差分確認付きquick fixとUndo
 - prior predictive設計チェックと外部AI向け検証prompt
+- model scorecard、prior感度scenario、Evidence Ledger、Model Card
+- Causal estimandとDirichlet-process mixtureの正式block契約
 - 実装receiptのfingerprint照合
 - IndexedDB autosave restore prompt for local-first recovery
 - PyMC/NumPyro code generation target later

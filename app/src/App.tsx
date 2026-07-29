@@ -43,6 +43,7 @@ import { DistributionEditor } from './components/DistributionEditor';
 import { CanvasPane, type FlowViewportControls } from './components/CanvasPane';
 import { OutputPanel, type AdvancedOutputMode, type HandoffPreviewFormat, type OutputMode } from './components/OutputPanel';
 import { ImportDialog } from './components/ImportDialog';
+import { EvidenceDialog } from './components/EvidenceDialog';
 import { WorkbenchPanel } from './components/WorkbenchPanel';
 import { assertJsonComplexity } from './lib/core/migrations.js';
 import type { HandoffBundle, HandoffTarget } from './lib/core/handoff.js';
@@ -64,7 +65,21 @@ import {
 import { useInspectorEditing } from './hooks/useInspectorEditing';
 import { usePatchPreview } from './hooks/usePatchPreview';
 import { dataContractToNodes, parseDataContractInput } from './lib/dataContract';
+import { formatProfileContract, profileDelimitedData } from './lib/dataProfiler';
+import { parseImportJsonText } from './lib/importText';
 import { projectToReactFlow } from './lib/canvasProjector';
+import {
+  buildModelScorecard,
+  buildSensitivityScenarios,
+  generateCriticismPrompt,
+  generateModelCardMarkdown,
+  loadModelEvidence,
+  persistModelEvidence,
+  validateModelEvidence,
+  type EvidenceFinding,
+  type ModelEvidenceBundle,
+  type SensitivityScenario,
+} from './lib/modelEvidence';
 import {
   applyModelingRecipe,
   availableDiagnosticFixes,
@@ -184,15 +199,19 @@ const MAX_IMPORT_DEPTH = 32;
 const PROMPT_TARGETS: PromptTarget[] = ['generic', 'pymc', 'numpyro', 'stan', 'review'];
 const CONSTRAINT_OPTIONS: Array<{ kind: Exclude<Constraint['kind'], 'sum_to_zero' | 'custom'>; label: string; note: string }> = [
   { kind: 'positive', label: '正の値', note: '0より大きい' },
+  { kind: 'nonnegative', label: '0以上', note: '負値なし' },
   { kind: 'unit_interval', label: '0から1', note: '範囲内' },
   { kind: 'simplex', label: '合計1', note: '比率' },
   { kind: 'ordered', label: '順序あり', note: '小から大' },
   { kind: 'correlation_matrix', label: '相関行列', note: '行列' },
+  { kind: 'cholesky_factor_corr', label: 'Cholesky相関因子', note: '下三角' },
+  { kind: 'positive_definite_matrix', label: '正定値行列', note: '対称行列' },
 ];
 
 const SUPPORT_LABELS: Record<string, string> = {
   real: '実数',
   positive: '正の値',
+  nonnegative: '0以上',
   unit_interval: '0から1',
   simplex: 'simplex',
   ordered: '順序あり',
@@ -445,6 +464,11 @@ interface UndoState {
   message: string;
   nodes: BayesCanvasNode[];
   edges: Edge[];
+}
+
+interface EvidenceHistoryState {
+  message: string;
+  runs: ModelEvidenceBundle[];
 }
 
 interface CanvasRect {
@@ -1174,6 +1198,7 @@ ModelDocument requirements:
 - every expression must be { "language": "bayes-expr@1", "source": "..." }.
 - every entity must have id, symbol, kind, valueType, and plateIds.
 - entity kind must be one of "data", "random_variable", "deterministic", "factor", "block_instance", or "query".
+- data entities must declare dataRole as "observed_value", "predictor", "index", "constant", "coordinate", "known_error", or "metadata"; preserve unit and missingValuePolicy when known.
 - random_variable entities need role and distribution: { "distributionId": "...", "args": { "mu": { "language": "bayes-expr@1", "source": "0" } } }.
 - Distinguish primary model parameters from hyperparameters. Use role "parameter" for both because ModelDocument has no separate hyperparameter role, but add tags: ["hyperparameter"] to random variables that tune a prior, hierarchy, concentration, scale, lengthscale, amplitude, cutpoint prior, or shrinkage strength rather than directly entering the likelihood or deterministic predictor of the outcome.
 - Do not tag coefficients, intercepts, group effects, latent states, or likelihood scales as hyperparameters when they are substantive unknowns to estimate or directly enter the outcome model.
@@ -1181,6 +1206,8 @@ ModelDocument requirements:
 - For ordinary observed likelihoods, prefer a random_variable entity with role "observation", observedDataId pointing to the observed data entity, and a distribution. Use an id like "y_likelihood" so Bayes Canvas imports it as an editable likelihood block.
 - Use factor only for custom potentials or log-density terms that cannot be represented as an observed distribution. If you must use factor with a standard distribution, write logDensity as e.g. "normal_lpdf(y | mu, sigma)" so Bayes Canvas can infer a likelihood block.
 - deterministic and query entities need expression. factor entities need logDensity.
+- Use block_instance for multi-variable contracts. Supported blockTypeId values include gp_regression, gam_smooth, mixture, state_space, hidden_markov, survival, competing_risks, spatial_gmrf, differential_process, copula, causal_estimand, and dirichlet_process_mixture.
+- causal_estimand must keep treatment, outcome model, estimand, intervention values, identification strategy, and reviewed assumptions explicit. dirichlet_process_mixture must separate the infinite random-measure contract from its finite computational representation.
 - use stable entity IDs and make every reference use those symbols/IDs consistently.
 
 Layout and visual links:
@@ -1200,7 +1227,7 @@ function createNodeData(kind: BayesNodeData['kind'], count: number): BayesNodeDa
   const baseName = `${kind}_${count}`;
 
   if (kind === 'data') {
-    return { kind, name: `${baseName}[i]`, shape: ['N'], observed: true };
+    return { kind, name: `${baseName}[i]`, shape: ['N'], observed: true, dataRole: 'predictor' };
   }
 
   if (kind === 'deterministic') {
@@ -1890,12 +1917,18 @@ export function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
   const [importError, setImportError] = useState<ImportErrorState | null>(null);
+  const [evidenceUndoState, setEvidenceUndoState] = useState<EvidenceHistoryState | null>(null);
+  const [evidenceRedoState, setEvidenceRedoState] = useState<EvidenceHistoryState | null>(null);
   const [undoState, setUndoSnapshot] = useState<UndoState | null>(null);
   const [redoState, setRedoState] = useState<UndoState | null>(null);
   const preserveRedoOnRestoreRef = useRef(false);
   const setUndoState = useCallback((snapshot: UndoState | null) => {
     setUndoSnapshot(snapshot);
-    if (snapshot) setRedoState(null);
+    if (snapshot) {
+      setRedoState(null);
+      setEvidenceUndoState(null);
+      setEvidenceRedoState(null);
+    }
   }, []);
   useEffect(() => {
     if (preserveRedoOnRestoreRef.current) {
@@ -1936,6 +1969,10 @@ export function App() {
   );
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importText, setImportText] = useState('');
+  const [dataImportText, setDataImportText] = useState('');
+  const [evidenceDialogOpen, setEvidenceDialogOpen] = useState(false);
+  const [evidenceInput, setEvidenceInput] = useState('');
+  const [evidenceRuns, setEvidenceRuns] = useState(loadModelEvidence);
   const [variants, setVariants] = useState(loadModelVariants);
   const [selectedVariantId, setSelectedVariantId] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
@@ -1970,6 +2007,14 @@ export function App() {
   const diagnosticFixes = useMemo(
     () => availableDiagnosticFixes(compiledCanvas.semantic.diagnostics),
     [compiledCanvas.semantic.diagnostics],
+  );
+  const sensitivityScenarios = useMemo(
+    () => buildSensitivityScenarios(compiledCanvas.document),
+    [compiledCanvas.document],
+  );
+  const modelScorecard = useMemo(
+    () => buildModelScorecard(compiledCanvas.document, compiledCanvas.semantic.diagnostics),
+    [compiledCanvas.document, compiledCanvas.semantic.diagnostics],
   );
   const activeProjection = useMemo(
     () => modelViewProjections.find((projection) => projection.id === activeModelView) ?? modelViewProjections[0]!,
@@ -2062,7 +2107,7 @@ export function App() {
     selectedData && selectedData.observed && (selectedData.kind === 'data' || selectedData.kind === 'likelihood'),
   );
   const showsObservedEditor = Boolean(
-    selectedData && ['data', 'likelihood'].includes(selectedData.kind),
+    selectedData && selectedData.kind === 'likelihood',
   );
   const showsConstraintsEditor = Boolean(
     selectedData && ['parameter', 'hyperparameter', 'latent'].includes(selectedData.kind),
@@ -2685,6 +2730,140 @@ export function App() {
     });
   }, [compiledCanvas.document]);
 
+  const copyCriticismProtocol = useCallback(() => {
+    copyText(generateCriticismPrompt(
+      compiledCanvas.document,
+      handoffBundle.manifest.specificationFingerprint,
+      sensitivityScenarios,
+    ));
+    setImportError({
+      title: 'Model criticism protocolをコピーしました',
+      detail: `${sensitivityScenarios.length}件の感度scenarioとEvidence返却形式を含みます。`,
+    });
+  }, [
+    compiledCanvas.document,
+    handoffBundle.manifest.specificationFingerprint,
+    sensitivityScenarios,
+  ]);
+
+  const copyModelCard = useCallback(() => {
+    const currentEvidence = evidenceRuns.filter(
+      (item) => item.specificationFingerprint === handoffBundle.manifest.specificationFingerprint,
+    );
+    copyText(generateModelCardMarkdown(
+      compiledCanvas.document,
+      compiledCanvas.semantic.diagnostics,
+      modelScorecard,
+      currentEvidence,
+    ));
+    setImportError({
+      title: 'Model cardをコピーしました',
+      detail: 'データ契約、prior、観測モデル、QoI、診断、検証EvidenceをMarkdownへまとめました。',
+    });
+  }, [
+    compiledCanvas.document,
+    compiledCanvas.semantic.diagnostics,
+    evidenceRuns,
+    handoffBundle.manifest.specificationFingerprint,
+    modelScorecard,
+  ]);
+
+  const acceptDataProfile = useCallback((inputText: string) => {
+    try {
+      const profile = profileDelimitedData(inputText);
+      setSchemaInput(formatProfileContract(profile));
+      setImportDialogOpen(false);
+      setWorkStage('build');
+      setActiveLeftPanel('structure');
+      setImportError({
+        title: `${profile.rowCount}行 × ${profile.columns.length}列を解析しました`,
+        detail: profile.warnings.length
+          ? profile.warnings.join(' / ')
+          : '型、role、欠測候補を確認してDataノードへ追加できます。',
+      });
+    } catch (error) {
+      setImportError({
+        title: 'データを解析できません',
+        detail: error instanceof Error ? error.message : 'CSV / TSV形式を確認してください。',
+      });
+    }
+  }, []);
+
+  const profileDataImport = useCallback(() => {
+    acceptDataProfile(dataImportText);
+  }, [acceptDataProfile, dataImportText]);
+
+  const handleDataFileImport = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,.tsv,text/csv,text/tab-separated-values';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > MAX_IMPORT_BYTES) {
+        setImportError({
+          title: 'データファイルが大きすぎます',
+          detail: `契約推定用ファイルの上限は${Math.round(MAX_IMPORT_BYTES / 1024)}KBです。`,
+        });
+        return;
+      }
+      const text = await file.text();
+      setDataImportText(text);
+      acceptDataProfile(text);
+    };
+    input.click();
+  }, [acceptDataProfile]);
+
+  const acceptEvidenceText = useCallback((inputText: string) => {
+    try {
+      const parsed = parseImportJsonText(inputText, {
+        maxBytes: MAX_IMPORT_BYTES,
+        maxDepth: MAX_IMPORT_DEPTH,
+      });
+      const evidence = validateModelEvidence(parsed);
+      const nextEvidence = persistModelEvidence([evidence, ...evidenceRuns]);
+      setEvidenceUndoState({ message: 'Evidenceを取り込みました。', runs: evidenceRuns });
+      setEvidenceRedoState(null);
+      setUndoSnapshot(null);
+      setRedoState(null);
+      setEvidenceRuns(nextEvidence);
+      setEvidenceDialogOpen(false);
+      const matches = evidence.specificationFingerprint === handoffBundle.manifest.specificationFingerprint;
+      setImportError({
+        title: matches ? '検証Evidenceを取り込みました' : '別revisionのEvidenceとして保存しました',
+        detail: `${evidence.runType} / ${evidence.metrics.length} metrics / ${evidence.findings.length} findings`,
+      });
+    } catch (error) {
+      setImportError({
+        title: 'Evidenceを読み込めません',
+        detail: error instanceof Error ? error.message : 'bayes-canvas-evidence@1形式を確認してください。',
+      });
+    }
+  }, [evidenceRuns, handoffBundle.manifest.specificationFingerprint]);
+
+  const importEvidence = useCallback(() => {
+    acceptEvidenceText(evidenceInput);
+  }, [acceptEvidenceText, evidenceInput]);
+
+  const handleEvidenceFileImport = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > MAX_IMPORT_BYTES) {
+        setImportError({
+          title: 'Evidenceファイルが大きすぎます',
+          detail: `上限は${Math.round(MAX_IMPORT_BYTES / 1024)}KBです。`,
+        });
+        return;
+      }
+      acceptEvidenceText(await file.text());
+    };
+    input.click();
+  }, [acceptEvidenceText]);
+
   const applyRecipe = useCallback((recipeId: (typeof MODELING_RECIPES)[number]['id']) => {
     try {
       const result = applyModelingRecipe(recipeId, nodes, edges);
@@ -2762,6 +2941,122 @@ export function App() {
       });
     }
   }, [compiledCanvas.document.documentId, previewProposal, setPendingPatch]);
+
+  const previewEvidenceFix = useCallback((
+    evidence: ModelEvidenceBundle,
+    finding: EvidenceFinding,
+  ) => {
+    if (evidence.specificationFingerprint !== handoffBundle.manifest.specificationFingerprint) {
+      setImportError({
+        title: 'このEvidenceの修正案は適用できません',
+        detail: '現在のモデルとはfingerprintが異なります。対応するモデル案を開いてください。',
+      });
+      return;
+    }
+    if (!finding.suggestedPatch?.length) return;
+    try {
+      previewProposal({
+        proposalVersion: '1.0.0',
+        baseDocumentId: compiledCanvas.document.documentId,
+        baseRevision: compiledCanvas.document.revision,
+        intent: finding.title,
+        author: 'import',
+        operations: finding.suggestedPatch,
+        reviewNotes: [`Evidence ${evidence.runType}: ${finding.detail}`],
+      });
+      setImportError(null);
+    } catch (error) {
+      setPendingPatch(null);
+      setImportError({
+        title: 'Evidenceの修正案をプレビューできません',
+        detail: error instanceof Error ? error.message : 'suggestedPatchを確認してください。',
+      });
+    }
+  }, [
+    compiledCanvas.document.documentId,
+    compiledCanvas.document.revision,
+    handoffBundle.manifest.specificationFingerprint,
+    previewProposal,
+    setPendingPatch,
+  ]);
+
+  const previewSensitivityScenario = useCallback((scenario: SensitivityScenario) => {
+    try {
+      previewProposal({
+        proposalVersion: '1.0.0',
+        baseDocumentId: compiledCanvas.document.documentId,
+        baseRevision: compiledCanvas.document.revision,
+        intent: scenario.label,
+        author: 'user',
+        operations: scenario.operations,
+        reviewNotes: [scenario.rationale],
+      });
+      setImportError(null);
+    } catch (error) {
+      setPendingPatch(null);
+      setImportError({
+        title: '感度scenarioをプレビューできません',
+        detail: error instanceof Error ? error.message : '現在のモデルとの差分を確認してください。',
+      });
+    }
+  }, [
+    compiledCanvas.document.documentId,
+    compiledCanvas.document.revision,
+    previewProposal,
+    setPendingPatch,
+  ]);
+
+  const deleteEvidence = useCallback((evidence: ModelEvidenceBundle) => {
+    try {
+      const nextEvidence = persistModelEvidence(evidenceRuns.filter((item) => item !== evidence));
+      setEvidenceUndoState({ message: 'Evidenceを削除しました。', runs: evidenceRuns });
+      setEvidenceRedoState(null);
+      setUndoSnapshot(null);
+      setRedoState(null);
+      setEvidenceRuns(nextEvidence);
+    } catch (error) {
+      setImportError({
+        title: 'Evidenceを削除できません',
+        detail: error instanceof Error ? error.message : 'ブラウザ保存領域を確認してください。',
+      });
+    }
+  }, [evidenceRuns]);
+
+  const restoreEvidenceUndo = useCallback(() => {
+    if (!evidenceUndoState) return;
+    try {
+      setEvidenceRedoState({ message: evidenceUndoState.message, runs: evidenceRuns });
+      setEvidenceRuns(persistModelEvidence(evidenceUndoState.runs));
+      setEvidenceUndoState(null);
+    } catch (error) {
+      setImportError({
+        title: 'Evidenceを復元できません',
+        detail: error instanceof Error ? error.message : 'ブラウザ保存領域を確認してください。',
+      });
+    }
+  }, [evidenceRuns, evidenceUndoState]);
+
+  const restoreEvidenceRedo = useCallback(() => {
+    if (!evidenceRedoState) return;
+    try {
+      setEvidenceUndoState({ message: evidenceRedoState.message, runs: evidenceRuns });
+      setEvidenceRuns(persistModelEvidence(evidenceRedoState.runs));
+      setEvidenceRedoState(null);
+    } catch (error) {
+      setImportError({
+        title: 'Evidence削除をやり直せません',
+        detail: error instanceof Error ? error.message : 'ブラウザ保存領域を確認してください。',
+      });
+    }
+  }, [evidenceRedoState, evidenceRuns]);
+
+  const copyEvidence = useCallback((evidence: ModelEvidenceBundle) => {
+    copyText(JSON.stringify(evidence, null, 2));
+    setImportError({
+      title: 'Evidence JSONをコピーしました',
+      detail: `${evidence.runType} / ${evidence.backend} / ${evidence.createdAt}`,
+    });
+  }, []);
 
   const applyPendingPatch = useCallback(() => {
     if (!pendingPatch) return;
@@ -3241,9 +3536,19 @@ export function App() {
       const usesCommandModifier = event.ctrlKey || event.metaKey;
       if (usesCommandModifier && event.key.toLowerCase() === 'z' && !isTyping) {
         if (event.shiftKey) {
+          if (evidenceRedoState) {
+            event.preventDefault();
+            restoreEvidenceRedo();
+            return;
+          }
           if (!redoState) return;
           event.preventDefault();
           restoreRedo();
+          return;
+        }
+        if (evidenceUndoState) {
+          event.preventDefault();
+          restoreEvidenceUndo();
           return;
         }
         if (!undoState) return;
@@ -3259,11 +3564,21 @@ export function App() {
         setCommandPaletteOpen(false);
         setStartDialogOpen(false);
         setImportDialogOpen(false);
+        setEvidenceDialogOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [redoState, restoreRedo, restoreUndo, undoState]);
+  }, [
+    evidenceRedoState,
+    evidenceUndoState,
+    redoState,
+    restoreEvidenceRedo,
+    restoreEvidenceUndo,
+    restoreRedo,
+    restoreUndo,
+    undoState,
+  ]);
 
   return (
     <main className="app-shell">
@@ -3346,6 +3661,34 @@ export function App() {
             ) : null}
             <button type="button" onClick={() => setImportError(null)}>
               閉じる
+            </button>
+          </div>
+        ) : null}
+
+        {evidenceUndoState ? (
+          <div className="status-banner status-undo" role="status">
+            <span>{evidenceUndoState.message}</span>
+            <button aria-keyshortcuts="Control+Z Meta+Z" type="button" onClick={restoreEvidenceUndo}>
+              元に戻す <kbd>Ctrl Z</kbd>
+            </button>
+            <button type="button" onClick={() => setEvidenceUndoState(null)}>
+              確定
+            </button>
+          </div>
+        ) : null}
+
+        {evidenceRedoState ? (
+          <div className="status-banner status-undo" role="status">
+            <span>Evidence操作を元に戻しました。</span>
+            <button
+              aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z"
+              type="button"
+              onClick={restoreEvidenceRedo}
+            >
+              やり直す <kbd>Ctrl Shift Z</kbd>
+            </button>
+            <button type="button" onClick={() => setEvidenceRedoState(null)}>
+              確定
             </button>
           </div>
         ) : null}
@@ -3461,11 +3804,26 @@ export function App() {
       {importDialogOpen ? (
         <ImportDialog
           input={importText}
+          dataInput={dataImportText}
           onChangeInput={setImportText}
+          onChangeDataInput={setDataImportText}
           onClose={() => setImportDialogOpen(false)}
           onCopyPrompt={copyExternalImportPrompt}
           onOpenFile={handleImport}
+          onOpenDataFile={handleDataFileImport}
+          onProfileData={profileDataImport}
           onPreviewText={previewPastedImport}
+        />
+      ) : null}
+
+      {evidenceDialogOpen ? (
+        <EvidenceDialog
+          input={evidenceInput}
+          onChangeInput={setEvidenceInput}
+          onClose={() => setEvidenceDialogOpen(false)}
+          onCopyProtocol={copyCriticismProtocol}
+          onImport={importEvidence}
+          onOpenFile={handleEvidenceFileImport}
         />
       ) : null}
 
@@ -3787,6 +4145,60 @@ export function App() {
                 </details>
                 <div className="inspector-section">
                   <div className="inspector-section-title">モデル定義</div>
+                  {selectedData.kind === 'data' ? (
+                    <div className="field-group">
+                      <label>
+                        値の型
+                        <select
+                          value={selectedData.scalarType ?? 'real'}
+                          onChange={(event) => updateSelectedNodeData({
+                            scalarType: event.target.value as NonNullable<BayesNodeData['scalarType']>,
+                          })}
+                        >
+                          <option value="real">real</option>
+                          <option value="integer">integer</option>
+                          <option value="boolean">boolean</option>
+                          <option value="category">category</option>
+                        </select>
+                      </label>
+                      <label>
+                        データrole
+                        <select
+                          value={selectedData.dataRole ?? 'predictor'}
+                          onChange={(event) => updateSelectedNodeData({
+                            dataRole: event.target.value as NonNullable<BayesNodeData['dataRole']>,
+                            observed: event.target.value === 'observed_value' || undefined,
+                          })}
+                        >
+                          <option value="observed_value">outcome / observed value</option>
+                          <option value="predictor">predictor</option>
+                          <option value="index">index</option>
+                          <option value="coordinate">coordinate</option>
+                          <option value="known_error">known error / SE</option>
+                          <option value="constant">constant</option>
+                          <option value="metadata">metadata</option>
+                        </select>
+                      </label>
+                      <label>
+                        単位
+                        <input
+                          placeholder="kg, °C, day"
+                          value={selectedData.unit ?? ''}
+                          onChange={(event) => updateSelectedNodeData({ unit: event.target.value || undefined })}
+                        />
+                      </label>
+                      <label>
+                        欠測方針
+                        <input
+                          placeholder="missing=possible"
+                          value={selectedData.missingValuePolicy ?? ''}
+                          onChange={(event) => updateSelectedNodeData({
+                            missingValuePolicy: event.target.value || undefined,
+                          })}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
                   {showsObservedEditor ? (
                     <label className="checkbox-row">
                       <input
@@ -4212,8 +4624,12 @@ export function App() {
             </div>
           </div>
           <WorkbenchPanel
+            currentFingerprint={handoffBundle.manifest.specificationFingerprint}
             diagnosticFixes={diagnosticFixes}
+            evidenceRuns={evidenceRuns}
+            modelScorecard={modelScorecard}
             pendingPatchSummary={pendingPatch?.summary ?? null}
+            sensitivityScenarios={sensitivityScenarios}
             variants={variants}
             selectedVariantId={selectedVariantId}
             comparison={variantComparison}
@@ -4222,11 +4638,18 @@ export function App() {
             receipt={receipt}
             receiptStatus={receiptFingerprintStatus}
             onApplyRecipe={applyRecipe}
+            onCopyCriticismProtocol={copyCriticismProtocol}
+            onCopyEvidence={copyEvidence}
+            onCopyModelCard={copyModelCard}
             onCopyPriorPrompt={copyPriorPredictivePrompt}
+            onDeleteEvidence={deleteEvidence}
             onDeleteVariant={deleteVariant}
             onDismissPatch={() => setPendingPatch(null)}
             onImportReceipt={handleReceiptImport}
+            onOpenEvidenceImport={() => setEvidenceDialogOpen(true)}
             onPreviewDiagnosticFix={previewDiagnosticFix}
+            onPreviewEvidenceFix={previewEvidenceFix}
+            onPreviewSensitivityScenario={previewSensitivityScenario}
             onApplyPendingPatch={applyPendingPatch}
             onRestoreVariant={restoreVariant}
             onSaveVariant={() => {

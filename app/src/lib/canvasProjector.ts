@@ -562,6 +562,7 @@ function isDataRole(value: unknown): value is DataEntity['dataRole'] {
     || value === 'index'
     || value === 'constant'
     || value === 'coordinate'
+    || value === 'known_error'
     || value === 'metadata';
 }
 
@@ -822,7 +823,18 @@ function entityToNodeData(entity: ModelEntity): BayesNodeData {
     plate: entity.plateIds[0],
     notes: entity.notes,
   };
-  if (entity.kind === 'data') return { ...base, kind: 'data', observed: entity.dataRole === 'observed_value' };
+  if (entity.kind === 'data') {
+    return {
+      ...base,
+      kind: 'data',
+      observed: true,
+      scalarType: entity.valueType.scalar,
+      constraints: fromCoreDomain(entity.valueType.domain),
+      dataRole: entity.dataRole,
+      unit: entity.unit,
+      missingValuePolicy: entity.missingValuePolicy,
+    };
+  }
   if (entity.kind === 'deterministic') return { ...base, kind: 'deterministic', expression: entity.expression.source };
   if (entity.kind === 'block_instance') {
     return {
@@ -894,6 +906,20 @@ function entityToNodeData(entity: ModelEntity): BayesNodeData {
   };
 }
 
+function fromCoreDomain(domain: Domain | undefined): BayesNodeData['constraints'] {
+  if (!domain || domain.kind === 'real') return undefined;
+  if (domain.kind === 'positive') return [{ kind: 'positive' }];
+  if (domain.kind === 'nonnegative') return [{ kind: 'nonnegative' }];
+  if (domain.kind === 'unit_interval') return [{ kind: 'unit_interval' }];
+  if (domain.kind === 'simplex') return [{ kind: 'simplex' }];
+  if (domain.kind === 'ordered') return [{ kind: 'ordered' }];
+  if (domain.kind === 'correlation_matrix') return [{ kind: 'correlation_matrix' }];
+  if (domain.kind === 'cholesky_factor_corr') return [{ kind: 'cholesky_factor_corr' }];
+  if (domain.kind === 'positive_definite_matrix') return [{ kind: 'positive_definite_matrix' }];
+  if (domain.kind === 'custom') return [{ kind: 'custom', description: domain.description }];
+  return undefined;
+}
+
 function fromCoreObservationProcess(
   process: RandomVariableEntity['observationProcess'],
 ): BayesNodeData['observationProcess'] {
@@ -948,6 +974,8 @@ function isKnownBlockTypeId(value: string): value is NonNullable<BayesNodeData['
     'spatial_gmrf',
     'differential_process',
     'copula',
+    'causal_estimand',
+    'dirichlet_process_mixture',
   ].includes(value);
 }
 

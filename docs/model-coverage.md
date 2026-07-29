@@ -6,8 +6,8 @@ Bayes Canvas separates Bayesian model semantics into four layers. A new palette 
 | --- | --- | --- |
 | Distribution | The probability law of one random variable | Continuous, count, categorical, multivariate, zero-inflated, mixture, and shrinkage families |
 | Observation process | How a latent or generated value becomes a recorded datum | Exact, missingness with mechanism/strategy and MNAR selection equation, measurement error, censoring, truncation/selection, rounding |
-| Structural block | Dependence spanning multiple variables, coordinates, or time points | GAM smooth, Gaussian process, state space, hidden Markov, finite mixture, survival/competing risks, spatial CAR/GMRF, ODE/SDE, copula |
-| Constraint / identification | Valid domain, transform, or an identifying restriction | Positive, unit interval, simplex, ordered, sum-to-zero, correlation and Cholesky-correlation forms, explicit forward/inverse transform and Jacobian owner |
+| Structural block | Dependence spanning multiple variables, coordinates, or time points | GAM smooth, Gaussian process, state space, hidden Markov, finite/Dirichlet-process mixture, survival/competing risks, spatial CAR/GMRF, ODE/SDE, copula, causal estimand |
+| Constraint / identification | Valid domain, transform, or an identifying restriction | Positive/nonnegative, unit interval, simplex, ordered, sum-to-zero, correlation, Cholesky-correlation, positive-definite matrix, explicit forward/inverse transform and Jacobian owner |
 
 ## Canonical distinctions
 
@@ -43,6 +43,8 @@ Structural blocks are boundary-checked contracts, not decorative grouping:
 - spatial CAR/GMRF: adjacency + spatial index + precision → spatial effect, with intrinsic and identification settings;
 - ODE/SDE: initial state + dynamics + parameters + time + observation model → trajectory, with solver and tolerances;
 - copula: marginal CDFs + uniform-scale inputs + dependence parameters → joint value, with Jacobian ownership.
+- causal estimand: treatment + outcome model + adjustment/instrument inputs → intervention contrast, with estimand and identification assumptions;
+- Dirichlet-process mixture: observations + base measure + concentration → random measure, with the infinite contract separated from its finite computational representation.
 
 Their internals remain implementation-specific, but ports, configuration, equations, and backend capability notes must be preserved.
 
@@ -60,9 +62,8 @@ A random variable may carry a forward expression, inverse expression, and one Ja
 
 These are not represented as completed components yet:
 
-- nonparametric random measures;
-- causal intervention contracts;
 - richer spatial SAR/continuous-field families beyond the current adjacency-based CAR/GMRF boundary;
+- longitudinal causal regimes and interference beyond the current point-intervention estimand boundary;
 - backend-native lowering and generated code for the advanced blocks.
 
 They should be added as vertical contracts rather than isolated palette buttons.
