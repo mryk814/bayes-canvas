@@ -447,6 +447,10 @@ button.meaning-text:disabled { color: var(--color-text) !important; cursor: defa
 .rail::before { content: ""; position: absolute; left: 6px; top: 0; bottom: 0; }
 .rail-label { font-size: var(--text-xs); color: var(--color-text-secondary); white-space: nowrap; }
 .rail-impl { font-size: var(--text-xs); font-family: var(--font-mono); color: var(--color-info-strong); border: 1px solid var(--color-info-bd); border-radius: var(--radius-sm); padding: 0 4px; }
+.rail { flex-wrap: wrap; align-content: center; row-gap: 2px; }
+.rail-learn { font-size: var(--text-xs); font-family: var(--font-mono); white-space: nowrap; color: var(--color-text-secondary); }
+.rail-learn.learn-learned { color: var(--color-text); }
+.rail-learn.learn-prior_dominated { color: var(--color-warning-strong); font-family: inherit; font-weight: var(--weight-bold); }
 
 .rail-given::before, .rail-sample.rail-given, .certainty-seg.rail-given { border-left: 4px solid var(--color-text); }
 .rail-derived::before, .rail-sample.rail-derived, .certainty-seg.rail-derived { border-left: 1px solid var(--color-text-secondary); }
@@ -645,6 +649,45 @@ button.meaning-text:disabled { color: var(--color-text) !important; cursor: defa
 .toast.is-danger { background: var(--color-danger-strong); }
 .save-error { position: fixed; top: 52px; right: 16px; z-index: 30; background: var(--color-danger-bg); color: var(--color-danger-strong); border: 1px solid var(--color-danger-bd); border-radius: var(--radius-md); padding: 6px 12px; font-size: var(--text-sm); }
 
+/* ---------- prior → posterior ---------- */
+.learn-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) 0 var(--space-2) var(--gutter);
+  position: relative;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: var(--text-sm);
+}
+.learn-bar .eyebrow { position: absolute; left: 0; width: calc(var(--gutter) - 16px); text-align: right; }
+.learn-bar input[type="range"] { width: min(280px, 40vw); accent-color: var(--color-accent); }
+.learn-bar input[type="range"]:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+.learn-end { font-size: var(--text-xs); color: var(--color-text-secondary); }
+.learn-note { font-size: var(--text-xs); color: var(--color-text-tertiary); }
+
+.learning { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--color-border-subtle); display: grid; gap: 4px; }
+.learning h4 { margin: 0; font-size: var(--text-xs); font-weight: var(--weight-bold); color: var(--color-text-secondary); }
+.learning-verdict { margin: 0; font-size: var(--text-sm); font-weight: var(--weight-bold); }
+.learning-verdict .num { font-weight: var(--weight-normal); color: var(--color-text-secondary); font-size: var(--text-xs); }
+.learning-verdict.learn-prior_dominated { color: var(--color-warning-strong); }
+.learning-source { margin: 0; font-size: var(--text-xs); color: var(--color-text-tertiary); }
+.learning-diagnosis { margin: 0; font-size: var(--text-xs); color: var(--color-text); }
+.learning-diagnosis.diag-prior_data_conflict, .learning-diagnosis.diag-strong_prior { color: var(--color-warning-strong); font-weight: var(--weight-medium); }
+.learning-diagnosis .num { color: var(--color-text-secondary); font-weight: var(--weight-normal); }
+.power { display: grid; gap: 4px; margin-top: 4px; }
+.power-switch { display: inline-flex; gap: 2px; justify-self: start; padding: 2px; background: var(--color-surface-subtle); border-radius: var(--radius-md); }
+.power-switch button { padding: 1px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-secondary); font-size: var(--text-xs); }
+.power-switch button:hover { background: var(--color-surface-muted); }
+.power-switch button:active { background: var(--color-border); }
+.power-switch button.is-on { background: var(--color-surface); color: var(--color-text); font-weight: var(--weight-bold); }
+.power-switch button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.power-slider { display: grid; gap: 2px; font-size: var(--text-xs); color: var(--color-text-secondary); }
+.power-slider input { accent-color: var(--color-accent); }
+.power-slider input:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+.power-result { margin: 0; font-size: var(--text-xs); color: var(--color-text); }
+
 /* ---------- model space (conclusion map) ---------- */
 .alt-map {
   padding: 3px 10px;
@@ -802,6 +845,8 @@ button.space-name:focus-visible { outline: none; box-shadow: var(--focus-ring); 
   .dossier-col + .dossier-col { border-left: 0; border-top: 1px solid var(--color-border-subtle); }
   .ledger { grid-template-columns: 1fr; margin-left: 0; }
   .space { margin-left: 0; padding: var(--space-3); }
+  .learn-bar { padding-left: 0; }
+  .learn-bar .eyebrow { position: static; width: auto; text-align: left; }
   .space-head { grid-template-columns: 1fr; }
   .space-acts { justify-content: flex-start; }
   .space-row { grid-template-columns: minmax(0, 1fr) 64px 72px; row-gap: 4px; }

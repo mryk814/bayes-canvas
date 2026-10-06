@@ -15,6 +15,7 @@ import {
   type ScoreRow,
   type StoryPart,
 } from './scoreModel';
+import { LEARNING_LABEL, type Learning } from './learning';
 import { Spark } from './Plots';
 import { Tex } from './Tex';
 
@@ -50,6 +51,8 @@ export interface SheetProps {
   sparkT: number;
   shifts: Record<string, number>;
   geoFlags: Record<string, string>;
+  /** How far the data moved each statement, when a posterior summary is back. */
+  learnings: Record<string, Learning>;
 }
 
 export function Sheet(props: SheetProps) {
@@ -202,6 +205,14 @@ export function Sheet(props: SheetProps) {
                   <span className={`rail rail-${grade}`}>
                     {showGrade && <span className="rail-label">{SUPPORT_LABEL[grade]}</span>}
                     {support?.implementation && <span className="rail-impl" title={`${support.implementation.file}`}>impl</span>}
+                    {props.learnings[row.id] && (
+                      <span
+                        className={`rail-learn learn-${props.learnings[row.id]!.verdict}`}
+                        title={`${LEARNING_LABEL[props.learnings[row.id]!.verdict]}: 事後の90%幅は事前の ×${props.learnings[row.id]!.ratio.toFixed(2)}`}
+                      >
+                        {props.learnings[row.id]!.verdict === 'prior_dominated' ? 'prior 支配' : `幅×${props.learnings[row.id]!.ratio.toFixed(2)}`}
+                      </span>
+                    )}
                   </span>
                 </div>
                 {row.id === focus && props.renderDossier(row)}

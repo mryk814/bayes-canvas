@@ -31,6 +31,14 @@ export interface EvidenceFinding {
   suggestedPatch?: JsonPatchOperation[];
 }
 
+/** Power-scaling sensitivity of a posterior summary (priorsense), @2. */
+export interface EvidencePowerScaling {
+  priorSensitivity?: number;
+  likelihoodSensitivity?: number;
+  /** Posterior quantiles with the prior or likelihood raised to the power alpha. */
+  sequence?: Array<{ component: 'prior' | 'likelihood'; alpha: number; q05: number; q50: number; q95: number }>;
+}
+
 /** Summary of one quantity's prior or posterior draws (@2). */
 export interface EvidenceQuantity {
   entityId: string;
@@ -43,6 +51,7 @@ export interface EvidenceQuantity {
   mean?: number;
   sd?: number;
   draws?: number;
+  powerScaling?: EvidencePowerScaling;
 }
 
 /** Predictive performance and sampler health of a posterior fit (@2). */
@@ -173,8 +182,35 @@ function validateQuantities(value: unknown): EvidenceQuantity[] {
       ...optional('mean'),
       ...optional('sd'),
       ...optional('draws'),
+      ...(quantity.powerScaling === undefined ? {} : { powerScaling: validatePowerScaling(quantity.powerScaling, index) }),
     };
   });
+}
+
+function validatePowerScaling(value: unknown, index: number): EvidencePowerScaling {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`quantity ${index}のpowerScalingはobjectで指定してください。`);
+  const scaling = value as Record<string, unknown>;
+  const result: EvidencePowerScaling = {};
+  for (const key of ['priorSensitivity', 'likelihoodSensitivity'] as const) {
+    const field = scaling[key];
+    if (field === undefined) continue;
+    if (!isFiniteNumber(field) || field < 0) throw new Error(`quantity ${index}のpowerScaling.${key}は0以上の数値で指定してください。`);
+    result[key] = field;
+  }
+  if (scaling.sequence !== undefined) {
+    if (!Array.isArray(scaling.sequence)) throw new Error(`quantity ${index}のpowerScaling.sequenceはarrayで指定してください。`);
+    result.sequence = scaling.sequence.map((item, step) => {
+      const entry = (item ?? {}) as Record<string, unknown>;
+      const { component, alpha, q05, q50, q95 } = entry;
+      if (component !== 'prior' && component !== 'likelihood') throw new Error(`quantity ${index}のpowerScaling.sequence ${step}のcomponentはpriorかlikelihoodです。`);
+      if (!isFiniteNumber(alpha) || alpha <= 0) throw new Error(`quantity ${index}のpowerScaling.sequence ${step}のalphaは正の数値です。`);
+      if (!isFiniteNumber(q05) || !isFiniteNumber(q50) || !isFiniteNumber(q95) || q05 > q50 || q50 > q95) {
+        throw new Error(`quantity ${index}のpowerScaling.sequence ${step}は q05 ≤ q50 ≤ q95 の数値で指定してください。`);
+      }
+      return { component, alpha, q05, q50, q95 };
+    });
+  }
+  return result;
 }
 
 function validateAssessment(value: unknown): EvidenceAssessment {
@@ -360,6 +396,7 @@ export function generateCriticismPrompt(
     'Use suggestedPatch only for RFC 6902 operations against this exact ModelDocument.',
     'quantities: for each quantity of interest (query entities, or the parameters if there are none), summarize the draws you actually computed.',
     'Use distribution "posterior" only when posterior inference was run; prior draws are "prior".',
+    'powerScaling (optional, per posterior quantity): priorsense power-scaling sensitivities and the posterior quantiles at prior/likelihood alpha = 0.5, 0.8, 1.25, 2 if you computed them. Report posterior quantities for the parameters too, not only the quantities of interest.',
     'assessment: include only after posterior inference (PSIS-LOO elpd and SE, stacking weight among compared models, divergences, max R-hat, min bulk ESS). Omit fields you did not compute.',
     '',
     'Required JSON shape:',

@@ -20,7 +20,7 @@ function quantile(sorted: number[], p: number) {
  * Implied (marginal) prior density. When `ghost` is given, it is the other
  * version (baseline or variant A); `t` morphs from ghost (0) to current (1).
  */
-export function DensityPlot({ samples, ghost, t = 1, label }: { samples: number[]; ghost?: number[]; t?: number; label: string }) {
+export function DensityPlot({ samples, ghost, t = 1, label, ghostLabel = '比較元', subject = '含意された事前分布' }: { samples: number[]; ghost?: number[]; t?: number; label: string; ghostLabel?: string; subject?: string }) {
   const view = useMemo(() => {
     if (!samples.length) return null;
     const all = [...samples, ...(ghost ?? [])].sort((a, b) => a - b);
@@ -53,7 +53,7 @@ export function DensityPlot({ samples, ghost, t = 1, label }: { samples: number[
   if (!view) return <div className="plot-empty">抽出できる prior がありません。</div>;
   return (
     <figure className="plot">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${label} の含意された事前分布。90%区間 ${fmt(view.q05)} から ${fmt(view.q95)}`}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${label} の${subject}。90%区間 ${fmt(view.q05)} から ${fmt(view.q95)}`}>
         <rect className="plot-band" x={view.band[0]} y={PAD.t} width={Math.max(1, view.band[1] - view.band[0])} height={H - PAD.t - PAD.b} />
         {view.zero !== null && <line className="plot-zero" x1={view.zero} x2={view.zero} y1={PAD.t} y2={view.baseline} />}
         {view.ghostPath && <path className="plot-ghost" d={view.ghostPath} />}
@@ -66,7 +66,7 @@ export function DensityPlot({ samples, ghost, t = 1, label }: { samples: number[
       </svg>
       <figcaption>
         <span>90% <span className="num">{fmt(view.q05)} 〜 {fmt(view.q95)}</span></span>
-        {view.ghostPath && <span className="plot-legend-ghost">比較元</span>}
+        {view.ghostPath && <span className="plot-legend-ghost">{ghostLabel}</span>}
       </figcaption>
     </figure>
   );

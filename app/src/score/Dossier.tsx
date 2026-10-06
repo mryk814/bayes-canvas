@@ -4,6 +4,15 @@ import type { ModelDocument, RandomVariableEntity } from '../lib/core/model';
 import { findDistribution } from '../lib/distributionRegistry';
 import type { FunnelSpec } from './geometry';
 import { GeometryStrip } from './GeometryView';
+import {
+  DIAGNOSIS_LABEL,
+  LEARNING_LABEL,
+  powerScaledQuantiles,
+  powerScalingDiagnosis,
+  powerScalingRange,
+  type Learning,
+  type PosteriorSummary,
+} from './learning';
 import { DensityPlot, FanPlot } from './Plots';
 import type { PriorSimulation } from './priorSim';
 import {
@@ -32,6 +41,11 @@ export interface DossierProps {
   onFork: (label: string, variantLabel: string, operations: JsonPatchOperation[]) => void;
   onFocus: (id: string) => void;
   funnels: FunnelSpec[];
+  /** Posterior summary from matched Evidence and how far the data moved this statement. */
+  posterior?: PosteriorSummary;
+  learning?: Learning;
+  /** Prior draws moved toward the posterior by the learning slider (t > 0). */
+  morphed?: number[];
 }
 
 export function Dossier(props: DossierProps) {
@@ -58,7 +72,7 @@ export function Dossier(props: DossierProps) {
 
 /* ------------------------------------------------------------------ */
 
-function BeliefColumn({ row, document, sim, ghost, t, onScrub, drafting }: DossierProps) {
+function BeliefColumn({ row, document, sim, ghost, t, onScrub, drafting, posterior, learning, morphed }: DossierProps) {
   const entity = row.entity;
   if (entity.kind === 'data') {
     return (
@@ -79,17 +93,92 @@ function BeliefColumn({ row, document, sim, ghost, t, onScrub, drafting }: Dossi
   const marginal = row.parents.some((parent) => document.entities[parent]?.kind !== 'data');
   return (
     <section className="dossier-col dossier-belief">
-      <h3>{isObservation ? 'prior predictive' : marginal ? '含意された事前分布' : '事前の信念'}</h3>
-      {sim.unsupported.length ? (
+      <h3>{morphed ? '事前 → 事後' : isObservation ? 'prior predictive' : marginal ? '含意された事前分布' : '事前の信念'}</h3>
+      {morphed && !ghost ? (
+        <DensityPlot samples={morphed} ghost={samples} t={1} label={entity.symbol} ghostLabel="事前" subject="事前から事後への変形" />
+      ) : sim.unsupported.length ? (
         <p className="note">ブラウザ内では抽出できません（{sim.unsupported.join(', ')}）。検証protocolを外部で実行してください。</p>
       ) : isObservation && sim.fan ? (
         <FanPlot {...sim.fan} ghost={ghost?.fan?.quantiles} />
       ) : (
         <DensityPlot samples={samples} ghost={ghostSamples} t={ghost ? t : 1} label={entity.symbol} />
       )}
-      {marginal && !isObservation && <p className="note">上位の不確かさを周辺化した形。条件付きの式より裾が厚い。</p>}
+      {marginal && !isObservation && !morphed && <p className="note">上位の不確かさを周辺化した形。条件付きの式より裾が厚い。</p>}
+      {morphed && <p className="note">事後は Evidence の分位点から近似した形。薄い線が事前分布。</p>}
       {entity.kind === 'random_variable' && <Args entity={entity} onScrub={onScrub} drafting={drafting} />}
+      {posterior && <LearningPanel posterior={posterior} learning={learning} />}
     </section>
+  );
+}
+
+function LearningPanel({ posterior, learning }: { posterior: PosteriorSummary; learning?: Learning }) {
+  const scaling = posterior.quantity.powerScaling;
+  const components = (['prior', 'likelihood'] as const).filter((component) => powerScalingRange(scaling, component));
+  const [component, setComponent] = useState<'prior' | 'likelihood'>(components[0] ?? 'prior');
+  const range = powerScalingRange(scaling, component);
+  const [log2Alpha, setLog2Alpha] = useState(0);
+  const alpha = Math.pow(2, log2Alpha);
+  const scaled = range ? powerScaledQuantiles(posterior.quantity, component, alpha) : null;
+  const diagnosis = powerScalingDiagnosis(scaling);
+  const base = posterior.quantity;
+  return (
+    <div className="learning">
+      <h4>データから学んだ量</h4>
+      {learning ? (
+        <>
+          <p className={`learning-verdict learn-${learning.verdict}`}>
+            {LEARNING_LABEL[learning.verdict]}
+            <span className="num"> 幅 ×{tidy(learning.ratio)}・収縮 {Math.round(learning.contraction * 100)}%</span>
+          </p>
+          <dl className="facts">
+            <dt>事前 90%</dt><dd className="num">{tidy(learning.prior.q05)} 〜 {tidy(learning.prior.q95)}</dd>
+            <dt>事後 90%</dt><dd className="num">{tidy(base.q05)} 〜 {tidy(base.q95)}</dd>
+          </dl>
+          {learning.conflict && (
+            <p className="note">事後の中央値が事前分布の {Math.round(learning.priorTail * 100)}% 点にある。prior とデータが食い違っている可能性がある。</p>
+          )}
+        </>
+      ) : (
+        <dl className="facts">
+          <dt>事後 90%</dt><dd className="num">{tidy(base.q05)} 〜 {tidy(base.q95)}</dd>
+        </dl>
+      )}
+      <p className="learning-source num">{posterior.bundle.runType} · {posterior.bundle.backend}</p>
+      {diagnosis !== 'unknown' && (
+        <p className={`learning-diagnosis diag-${diagnosis}`}>
+          power-scaling: {DIAGNOSIS_LABEL[diagnosis]}
+          <span className="num"> prior {tidy(scaling!.priorSensitivity!)} / 尤度 {tidy(scaling!.likelihoodSensitivity!)}</span>
+        </p>
+      )}
+      {range && scaled && (
+        <div className="power">
+          {components.length > 1 && (
+            <span className="power-switch" role="group" aria-label="冪を掛ける対象">
+              {components.map((item) => (
+                <button key={item} type="button" className={item === component ? 'is-on' : ''} aria-pressed={item === component} onClick={() => { setComponent(item); setLog2Alpha(0); }}>
+                  {item === 'prior' ? 'prior' : '尤度'}
+                </button>
+              ))}
+            </span>
+          )}
+          <label className="power-slider">
+            <span>{component === 'prior' ? 'prior' : '尤度'}の強さ <span className="num">α = {tidy(alpha)}</span></span>
+            <input
+              type="range"
+              min={Math.log2(range[0])}
+              max={Math.log2(range[1])}
+              step={0.01}
+              value={log2Alpha}
+              onChange={(event) => setLog2Alpha(Number(event.target.value))}
+            />
+          </label>
+          <p className="power-result num">
+            90% {tidy(scaled.q05)} 〜 {tidy(scaled.q95)}・中央 {tidy(scaled.q50)}
+            {log2Alpha !== 0 && <span>（α = 1 から {scaled.q50 - base.q50 >= 0 ? '+' : ''}{tidy(scaled.q50 - base.q50)}）</span>}
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 

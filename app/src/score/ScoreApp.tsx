@@ -17,6 +17,7 @@ import { createModelVariant, loadModelVariants, persistModelVariants, type Model
 import { Dossier } from './Dossier';
 import { findFunnels, funnelGeometry } from './geometry';
 import { ImportSheet, VARIANT_CAPACITY, type ImportedVariant } from './ImportSheet';
+import { learningOf, morphDraws, posteriorsByEntity, ranksOf, type Learning } from './learning';
 import { AGREEMENT_LABEL, SOURCE_LABEL, buildModelSpace, generateVariantsPrompt, qoiOptions, qoiSymbolOf, type Interval, type SpaceCandidate } from './modelSpace';
 import { ModelSpaceView, formatNumber } from './ModelSpaceView';
 import { intervalShifts, simulatePrior, type PriorSimulation } from './priorSim';
@@ -106,6 +107,8 @@ export function ScoreApp() {
   const [toast, setToast] = useState<Toast | null>(model.restored ? { message: '前回の作業を復元しました。' } : null);
   const [highlight, setHighlight] = useState<Set<string>>(new Set());
   const [spacePrefs, setSpacePrefs] = useState<SpacePrefs>(loadSpacePrefs);
+  /** 0 = prior, 1 = posterior, for statements with a posterior summary. */
+  const [learnT, setLearnT] = useState(0);
 
   /* ---------- projections (all derived from the ModelDocument) ---------- */
   const shown = useMemo(() => {
@@ -185,6 +188,30 @@ export function ScoreApp() {
     return flags;
   }, [funnels, sim, shown.document]);
   const findings = useMemo(() => findDuplicateAxes(shown.document), [shown.document]);
+
+  /* ---------- prior → posterior (only for the committed model, not drafts or comparisons) ---------- */
+  const posteriors = useMemo(() => posteriorsByEntity(document, matchedEvidence), [document, matchedEvidence]);
+  const learnings = useMemo(() => {
+    const out: Record<string, Learning> = {};
+    if (draft) return out;
+    for (const [id, summary] of Object.entries(posteriors)) {
+      const result = learningOf(sim.marginals[id] ?? [], summary.quantity);
+      if (result) out[id] = result;
+    }
+    return out;
+  }, [draft, posteriors, sim]);
+  const ranks = useMemo(() => {
+    const out: Record<string, Float64Array> = {};
+    for (const id of Object.keys(learnings)) out[id] = ranksOf(sim.marginals[id]!);
+    return out;
+  }, [learnings, sim]);
+  const learnActive = learnT > 0 && !draft && !compare && Object.keys(learnings).length > 0;
+  const morphed = useMemo(() => {
+    const out: Record<string, number[]> = {};
+    if (!learnActive) return out;
+    for (const id of Object.keys(learnings)) out[id] = morphDraws(sim.marginals[id]!, posteriors[id]!.quantity, learnT, ranks[id]);
+    return out;
+  }, [learnActive, learnings, learnT, posteriors, ranks, sim]);
   const receiptMatch = useMemo(() => (receipt ? compareReceiptFingerprint(receipt, fingerprint) : null), [receipt, fingerprint]);
   const supports = useMemo(() => {
     const out: Record<string, RowSupport> = {};
@@ -312,6 +339,21 @@ export function ScoreApp() {
     if (compareId) play();
     return () => cancelAnimationFrame(raf.current);
   }, [compareId, play]);
+
+  const learnRaf = useRef(0);
+  const playLearning = useCallback(() => {
+    cancelAnimationFrame(learnRaf.current);
+    const from = learnT >= 1 ? 1 : 0;
+    const startTime = performance.now();
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startTime) / 1600);
+      const eased = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      setLearnT(from === 1 ? 1 - eased : eased);
+      if (progress < 1) learnRaf.current = requestAnimationFrame(tick);
+    };
+    learnRaf.current = requestAnimationFrame(tick);
+  }, [learnT]);
+  useEffect(() => () => cancelAnimationFrame(learnRaf.current), []);
 
   useEffect(() => {
     if (!toast) return;
@@ -521,6 +563,16 @@ export function ScoreApp() {
           </ul>
         )}
 
+        {Object.keys(learnings).length > 0 && (
+          <LearnBar
+            count={Object.keys(learnings).length}
+            t={learnT}
+            blocked={draft ? '調整中は事前分布を表示しています。' : compare ? '比較中は事前分布を表示しています。' : null}
+            onT={(value) => { cancelAnimationFrame(learnRaf.current); setLearnT(value); }}
+            onPlay={playLearning}
+          />
+        )}
+
         <Sheet
           projection={projection}
           document={shown.document}
@@ -533,11 +585,12 @@ export function ScoreApp() {
           compare={compare ? { document: compare.document, projection: compare.projection, changes: compare.changes, t } : undefined}
           receipt={receiptMatch?.matches ? receipt : null}
           highlight={highlight}
-          sparks={sim.marginals}
-          ghostSparks={draft ? draftBaseline?.marginals : compare?.sim.marginals}
-          sparkT={draft ? 1 : t}
+          sparks={learnActive ? { ...sim.marginals, ...morphed } : sim.marginals}
+          ghostSparks={draft ? draftBaseline?.marginals : compare ? compare.sim.marginals : learnActive ? Object.fromEntries(Object.keys(morphed).map((id) => [id, sim.marginals[id]!])) : undefined}
+          sparkT={draft || learnActive ? 1 : t}
           shifts={shifts}
           geoFlags={geoFlags}
+          learnings={learnings}
           renderDossier={(row) => (
             <Dossier
               row={row}
@@ -555,6 +608,9 @@ export function ScoreApp() {
               onFork={fork}
               onFocus={setFocus}
               funnels={funnels}
+              posterior={draft ? undefined : posteriors[row.id]}
+              learning={learnings[row.id]}
+              morphed={morphed[row.id]}
             />
           )}
         />
@@ -636,6 +692,28 @@ export function ScoreApp() {
 }
 
 /* ------------------------------------------------------------------ */
+
+function LearnBar({ count, t, blocked, onT, onPlay }: { count: number; t: number; blocked: string | null; onT: (value: number) => void; onPlay: () => void }) {
+  return (
+    <section className="learn-bar" aria-label="事前から事後へ">
+      <span className="eyebrow">学習</span>
+      <span className="learn-end">事前</span>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        value={blocked ? 0 : t}
+        disabled={Boolean(blocked)}
+        aria-label="事前分布から事後分布への変形"
+        onChange={(event) => onT(Number(event.target.value))}
+      />
+      <span className="learn-end">事後</span>
+      <button type="button" className="quiet" disabled={Boolean(blocked)} onClick={onPlay}>{t >= 1 ? '事前へ戻す' : '事後へ変形'}</button>
+      <span className="learn-note">{blocked ?? `事後の要約がある ${count} 文。事後は Evidence の分位点から近似。`}</span>
+    </section>
+  );
+}
 
 const GRADE_ORDER: SupportGrade[] = ['contested', 'stated', 'reasoned', 'checked', 'derived', 'given'];
 

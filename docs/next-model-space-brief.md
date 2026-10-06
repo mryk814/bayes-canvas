@@ -10,7 +10,8 @@
   - `f2dd0f0` 事前の幾何: 漏斗検出、首の細さ、non-centered 座標、HMC の1歩、親との同時分布
   - Step 1 意味の指紋と Evidence の2段照合（完了、`docs/model-score.md` §7・§8）
   - Step 2 結論の地図、Evidence `@2`、AI への案依頼と一括取り込み（完了、`docs/model-score.md` §9、`docs/model-evidence-format.md`）
-- 次は §2 の「Step 3 以降」から選ぶ。
+  - Step 3 の「prior → posterior の変形」（完了、`docs/model-score.md` §10）
+- 次は §2 の「Step 3 以降」の残りから選ぶ。
 - 既存UIは `#/` のまま動く。`app/src/main.tsx` が hash で2つの UI を出し分ける。
 - 別セッションで「canvas 投影の軸二重化の修正」（`authoringSnapshot.ts` が shape 軸と plate 軸を別々に登録する問題）が進行中の可能性がある。着手前に `git log --all --oneline | head` で確認し、main に入っていれば rebase してから始める。
 - 検証コマンド（すべて通る状態で引き継いでいる）:
@@ -89,7 +90,7 @@ Evidence format の拡張は、利用者が判断を任せた（2026-10-07）た
 ### Step 3 以降（バックログ）
 
 - **データ空間で信念を描く**: prior predictive の帯を直接つまんで「y はこの範囲」と描くと、prior の scale を逆算する（PreliZ の predictive elicitation、PriorWeaver の考え方）。
-- **prior → posterior の変形**: posterior draws が戻ったら、power-scaling（priorsense）を1本のスライダーにして、漏斗の散布図や sparkline を prior から posterior へ変形させる。文ごとの「データから学んだ量」（事後と事前の幅の比）を支持レールに加える。
+- **prior → posterior の変形**（完了。draws の代わりに分位点要約と最適輸送写像で変形し、power-scaling は Evidence の `powerScaling` から読む）: posterior draws が戻ったら、power-scaling（priorsense）を1本のスライダーにして、漏斗の散布図や sparkline を prior から posterior へ変形させる。文ごとの「データから学んだ量」（事後と事前の幅の比）を支持レールに加える。
 - **次に何を測るか**: 不確かさの源の説明（Variance Deltas）や期待情報利得で、どのデータを集めれば QoI の不確かさが減るかを示す。
 - **識別可能性と反証可能性のトレードオフ**（arXiv 2307.14545）: モデルを拡張した案で、prior の締め付けが足りているかを問いとして出す。
 

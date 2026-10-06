@@ -88,6 +88,25 @@ ModelDocument
 | `distribution` | ○ | `prior` か `posterior`。posterior inference を実行していなければ `prior` |
 | `q05`, `q50`, `q95` | ○ | 5%・50%・95% 分位点。`q05 ≤ q50 ≤ q95` |
 | `q25`, `q75`, `mean`, `sd`, `draws` | | 追加の要約。計算したものだけ入れる |
+| `powerScaling` | | priorsense の power-scaling 結果（下記） |
+
+`powerScaling` は posterior 要約に付けます。
+
+```json
+{
+  "priorSensitivity": 0.012,
+  "likelihoodSensitivity": 0.09,
+  "sequence": [
+    { "component": "prior", "alpha": 0.5, "q05": 0.25, "q50": 0.52, "q95": 0.79 },
+    { "component": "prior", "alpha": 2, "q05": 0.22, "q50": 0.46, "q95": 0.71 }
+  ]
+}
+```
+
+- `priorSensitivity`・`likelihoodSensitivity` は 0 以上（priorsense の CJS 距離に基づく感度）。
+- `sequence` は prior か尤度を α 乗したときの事後分位点。α は正の数で、α = 1 は要約本体として扱う。
+
+posterior 要約は推定目標だけでなく parameter にも付けられます。Model Score は文ごとの「データから学んだ量」と事前から事後への変形に使います。
 
 query entity の式が記号1つ（`beta`）なら、その記号の結論として扱います。Model Score の結論の地図は、案ごとに最新の `posterior` 要約、なければ `prior` 要約、それもなければブラウザ内の prior 試算を表示します。事前の要約は「事後ではない」と明示し、事後と並べて比べません。
 
@@ -115,7 +134,7 @@ Evidenceは`specificationFingerprint`で対象revisionに結び付きます。�
 
 | version | 状態 | 違い |
 |---------|------|------|
-| `bayes-canvas-evidence@2` | 現行。検証protocolはこの形式を求める | `quantities`、`assessment`、runType `posterior_inference` を追加 |
+| `bayes-canvas-evidence@2` | 現行。検証protocolはこの形式を求める | `quantities`（`powerScaling` を含む）、`assessment`、runType `posterior_inference` を追加 |
 | `bayes-canvas-evidence@1` | 読み込みのみ対応 | `quantities`・`assessment` を持たない。@1 に付いていても読まない |
 
 - 保存済みの @1 Evidence は書き換えません。そのまま読み込み、metric・finding・支持レールに使います。結論の地図では「結論なし」として扱います。

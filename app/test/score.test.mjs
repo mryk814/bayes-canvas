@@ -9,6 +9,7 @@ import { evidenceMatch, findDuplicateAxes, groupBySemantics, meaningDiff, projec
 import { createStableFingerprint } from '../dist-test/lib/core/fingerprint.js';
 import { semanticFingerprint } from '../dist-test/lib/core/semantic-fingerprint.js';
 import { validateModelEvidence } from '../dist-test/lib/modelEvidence.js';
+import { inverseNormal, learningOf, morphDraws, posteriorsByEntity, powerScaledQuantiles, powerScalingDiagnosis, powerScalingRange, splitNormalQuantile } from '../dist-test/score/learning.js';
 import { buildModelSpace, compareConclusions, generateVariantsPrompt, qoiOptions, validateVariantsEnvelope } from '../dist-test/score/modelSpace.js';
 import { intervalShifts, simulatePrior } from '../dist-test/score/priorSim.js';
 import { initialEdges, initialNodes } from '../dist-test/samples/hierarchicalRegression.js';
@@ -254,4 +255,59 @@ test('variants envelope and prompt ask for whole models that change one kind of 
   assert.equal(envelope.variants[0].label, 'A');
   assert.throws(() => validateVariantsEnvelope({ variantsVersion: 'bayes-canvas-variants@1', variants: [] }), /1つ以上/u);
   assert.throws(() => validateVariantsEnvelope({ variantsVersion: 'bayes-canvas-variants@1', variants: [{ label: 'B' }] }), /model/u);
+});
+
+test('the prior morphs into the posterior along the optimal transport path', () => {
+  assert.ok(Math.abs(inverseNormal(0.975) - 1.959964) < 1e-5);
+  assert.ok(Math.abs(inverseNormal(0.001) + 3.090232) < 1e-5);
+  const posterior = { q05: 0.2, q50: 0.5, q95: 0.9 };
+  assert.ok(Math.abs(splitNormalQuantile(posterior, 0.05) - 0.2) < 1e-9);
+  assert.ok(Math.abs(splitNormalQuantile(posterior, 0.95) - 0.9) < 1e-9);
+  const prior = Array.from({ length: 2000 }, (_, index) => inverseNormal((index + 0.5) / 2000) * 2).reverse();
+  assert.deepEqual(morphDraws(prior, posterior, 0), prior);
+  const end = [...morphDraws(prior, posterior, 1)].sort((a, b) => a - b);
+  assert.ok(Math.abs(end[100] - 0.2) < 0.01 && Math.abs(end[1000] - 0.5) < 0.01 && Math.abs(end[1900] - 0.9) < 0.01);
+  const half = [...morphDraws(prior, posterior, 0.5)].sort((a, b) => a - b);
+  assert.ok(Math.abs(half[1000] - 0.25) < 0.02);
+});
+
+test('learning separates statements the data informed from those the prior decides', () => {
+  const prior = Array.from({ length: 2000 }, (_, index) => inverseNormal((index + 0.5) / 2000));
+  const learned = learningOf(prior, { q05: 0.1, q50: 0.2, q95: 0.3 });
+  assert.equal(learned.verdict, 'learned');
+  assert.ok(Math.abs(learned.ratio - 0.2 / 3.29) < 0.01);
+  assert.equal(learned.conflict, false);
+  assert.equal(learningOf(prior, { q05: -1.6, q50: 0, q95: 1.6 }).verdict, 'prior_dominated');
+  assert.equal(learningOf(prior, { q05: 1.0, q50: 1.2, q95: 1.4 }).verdict, 'learned');
+  assert.equal(learningOf(prior, { q05: 1.9, q50: 2.1, q95: 2.3 }).conflict, true);
+  assert.equal(learningOf([1, 2], { q05: 0, q50: 1, q95: 2 }), null);
+});
+
+test('power-scaling is diagnosed and interpolated in log alpha', () => {
+  assert.equal(powerScalingDiagnosis({ priorSensitivity: 0.08, likelihoodSensitivity: 0.12 }), 'prior_data_conflict');
+  assert.equal(powerScalingDiagnosis({ priorSensitivity: 0.08, likelihoodSensitivity: 0.01 }), 'strong_prior');
+  assert.equal(powerScalingDiagnosis({ priorSensitivity: 0.01, likelihoodSensitivity: 0.2 }), 'ok');
+  assert.equal(powerScalingDiagnosis(undefined), 'unknown');
+  const quantity = {
+    entityId: 'beta', distribution: 'posterior', q05: 0.2, q50: 0.5, q95: 0.8,
+    powerScaling: { sequence: [{ component: 'prior', alpha: 0.5, q05: 0.3, q50: 0.6, q95: 0.9 }, { component: 'prior', alpha: 2, q05: 0.1, q50: 0.4, q95: 0.7 }] },
+  };
+  assert.deepEqual(powerScalingRange(quantity.powerScaling, 'prior'), [0.5, 2]);
+  assert.equal(powerScalingRange(quantity.powerScaling, 'likelihood'), null);
+  assert.equal(powerScaledQuantiles(quantity, 'prior', 1).q50, 0.5);
+  assert.ok(Math.abs(powerScaledQuantiles(quantity, 'prior', Math.SQRT2).q50 - 0.45) < 1e-9);
+  assert.equal(powerScaledQuantiles(quantity, 'prior', 4).q50, 0.4);
+});
+
+test('posterior summaries attach to entities directly or through a query', () => {
+  const document = patch(sample(), queryOperations(sample(), 'beta'));
+  const base = { evidenceVersion: 'bayes-canvas-evidence@2', specificationFingerprint: 'x', runType: 'posterior_inference', backend: 'fixture', status: 'passed', metrics: [], findings: [] };
+  const older = validateModelEvidence({ ...base, createdAt: '2026-10-01T00:00:00.000Z', quantities: [{ entityId: 'qoi_beta', distribution: 'posterior', q05: 0, q50: 1, q95: 2 }, { entityId: 'sigma', distribution: 'posterior', q05: 0.5, q50: 0.7, q95: 0.9 }] });
+  const newer = validateModelEvidence({ ...base, createdAt: '2026-10-07T00:00:00.000Z', quantities: [{ entityId: 'beta', distribution: 'posterior', q05: 0.2, q50: 0.5, q95: 0.8, powerScaling: { priorSensitivity: 0.02, likelihoodSensitivity: 0.1 } }, { entityId: 'tau_alpha', distribution: 'prior', q05: 0, q50: 1, q95: 2 }] });
+  const posteriors = posteriorsByEntity(document, [older, newer]);
+  assert.equal(posteriors.beta.quantity.q50, 0.5);
+  assert.equal(posteriors.beta.quantity.powerScaling.likelihoodSensitivity, 0.1);
+  assert.equal(posteriors.sigma.quantity.q50, 0.7);
+  assert.equal(posteriors.tau_alpha, undefined);
+  assert.throws(() => validateModelEvidence({ ...base, createdAt: '2026-10-07T00:00:00.000Z', quantities: [{ entityId: 'beta', distribution: 'posterior', q05: 0, q50: 1, q95: 2, powerScaling: { sequence: [{ component: 'prior', alpha: 0, q05: 0, q50: 1, q95: 2 }] } }] }), /alpha/u);
 });
