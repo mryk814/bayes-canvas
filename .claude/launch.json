@@ -14,6 +14,13 @@
       "runtimeArgs": ["run", "dev", "--", "--port", "5176", "--strictPort"],
       "port": 5176,
       "cwd": "app"
+    },
+    {
+      "name": "app-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview", "--", "--port", "5177", "--strictPort"],
+      "port": 5177,
+      "cwd": "app"
     }
   ]
 }

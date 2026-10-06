@@ -59,7 +59,7 @@ Model ScoreはData binding、Prior intent、Identification、Estimand/QoI、Hand
 
 数値scaleを持つpriorには0.5倍・2倍、Normal観測にはStudent-tの感度scenarioを生成します。scenarioは即時適用せず、JSON Patchとしてsandbox compileした差分を確認してから適用し、Undoできます。
 
-「検証protocolをコピー」はModelDocument、仕様fingerprint、感度scenario、Evidence返却schemaを外部AIやnotebookへ渡します。返ってきた`bayes-canvas-evidence@1`は貼り付けまたはJSONファイルで取り込みます。metric、finding、実行したbackendをfingerprintごとに保存し、findingの`suggestedPatch`も差分確認を通します。
+「検証protocolをコピー」はModelDocument、仕様fingerprint、感度scenario、Evidence返却schemaを外部AIやnotebookへ渡します。返ってきた`bayes-canvas-evidence@2`（旧形式の@1も可）は貼り付けまたはJSONファイルで取り込みます。metric、finding、実行したbackendをfingerprintごとに保存し、findingの`suggestedPatch`も差分確認を通します。
 
 Evidenceはブラウザへ新しい順に最大30件、全体約2MBを上限として保存します。容量を超える場合は古いrunから外れます。各runの`JSON`コピーを外部backupとして使えます。
 取り込みと削除は画面上のUndoおよび`Ctrl+Z`、やり直しは`Ctrl+Shift+Z`で戻せます。

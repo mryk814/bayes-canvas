@@ -164,7 +164,7 @@ test('validates model evidence and builds scorecard, sensitivity, and model card
   const scenarios = buildSensitivityScenarios(compiled.document);
   assert.ok(scenarios.some((scenario) => scenario.id.includes('beta')));
   assert.ok(scenarios.some((scenario) => scenario.id.includes('student-t')));
-  assert.match(generateCriticismPrompt(compiled.document, fingerprint, scenarios), /bayes-canvas-evidence@1/u);
+  assert.match(generateCriticismPrompt(compiled.document, fingerprint, scenarios), /bayes-canvas-evidence@2/u);
   assert.match(generateModelCardMarkdown(compiled.document, [], scorecard, [evidence]), /Validation evidence/u);
 });
 

@@ -2842,7 +2842,7 @@ export function App() {
     } catch (error) {
       setImportError({
         title: 'Evidenceを読み込めません',
-        detail: error instanceof Error ? error.message : 'bayes-canvas-evidence@1形式を確認してください。',
+        detail: error instanceof Error ? error.message : 'bayes-canvas-evidence@2（または@1）形式を確認してください。',
       });
     }
   }, [evidenceRuns, handoffBundle.manifest.specificationFingerprint]);

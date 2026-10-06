@@ -3,9 +3,7 @@ import type { JsonPatchOperation } from '../lib/core/diagnostics';
 import { buildHandoffBundle } from '../lib/core/handoff';
 import type { LayoutDocument, ModelDocument } from '../lib/core/model';
 import { buildPortablePackage } from '../lib/core/portable';
-import { compareReceiptFingerprint, validateImplementationReceipt, type ImplementationReceipt } from '../lib/core/receipt';
-import { previewPortablePackageImport } from '../lib/canvasProjector';
-import { parseImportJsonText } from '../lib/importText';
+import { compareReceiptFingerprint, type ImplementationReceipt } from '../lib/core/receipt';
 import {
   buildModelScorecard,
   buildSensitivityScenarios,
@@ -13,13 +11,15 @@ import {
   generateModelCardMarkdown,
   loadModelEvidence,
   persistModelEvidence,
-  validateModelEvidence,
   type ModelEvidenceBundle,
 } from '../lib/modelEvidence';
 import { createModelVariant, loadModelVariants, persistModelVariants, type ModelVariant } from '../lib/modelWorkbench';
 import { Dossier } from './Dossier';
 import { findFunnels, funnelGeometry } from './geometry';
-import { intervalShifts, simulatePrior } from './priorSim';
+import { ImportSheet, VARIANT_CAPACITY, type ImportedVariant } from './ImportSheet';
+import { AGREEMENT_LABEL, SOURCE_LABEL, buildModelSpace, generateVariantsPrompt, qoiOptions, qoiSymbolOf, type Interval, type SpaceCandidate } from './modelSpace';
+import { ModelSpaceView, formatNumber } from './ModelSpaceView';
+import { intervalShifts, simulatePrior, type PriorSimulation } from './priorSim';
 import {
   MEANING_LABEL,
   SUPPORT_LABEL,
@@ -51,10 +51,44 @@ interface Draft {
 interface Toast {
   message: string;
   tone?: 'danger';
+  /** Undo the last document change. */
   undo?: boolean;
+  /** Undo something outside the document history (e.g. the variant list). */
+  onUndo?: () => void;
 }
 
-const IMPORT_LIMITS = { maxBytes: 4 * 1024 * 1024, maxDepth: 64 };
+const SPACE_KEY = 'bayes-canvas:score:space';
+
+interface SpacePrefs {
+  open: boolean;
+  qoi?: string;
+}
+
+function loadSpacePrefs(): SpacePrefs {
+  try {
+    const value = JSON.parse(localStorage.getItem(SPACE_KEY) ?? '{}') as Partial<SpacePrefs>;
+    return { open: value.open === true, qoi: typeof value.qoi === 'string' ? value.qoi : undefined };
+  } catch {
+    return { open: false };
+  }
+}
+
+const priorCache = new WeakMap<ModelDocument, PriorSimulation>();
+
+/** 90% interval of the in-browser prior simulation for one symbol. */
+function priorIntervalOf(document: ModelDocument, symbol: string): Interval | undefined {
+  let simulation = priorCache.get(document);
+  if (!simulation) {
+    simulation = simulatePrior(document, projectScore(document, compile(document)));
+    priorCache.set(document, simulation);
+  }
+  const entity = Object.values(document.entities).find((item) => item.symbol === symbol);
+  const draws = entity ? simulation.marginals[entity.id] : undefined;
+  if (!draws?.length) return undefined;
+  const sorted = [...draws].sort((a, b) => a - b);
+  const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]!;
+  return { lo: at(0.05), mid: at(0.5), hi: at(0.95) };
+}
 
 export function ScoreApp() {
   const model = useScoreDocument();
@@ -71,6 +105,7 @@ export function ScoreApp() {
   const [importOpen, setImportOpen] = useState(false);
   const [toast, setToast] = useState<Toast | null>(model.restored ? { message: '前回の作業を復元しました。' } : null);
   const [highlight, setHighlight] = useState<Set<string>>(new Set());
+  const [spacePrefs, setSpacePrefs] = useState<SpacePrefs>(loadSpacePrefs);
 
   /* ---------- projections (all derived from the ModelDocument) ---------- */
   const shown = useMemo(() => {
@@ -95,6 +130,28 @@ export function ScoreApp() {
     semanticOf: { ...semanticIndex, ...Object.fromEntries([...variantKeys.values()].map((key) => [key.implementation, key.semantic])) },
   }), [fingerprint, model.semanticFingerprint, semanticIndex, variantKeys]);
   const matchedEvidence = useMemo(() => evidence.filter((item) => evidenceMatch(item, keys) !== 'stale'), [evidence, keys]);
+
+  const qoiChoices = useMemo(() => qoiOptions(document), [document]);
+  const qoi = spacePrefs.qoi && qoiChoices.includes(spacePrefs.qoi) ? spacePrefs.qoi : qoiChoices[0];
+  const space = useMemo(() => {
+    if (!spacePrefs.open || !qoi) return null;
+    return buildModelSpace({
+      current: { id: 'current', label: '現在', document, implementation: fingerprint, semantic: model.semanticFingerprint },
+      variants: variants.map((variant) => ({ id: variant.id, label: variant.label, document: variant.document, ...variantKeys.get(variant.id)! })),
+      evidence,
+      semanticOf: keys.semanticOf,
+      qoi,
+      priorInterval: priorIntervalOf,
+    });
+  }, [spacePrefs.open, qoi, document, fingerprint, model.semanticFingerprint, variants, variantKeys, evidence, keys.semanticOf]);
+  const updateSpacePrefs = useCallback((next: SpacePrefs) => {
+    setSpacePrefs(next);
+    try {
+      localStorage.setItem(SPACE_KEY, JSON.stringify(next));
+    } catch {
+      // Only a viewing preference; the map still opens for this session.
+    }
+  }, []);
 
   const compareVariant = variants.find((variant) => variant.id === compareId) ?? null;
   const compare = useMemo(() => {
@@ -196,6 +253,25 @@ export function ScoreApp() {
     }
   }, [baselineVariant, document, layout, model, notify, saveVariants, variants]);
 
+  const removeCandidate = useCallback((candidate: SpaceCandidate) => {
+    const previous = variants;
+    if (!saveVariants(variants.filter((variant) => !candidate.memberIds.includes(variant.id)))) return;
+    if (compareId && candidate.memberIds.includes(compareId)) setCompareId(null);
+    const extra = candidate.memberIds.length > 1 ? `ほか ${candidate.memberIds.length - 1} 案` : '';
+    notify(`「${candidate.label}」${extra}を削除しました。`, { onUndo: () => saveVariants(previous) });
+  }, [compareId, notify, saveVariants, variants]);
+
+  const addVariants = useCallback((items: ImportedVariant[]) => {
+    const previous = variants;
+    const timestamp = Date.now();
+    const created = items.map((item, index) => createModelVariant(item.label, item.document, item.layout, timestamp + index));
+    const dropped = Math.max(0, created.length + variants.length - VARIANT_CAPACITY);
+    if (!saveVariants([...created, ...variants])) return;
+    setImportOpen(false);
+    updateSpacePrefs({ ...spacePrefs, open: true });
+    notify(`${created.length} 案を追加しました${dropped ? `（古い案 ${dropped} 件が外れました）` : ''}。結論の地図に並べています。`, { onUndo: () => saveVariants(previous) });
+  }, [notify, saveVariants, spacePrefs, updateSpacePrefs, variants]);
+
   const scrub = useCallback((entityId: string, arg: string, value: string) => {
     const entity = document.entities[entityId];
     if (!entity) return;
@@ -239,7 +315,7 @@ export function ScoreApp() {
 
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), toast.undo ? 7000 : 4200);
+    const timer = window.setTimeout(() => setToast(null), toast.undo || toast.onUndo ? 7000 : 4200);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -288,6 +364,25 @@ export function ScoreApp() {
       notify(`${what}をコピーできませんでした。ブラウザのクリップボード許可を確認してください。`, { tone: 'danger' });
     }
   }, [notify]);
+
+  const copySpaceTable = useCallback(() => {
+    if (!space) return;
+    const header = ['群', '案', '結論', 'q05', 'q50', 'q95', '基準と', 'stacking weight', 'elpd_loo', '診断', '基準との違い'];
+    const lines = space.groups.flatMap((group) => group.rows.map((row) => [
+      group.label,
+      row.candidate.label,
+      SOURCE_LABEL[row.conclusion.source],
+      row.conclusion.interval ? formatNumber(row.conclusion.interval.lo) : '',
+      row.conclusion.interval ? formatNumber(row.conclusion.interval.mid) : '',
+      row.conclusion.interval ? formatNumber(row.conclusion.interval.hi) : '',
+      AGREEMENT_LABEL[row.agreement],
+      row.assessment.stackingWeight?.toFixed(2) ?? '',
+      row.assessment.elpdLoo?.toString() ?? '',
+      row.assessment.evaluated ? row.assessment.flags.join(' / ') || 'ok' : '未評価',
+      row.changes.map((change) => change.sentence).join(' / '),
+    ].map((cell) => cell.replace(/[\t\n]/g, ' ')).join('\t')));
+    void copy([header.join('\t'), ...lines].join('\n'), `${space.qoi} の結論の表`);
+  }, [copy, space]);
 
   const known = useMemo(() => new Set(Object.values(shown.document.entities).map((entity) => entity.symbol)), [shown.document]);
   const blocking = shown.semantic.diagnostics.filter((item) => item.blocksHandoff).length;
@@ -348,7 +443,26 @@ export function ScoreApp() {
           onSave={(label) => {
             if (saveVariants([createModelVariant(label, document, layout), ...variants])) notify(`「${label}」を保存しました。`);
           }}
+          mapOpen={spacePrefs.open}
+          onToggleMap={() => updateSpacePrefs({ ...spacePrefs, open: !spacePrefs.open })}
         />
+
+        {space && (
+          <ModelSpaceView
+            space={space}
+            qoiChoices={qoiChoices}
+            compareId={compareId}
+            onQoi={(symbol) => updateSpacePrefs({ ...spacePrefs, qoi: symbol })}
+            onCompare={(id) => {
+              setCompareId(id === compareId ? null : id);
+              window.requestAnimationFrame(() => window.document.querySelector('.compare')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+            }}
+            onDelete={removeCandidate}
+            onAskAI={() => copy(generateVariantsPrompt(document, fingerprint, projection.queries.length ? projection.queries.map((query) => qoiSymbolOf(document, query.id) ?? query.entity.symbol) : [space.qoi]), '案を作らせる prompt')}
+            onImport={() => setImportOpen(true)}
+            onCopyTable={copySpaceTable}
+          />
+        )}
 
         {compare && compareVariant && (
           <section className="compare" aria-label="意味の比較">
@@ -463,7 +577,10 @@ export function ScoreApp() {
       {importOpen && (
         <ImportSheet
           current={document}
+          knownModels={new Map([...variants.map((variant) => [variantKeys.get(variant.id)!.semantic, variant.label] as [string, string]).reverse(), [model.semanticFingerprint, '現在']])}
+          savedCount={variants.length}
           onClose={() => setImportOpen(false)}
+          onVariants={addVariants}
           onModel={(next, nextLayout, label) => {
             const baseline = baselineVariant(document, layout, '読み込み');
             saveVariants([baseline, ...variants.filter((variant) => variant.id !== baseline.id)]);
@@ -479,11 +596,19 @@ export function ScoreApp() {
               setEvidence(next);
               setImportOpen(false);
               const match = evidenceMatch(bundle, keys);
+              const target = match === 'stale'
+                ? variants.find((variant) => {
+                  const key = variantKeys.get(variant.id)!;
+                  return key.implementation === bundle.specificationFingerprint || keys.semanticOf[bundle.specificationFingerprint] === key.semantic;
+                })
+                : undefined;
               notify(match === 'implementation'
                 ? 'Evidence を取り込み、該当する文へ結び付けました。'
                 : match === 'semantic'
                   ? 'Evidence を取り込みました。書き方の違う同じ確率モデルの検証として、該当する文へ結び付けました。'
-                  : 'Evidence を取り込みました。fingerprint が現在の仕様と異なるため、支持には数えません。');
+                  : target
+                    ? `Evidence を取り込みました。案「${target.label}」の検証として、結論の地図に反映します。`
+                    : 'Evidence を取り込みました。fingerprint が現在の仕様とも保存済みの案とも異なるため、支持にも結論にも数えません。');
             } catch (error) {
               notify((error as Error).message, { tone: 'danger' });
             }
@@ -501,7 +626,9 @@ export function ScoreApp() {
       {toast && (
         <div className={`toast${toast.tone === 'danger' ? ' is-danger' : ''}`} role="status">
           <span>{toast.message}</span>
-          {toast.undo && model.canUndo && <button type="button" className="quiet" onClick={() => { undo(); setToast(null); }}>取り消す</button>}
+          {toast.onUndo
+            ? <button type="button" className="quiet" onClick={() => { toast.onUndo!(); setToast(null); }}>取り消す</button>
+            : toast.undo && model.canUndo && <button type="button" className="quiet" onClick={() => { undo(); setToast(null); }}>取り消す</button>}
         </div>
       )}
     </div>
@@ -534,13 +661,15 @@ function Certainty({ counts, total, assumptions, grounded }: { counts: Partial<R
   );
 }
 
-function Alternatives({ variants, variantKeys, current, compareId, onCompare, onSave }: {
+function Alternatives({ variants, variantKeys, current, compareId, onCompare, onSave, mapOpen, onToggleMap }: {
   variants: ModelVariant[];
   variantKeys: ReadonlyMap<string, { implementation: string; semantic: string }>;
   current: SpecificationKeys;
   compareId: string | null;
   onCompare: (id: string) => void;
   onSave: (label: string) => void;
+  mapOpen: boolean;
+  onToggleMap: () => void;
 }) {
   const [naming, setNaming] = useState<string | null>(null);
   const groups = useMemo(
@@ -555,6 +684,9 @@ function Alternatives({ variants, variantKeys, current, compareId, onCompare, on
   return (
     <section className="alternatives" aria-label="モデル案">
       <span className="eyebrow">案</span>
+      <button type="button" className={`alt-map${mapOpen ? ' is-on' : ''}`} aria-expanded={mapOpen} onClick={onToggleMap}>
+        {mapOpen ? '地図を閉じる' : '結論の地図'}
+      </button>
       <span className="alt alt-current"><span className="alt-dot" />現在</span>
       {groups.map((group) => {
         const chips = group.map((variant) => {
@@ -582,6 +714,7 @@ function Alternatives({ variants, variantKeys, current, compareId, onCompare, on
           </span>
         );
       })}
+      {variants.length > 8 && <span className="alt-more">ほか {variants.length - 8} 案は地図に</span>}
       {naming === null ? (
         <button type="button" className="quiet" onClick={() => setNaming(`案 ${variants.length + 1}`)}>この版を案として保存</button>
       ) : (
@@ -696,97 +829,5 @@ function Ledger(props: {
         ) : <p className="missing">実装 receipt はまだ戻っていません。</p>}
       </div>
     </section>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-
-type ImportResult =
-  | { kind: 'model'; document: ModelDocument; layout: LayoutDocument; summary: string; changes: MeaningChange[]; warnings: string[] }
-  | { kind: 'evidence'; bundle: ModelEvidenceBundle }
-  | { kind: 'receipt'; receipt: ImplementationReceipt };
-
-function ImportSheet({ current, onClose, onModel, onEvidence, onReceipt }: {
-  current: ModelDocument;
-  onClose: () => void;
-  onModel: (document: ModelDocument, layout: LayoutDocument, label: string) => void;
-  onEvidence: (bundle: ModelEvidenceBundle) => void;
-  onReceipt: (receipt: ImplementationReceipt) => void;
-}) {
-  const [text, setText] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ImportResult | null>(null);
-
-  const inspect = (input: string) => {
-    setError(null);
-    setResult(null);
-    if (!input.trim()) return;
-    try {
-      const value = parseImportJsonText(input, IMPORT_LIMITS) as Record<string, unknown>;
-      if (value && typeof value === 'object' && 'evidenceVersion' in value) {
-        setResult({ kind: 'evidence', bundle: validateModelEvidence(value) });
-      } else if (value && typeof value === 'object' && 'receiptVersion' in value) {
-        setResult({ kind: 'receipt', receipt: validateImplementationReceipt(value) });
-      } else {
-        const preview = previewPortablePackageImport(value);
-        setResult({ kind: 'model', document: preview.document, layout: preview.layout, summary: preview.summary, warnings: preview.importWarnings, changes: meaningDiff(current, preview.document) });
-      }
-    } catch (caught) {
-      setError(`読み込めません: ${(caught as Error).message}。JSON全体（portable package / ModelDocument / Evidence / Receipt）を貼り付けてください。`);
-    }
-  };
-
-  return (
-    <div className="sheet-overlay" role="dialog" aria-modal="true" aria-label="読み込み" onClick={onClose}>
-      <div className="import" onClick={(event) => event.stopPropagation()}>
-        <h2>読み込む</h2>
-        <textarea
-          value={text}
-          autoFocus
-          placeholder="portable package・ModelDocument・Evidence・Implementation Receipt の JSON（AIの返答そのままでも可）"
-          onChange={(event) => { setText(event.target.value); inspect(event.target.value); }}
-        />
-        <label className="file">
-          ファイルを選ぶ
-          <input type="file" accept=".json,application/json" onChange={async (event) => {
-            const file = event.target.files?.[0];
-            if (!file) return;
-            const content = await file.text();
-            setText(content);
-            inspect(content);
-          }} />
-        </label>
-        {error && <p className="error">{error}</p>}
-        {result?.kind === 'model' && (
-          <div className="import-preview">
-            <p>{result.summary}</p>
-            {result.warnings.map((warning) => <p key={warning} className="note">{warning}</p>)}
-            <ol className="meaning">
-              {result.changes.slice(0, 12).map((change, index) => (
-                <li key={index} className="meaning-item"><span className="meaning-kind">{MEANING_LABEL[change.kind]}</span><span className="meaning-text">{change.sentence}</span></li>
-              ))}
-            </ol>
-            {result.changes.length > 12 && <p className="note">ほか {result.changes.length - 12} 件</p>}
-          </div>
-        )}
-        {result?.kind === 'evidence' && <p>{result.bundle.runType} · {result.bundle.backend} · metric {result.bundle.metrics.length} / finding {result.bundle.findings.length}</p>}
-        {result?.kind === 'receipt' && <p>{result.receipt.backend} · 対応 {result.receipt.mappings.length} 件</p>}
-        <div className="import-acts">
-          <button type="button" className="quiet" onClick={onClose}>閉じる</button>
-          <button
-            type="button"
-            className="primary"
-            disabled={!result}
-            onClick={() => {
-              if (result?.kind === 'model') onModel(result.document, result.layout, 'モデルを読み込む');
-              else if (result?.kind === 'evidence') onEvidence(result.bundle);
-              else if (result?.kind === 'receipt') onReceipt(result.receipt);
-            }}
-          >
-            {result?.kind === 'model' ? 'このモデルに置き換える' : result?.kind === 'evidence' ? 'Evidence を取り込む' : result?.kind === 'receipt' ? 'receipt を照合する' : '取り込む'}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

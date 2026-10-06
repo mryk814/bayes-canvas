@@ -1,10 +1,14 @@
 import type { Diagnostic, JsonPatchOperation } from './core/diagnostics.js';
 import type { ModelDocument, ModelEntity } from './core/model.js';
 
+export const EVIDENCE_VERSION = 'bayes-canvas-evidence@2' as const;
+export type EvidenceVersion = 'bayes-canvas-evidence@1' | typeof EVIDENCE_VERSION;
+
 export type EvidenceRunType =
   | 'prior_predictive'
   | 'simulation_recovery'
   | 'prior_sensitivity'
+  | 'posterior_inference'
   | 'posterior_predictive'
   | 'calibration';
 
@@ -27,8 +31,32 @@ export interface EvidenceFinding {
   suggestedPatch?: JsonPatchOperation[];
 }
 
+/** Summary of one quantity's prior or posterior draws (@2). */
+export interface EvidenceQuantity {
+  entityId: string;
+  distribution: 'prior' | 'posterior';
+  q05: number;
+  q50: number;
+  q95: number;
+  q25?: number;
+  q75?: number;
+  mean?: number;
+  sd?: number;
+  draws?: number;
+}
+
+/** Predictive performance and sampler health of a posterior fit (@2). */
+export interface EvidenceAssessment {
+  elpdLoo?: number;
+  elpdLooSe?: number;
+  stackingWeight?: number;
+  divergences?: number;
+  maxRhat?: number;
+  minEssBulk?: number;
+}
+
 export interface ModelEvidenceBundle {
-  evidenceVersion: 'bayes-canvas-evidence@1';
+  evidenceVersion: EvidenceVersion;
   specificationFingerprint: string;
   runType: EvidenceRunType;
   createdAt: string;
@@ -37,6 +65,10 @@ export interface ModelEvidenceBundle {
   metrics: EvidenceMetric[];
   findings: EvidenceFinding[];
   notes: string[];
+  /** @2 only. */
+  quantities?: EvidenceQuantity[];
+  /** @2 only. */
+  assessment?: EvidenceAssessment;
 }
 
 export interface SensitivityScenario {
@@ -63,24 +95,27 @@ export interface ModelScorecard {
 
 const STORAGE_KEY = 'bayes-canvas:model-evidence';
 const STORAGE_BUDGET_BYTES = 2 * 1024 * 1024;
-const RUN_TYPES = new Set<EvidenceRunType>([
+const RUN_TYPES_V1 = new Set<EvidenceRunType>([
   'prior_predictive',
   'simulation_recovery',
   'prior_sensitivity',
   'posterior_predictive',
   'calibration',
 ]);
+const RUN_TYPES_V2 = new Set<EvidenceRunType>([...RUN_TYPES_V1, 'posterior_inference']);
 
 export function validateModelEvidence(value: unknown): ModelEvidenceBundle {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('EvidenceはJSON objectで指定してください。');
   }
   const candidate = value as Partial<ModelEvidenceBundle>;
-  if (candidate.evidenceVersion !== 'bayes-canvas-evidence@1') {
-    throw new Error('evidenceVersionはbayes-canvas-evidence@1を指定してください。');
+  const version = candidate.evidenceVersion;
+  if (version !== 'bayes-canvas-evidence@1' && version !== EVIDENCE_VERSION) {
+    throw new Error(`evidenceVersionは${EVIDENCE_VERSION}（または旧形式のbayes-canvas-evidence@1）を指定してください。`);
   }
   if (!candidate.specificationFingerprint) throw new Error('specificationFingerprintがありません。');
-  if (!candidate.runType || !RUN_TYPES.has(candidate.runType)) throw new Error('未対応のrunTypeです。');
+  const runTypes = version === EVIDENCE_VERSION ? RUN_TYPES_V2 : RUN_TYPES_V1;
+  if (!candidate.runType || !runTypes.has(candidate.runType)) throw new Error('未対応のrunTypeです。');
   if (!candidate.createdAt || Number.isNaN(Date.parse(candidate.createdAt))) throw new Error('createdAtはISO日時で指定してください。');
   if (!candidate.backend) throw new Error('backendがありません。');
   if (!['passed', 'review', 'failed'].includes(String(candidate.status))) throw new Error('statusが不正です。');
@@ -89,8 +124,13 @@ export function validateModelEvidence(value: unknown): ModelEvidenceBundle {
   }
   const metrics = candidate.metrics.map((metric, index) => validateMetric(metric, index));
   const findings = candidate.findings.map((finding, index) => validateFinding(finding, index));
+  // @1 has no quantities or assessment; fields an @1 producer adds anyway are not read.
+  const v2 = version === EVIDENCE_VERSION ? {
+    quantities: candidate.quantities === undefined ? [] : validateQuantities(candidate.quantities),
+    ...(candidate.assessment === undefined ? {} : { assessment: validateAssessment(candidate.assessment) }),
+  } : {};
   return {
-    evidenceVersion: 'bayes-canvas-evidence@1',
+    evidenceVersion: version,
     specificationFingerprint: candidate.specificationFingerprint,
     runType: candidate.runType,
     createdAt: candidate.createdAt,
@@ -99,7 +139,65 @@ export function validateModelEvidence(value: unknown): ModelEvidenceBundle {
     metrics,
     findings,
     notes: Array.isArray(candidate.notes) ? candidate.notes.filter((note): note is string => typeof note === 'string') : [],
+    ...v2,
   };
+}
+
+function validateQuantities(value: unknown): EvidenceQuantity[] {
+  if (!Array.isArray(value)) throw new Error('quantitiesはarrayで指定してください。');
+  return value.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`quantity ${index}がobjectではありません。`);
+    const quantity = item as Partial<EvidenceQuantity>;
+    if (!quantity.entityId || typeof quantity.entityId !== 'string') throw new Error(`quantity ${index}にentityIdがありません。`);
+    if (quantity.distribution !== 'prior' && quantity.distribution !== 'posterior') {
+      throw new Error(`quantity ${index}のdistributionはpriorかposteriorを指定してください。`);
+    }
+    const { q05, q50, q95 } = quantity;
+    if (!isFiniteNumber(q05) || !isFiniteNumber(q50) || !isFiniteNumber(q95) || q05 > q50 || q50 > q95) {
+      throw new Error(`quantity ${index}のq05・q50・q95は q05 ≤ q50 ≤ q95 の数値で指定してください。`);
+    }
+    const optional = (key: 'q25' | 'q75' | 'mean' | 'sd' | 'draws') => {
+      const field = quantity[key];
+      if (field === undefined) return {};
+      if (!isFiniteNumber(field)) throw new Error(`quantity ${index}の${key}が数値ではありません。`);
+      return { [key]: field };
+    };
+    return {
+      entityId: quantity.entityId,
+      distribution: quantity.distribution,
+      q05,
+      q50,
+      q95,
+      ...optional('q25'),
+      ...optional('q75'),
+      ...optional('mean'),
+      ...optional('sd'),
+      ...optional('draws'),
+    };
+  });
+}
+
+function validateAssessment(value: unknown): EvidenceAssessment {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('assessmentはobjectで指定してください。');
+  const assessment = value as Record<string, unknown>;
+  const result: EvidenceAssessment = {};
+  for (const key of ['elpdLoo', 'elpdLooSe', 'stackingWeight', 'divergences', 'maxRhat', 'minEssBulk'] as const) {
+    const field = assessment[key];
+    if (field === undefined) continue;
+    if (!isFiniteNumber(field)) throw new Error(`assessment.${key}が数値ではありません。`);
+    result[key] = field;
+  }
+  if (result.stackingWeight !== undefined && (result.stackingWeight < 0 || result.stackingWeight > 1)) {
+    throw new Error('assessment.stackingWeightは0から1の値で指定してください。');
+  }
+  if (result.divergences !== undefined && (result.divergences < 0 || !Number.isInteger(result.divergences))) {
+    throw new Error('assessment.divergencesは0以上の整数で指定してください。');
+  }
+  return result;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 export function loadModelEvidence(): ModelEvidenceBundle[] {
@@ -258,13 +356,16 @@ export function generateCriticismPrompt(
   return [
     'Evaluate this Bayes Canvas specification in an executable Bayesian environment.',
     'Run the checks that are feasible. Do not claim a check was run when it was only inspected.',
-    'Preserve entity IDs. Return exactly one JSON object matching bayes-canvas-evidence@1.',
+    `Preserve entity IDs. Return exactly one JSON object matching ${EVIDENCE_VERSION}.`,
     'Use suggestedPatch only for RFC 6902 operations against this exact ModelDocument.',
+    'quantities: for each quantity of interest (query entities, or the parameters if there are none), summarize the draws you actually computed.',
+    'Use distribution "posterior" only when posterior inference was run; prior draws are "prior".',
+    'assessment: include only after posterior inference (PSIS-LOO elpd and SE, stacking weight among compared models, divergences, max R-hat, min bulk ESS). Omit fields you did not compute.',
     '',
     'Required JSON shape:',
     '```json',
     JSON.stringify({
-      evidenceVersion: 'bayes-canvas-evidence@1',
+      evidenceVersion: EVIDENCE_VERSION,
       specificationFingerprint,
       runType: 'prior_predictive',
       createdAt: now,
@@ -288,6 +389,21 @@ export function generateCriticismPrompt(
         suggestedPatch: [],
       }],
       notes: [],
+      quantities: [{
+        entityId: 'replace-with-entity-id',
+        distribution: 'prior',
+        q05: -1.6,
+        q50: 0,
+        q95: 1.6,
+        draws: 4000,
+      }],
+      assessment: {
+        elpdLoo: -123.4,
+        elpdLooSe: 5.6,
+        divergences: 0,
+        maxRhat: 1.003,
+        minEssBulk: 812,
+      },
     }, null, 2),
     '```',
     '',

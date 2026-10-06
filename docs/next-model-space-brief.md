@@ -5,12 +5,15 @@
 
 ## 0. 現在地
 
-- ブランチ: `claude/model-lens-prototype`（main から2コミット、未push）
+- ブランチ: `claude/model-lens-prototype`（未push）
   - `d775843` Model Score（`#/score`）: 生成文の楽譜、4つの読み方、belief sparkline、支持レール、問いからの分岐、意味の差分、Evidence / Receipt 照合
   - `f2dd0f0` 事前の幾何: 漏斗検出、首の細さ、non-centered 座標、HMC の1歩、親との同時分布
+  - Step 1 意味の指紋と Evidence の2段照合（完了、`docs/model-score.md` §7・§8）
+  - Step 2 結論の地図、Evidence `@2`、AI への案依頼と一括取り込み（完了、`docs/model-score.md` §9、`docs/model-evidence-format.md`）
+- 次は §2 の「Step 3 以降」から選ぶ。
 - 既存UIは `#/` のまま動く。`app/src/main.tsx` が hash で2つの UI を出し分ける。
 - 別セッションで「canvas 投影の軸二重化の修正」（`authoringSnapshot.ts` が shape 軸と plate 軸を別々に登録する問題）が進行中の可能性がある。着手前に `git log --all --oneline | head` で確認し、main に入っていれば rebase してから始める。
-- 検証コマンド（すべて通る状態で引き継いでいる。テスト53件）:
+- 検証コマンド（すべて通る状態で引き継いでいる）:
 
 ```bash
 npm run lint
@@ -35,7 +38,7 @@ Bayes Canvas は `ModelDocument` で確率的な意味と実装 hints を分け�
 
 ## 2. 作るもの（この順に、縦に通す）
 
-### Step 1. 意味の fingerprint を分ける（小さく、土台）
+### Step 1. 意味の fingerprint を分ける（小さく、土台）— 完了
 
 **事実**: 現在の `specificationFingerprint` は `createStableFingerprint(document)` で、`revision`、label、notes、hints、authorship を含む文書全体の hash。そのため次の問題がある。
 
@@ -54,7 +57,9 @@ Bayes Canvas は `ModelDocument` で確率的な意味と実装 hints を分け�
 - モデル案の一覧で、意味の指紋が同じ案を「同じモデル（書き方違い）」として束ねて表示する。
 - テスト: centered と non-centered（hint のみ違い）、revision 違い、label・rationale 違いで意味の指紋が一致すること。分布・scale・plate・観測過程を変えると一致しないこと。
 
-### Step 2. Model Space（結論の地図）（本命）
+### Step 2. Model Space（結論の地図）（本命）— 完了
+
+Evidence format の拡張は、利用者が判断を任せた（2026-10-07）ため `bayes-canvas-evidence@2` として実施した。@1 は読み込みのみ対応し、保存済みデータは書き換えていない。以下は当初の指示として残す。
 
 目的: AI が書いた・問いから分岐した複数のモデルを1つの空間に置き、**結論を割っている仮定**を見えるようにする。
 

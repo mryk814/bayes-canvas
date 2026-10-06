@@ -39,10 +39,10 @@ export function EvidenceDialog({
           Evidence JSONファイルを選ぶ
         </button>
         <label className="import-paste-field">
-          bayes-canvas-evidence@1を貼り付け
+          bayes-canvas-evidence@2（または@1）を貼り付け
           <textarea
             autoFocus
-            placeholder={'```json\n{ "evidenceVersion": "bayes-canvas-evidence@1", ... }\n```'}
+            placeholder={'```json\n{ "evidenceVersion": "bayes-canvas-evidence@2", ... }\n```'}
             value={input}
             onChange={(event) => onChangeInput(event.target.value)}
           />

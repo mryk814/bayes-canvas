@@ -697,6 +697,8 @@ export interface MeaningChange {
   kind: MeaningKind;
   entityId?: string;
   sentence: string;
+  /** The change does not alter the probabilistic model (hints, notes, rationale). */
+  soft?: boolean;
 }
 
 export function meaningDiff(before: ModelDocument, after: ModelDocument): MeaningChange[] {
@@ -754,7 +756,7 @@ export function meaningDiff(before: ModelDocument, after: ModelDocument): Meanin
         out.push({ kind: 'observation', entityId: item.entityId, sentence: `${right?.symbol ?? item.entityId} が結び付く観測データが変わった。` });
         break;
       case 'hint_changed':
-        out.push({ kind: 'implementation', entityId: item.entityId, sentence: `${right?.symbol ?? item.entityId} の実装方針: ${describeHints(item.after)}。確率モデル自体は変わらない。` });
+        out.push({ kind: 'implementation', entityId: item.entityId, sentence: `${right?.symbol ?? item.entityId} の実装方針: ${describeHints(item.after)}。確率モデル自体は変わらない。`, soft: true });
         break;
       case 'entity_added':
         if (right?.kind === 'query') out.push({ kind: 'estimand', entityId: right.id, sentence: `推定目標に ${right.expression.source} を追加。` });
@@ -778,7 +780,7 @@ export function meaningDiff(before: ModelDocument, after: ModelDocument): Meanin
         out.push({ kind: 'structure', entityId: item.entityId, sentence: `${right?.symbol ?? item.entityId} の式が変わった。` });
         break;
       case 'note_changed':
-        out.push({ kind: 'assumption', sentence: 'モデルノート（仮定・判断）が変わった。' });
+        out.push({ kind: 'assumption', sentence: 'モデルノート（仮定・判断）が変わった。', soft: true });
         break;
       default:
         out.push({ kind: 'structure', entityId: item.entityId, sentence: item.label });
@@ -788,7 +790,7 @@ export function meaningDiff(before: ModelDocument, after: ModelDocument): Meanin
   for (const [id, right] of Object.entries(after.entities)) {
     const left = before.entities[id];
     if (left?.kind === 'random_variable' && right.kind === 'random_variable' && left.priorRationale !== right.priorRationale) {
-      out.push({ kind: 'assumption', entityId: id, sentence: `${right.symbol} の prior の意図${left.priorRationale ? 'を書き換え' : 'を記録'}: 「${right.priorRationale ?? '（削除）'}」` });
+      out.push({ kind: 'assumption', entityId: id, sentence: `${right.symbol} の prior の意図${left.priorRationale ? 'を書き換え' : 'を記録'}: 「${right.priorRationale ?? '（削除）'}」`, soft: true });
     }
   }
   return out;

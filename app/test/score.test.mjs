@@ -5,9 +5,11 @@ import { applyJsonPatch } from '../dist-test/lib/core/json-patch.js';
 import { compileModel } from '../dist-test/lib/core/compiler.js';
 import { InMemoryDistributionRegistry } from '../dist-test/lib/core/registry.js';
 import { DISTRIBUTIONS, toCompilerDistributionDefinition } from '../dist-test/lib/distributionRegistry.js';
-import { evidenceMatch, findDuplicateAxes, groupBySemantics, meaningDiff, projectScore, questionsFor } from '../dist-test/score/scoreModel.js';
+import { evidenceMatch, findDuplicateAxes, groupBySemantics, meaningDiff, projectScore, queryOperations, questionsFor } from '../dist-test/score/scoreModel.js';
 import { createStableFingerprint } from '../dist-test/lib/core/fingerprint.js';
 import { semanticFingerprint } from '../dist-test/lib/core/semantic-fingerprint.js';
+import { validateModelEvidence } from '../dist-test/lib/modelEvidence.js';
+import { buildModelSpace, compareConclusions, generateVariantsPrompt, qoiOptions, validateVariantsEnvelope } from '../dist-test/score/modelSpace.js';
 import { intervalShifts, simulatePrior } from '../dist-test/score/priorSim.js';
 import { initialEdges, initialNodes } from '../dist-test/samples/hierarchicalRegression.js';
 
@@ -154,4 +156,102 @@ test('evidence matches the implementation first, then the same probabilistic mod
 test('variants with the same semantic fingerprint are bundled in order', () => {
   const items = [{ id: 'a', key: 'x' }, { id: 'b', key: 'y' }, { id: 'c', key: 'x' }];
   assert.deepEqual(groupBySemantics(items, (item) => item.key).map((group) => group.map((item) => item.id)), [['a', 'c'], ['b']]);
+});
+
+const spaceInput = (id, label, document) => ({ id, label, document, implementation: createStableFingerprint(document).value, semantic: semantic(document) });
+const posterior = (input, lo, mid, hi, assessment) => ({
+  evidenceVersion: 'bayes-canvas-evidence@2',
+  specificationFingerprint: input.implementation,
+  runType: 'posterior_inference',
+  createdAt: '2026-10-07T00:00:00.000Z',
+  backend: 'fixture',
+  status: 'passed',
+  metrics: [],
+  findings: [],
+  notes: [],
+  quantities: [{ entityId: 'beta', distribution: 'posterior', q05: lo, q50: mid, q95: hi }],
+  ...(assessment ? { assessment } : {}),
+});
+
+test('model space groups candidates by assumption kind and names the assumption that flips the conclusion', () => {
+  const document = sample();
+  const current = spaceInput('current', '現在', document);
+  const robust = spaceInput('v-robust', 'Student-t', patch(document, [
+    { op: 'replace', path: '/entities/y/distribution/distributionId', value: 'student_t' },
+    { op: 'add', path: '/entities/y/distribution/args/nu', value: { language: 'bayes-expr@1', source: '4' } },
+  ]));
+  const wide = spaceInput('v-wide', 'beta 広い', patch(document, [{ op: 'replace', path: '/entities/beta/distribution/args/sigma/source', value: '10' }]));
+  const rewritten = spaceInput('v-nc', 'non-centered', patch(document, [
+    { op: 'replace', path: '/revision', value: 9 },
+    { op: 'add', path: '/entities/alpha/hints', value: [{ kind: 'parameterization', value: 'non_centered' }] },
+  ]));
+  const untested = spaceInput('v-pool', 'プールなし', patch(document, [{ op: 'replace', path: '/entities/alpha/distribution/args/sigma/source', value: '5' }]));
+  const evidence = [
+    posterior(current, 0.2, 0.5, 0.8, { stackingWeight: 0.6, divergences: 3 }),
+    posterior(robust, -0.8, -0.5, -0.2, { stackingWeight: 0.4 }),
+    posterior(wide, 0.1, 0.45, 0.9),
+    { ...posterior(wide, -9, -9, -9), specificationFingerprint: 'unrelated' },
+  ].map(validateModelEvidence);
+  const semanticOf = Object.fromEntries([current, robust, wide, rewritten, untested].map((item) => [item.implementation, item.semantic]));
+  const space = buildModelSpace({
+    current,
+    variants: [robust, wide, rewritten, untested],
+    evidence,
+    semanticOf,
+    qoi: 'beta',
+    priorInterval: () => ({ lo: -1, mid: 0, hi: 1 }),
+  });
+
+  assert.equal(space.groups[0].label, '基準（現在のモデル）');
+  assert.deepEqual(space.groups[0].rows[0].candidate.memberLabels, ['non-centered']);
+  const byLabel = Object.fromEntries(space.groups.flatMap((group) => group.rows.map((row) => [row.candidate.label, { group: group.label, row }])));
+  assert.equal(byLabel['Student-t'].group, '観測モデル');
+  assert.equal(byLabel['Student-t'].row.agreement, 'sign_flip');
+  assert.equal(byLabel['beta 広い'].group, 'priorの信念');
+  assert.equal(byLabel['beta 広い'].row.agreement, 'agree');
+  assert.equal(byLabel['プールなし'].row.conclusion.source, 'prior_simulation');
+  assert.equal(byLabel['プールなし'].row.agreement, 'incomparable');
+  assert.equal(byLabel['プールなし'].row.assessment.evaluated, false);
+  assert.deepEqual(space.groups[0].rows[0].assessment.flags, ['divergence 3']);
+  assert.equal(space.headline, '観測モデルを変えた案だけ beta の符号が反転する。');
+  assert.ok(space.domain[0] < -0.8 && space.domain[1] > 0.9);
+  const onlyRobust = buildModelSpace({ current, variants: [robust, untested], evidence, semanticOf, qoi: 'beta', priorInterval: () => ({ lo: -1, mid: 0, hi: 1 }) });
+  assert.equal(onlyRobust.headline, '観測モデルを変えた案で beta の符号が反転する。');
+  const priorOnly = buildModelSpace({ current, variants: [untested], evidence: [], semanticOf, qoi: 'beta', priorInterval: () => ({ lo: -1, mid: 0, hi: 1 }) });
+  assert.equal(priorOnly.basis, 'prior');
+  assert.match(priorOnly.headline, /事前分布は揃っている/u);
+});
+
+test('conclusions compare like with like', () => {
+  const post = (lo, hi) => ({ source: 'posterior', interval: { lo, mid: (lo + hi) / 2, hi } });
+  assert.equal(compareConclusions(post(0.2, 0.8), post(1.5, 2)), 'shifted');
+  assert.equal(compareConclusions(post(0.2, 0.8), post(-0.1, 2)), 'width');
+  assert.equal(compareConclusions(post(0.2, 0.8), { source: 'prior_simulation', interval: { lo: -1, mid: 0, hi: 1 } }), 'incomparable');
+  assert.equal(compareConclusions(post(0.2, 0.8), { source: 'none' }), 'missing');
+});
+
+test('evidence @2 carries quantity summaries and assessment; @1 stays readable', () => {
+  const base = { specificationFingerprint: 'abc', runType: 'posterior_inference', createdAt: '2026-10-07T00:00:00.000Z', backend: 'fixture', status: 'passed', metrics: [], findings: [] };
+  const v2 = validateModelEvidence({ ...base, evidenceVersion: 'bayes-canvas-evidence@2', quantities: [{ entityId: 'beta', distribution: 'posterior', q05: -1, q50: 0, q95: 1, draws: 4000 }], assessment: { stackingWeight: 0.3, maxRhat: 1.02 } });
+  assert.equal(v2.quantities[0].draws, 4000);
+  assert.equal(v2.assessment.maxRhat, 1.02);
+  assert.throws(() => validateModelEvidence({ ...base, evidenceVersion: 'bayes-canvas-evidence@2', quantities: [{ entityId: 'beta', distribution: 'posterior', q05: 1, q50: 0, q95: 2 }] }), /q05/u);
+  assert.throws(() => validateModelEvidence({ ...base, evidenceVersion: 'bayes-canvas-evidence@2', assessment: { stackingWeight: 1.5 } }), /stackingWeight/u);
+  assert.throws(() => validateModelEvidence({ ...base, evidenceVersion: 'bayes-canvas-evidence@1' }), /runType/u);
+  const v1 = validateModelEvidence({ ...base, evidenceVersion: 'bayes-canvas-evidence@1', runType: 'prior_predictive', quantities: [{ entityId: 'beta' }] });
+  assert.equal(v1.quantities, undefined);
+});
+
+test('variants envelope and prompt ask for whole models that change one kind of assumption', () => {
+  const document = sample();
+  assert.deepEqual(qoiOptions(document), ['alpha_bar', 'tau_alpha', 'alpha', 'beta', 'sigma']);
+  const withQuery = patch(document, queryOperations(document, 'beta'));
+  assert.equal(qoiOptions(withQuery)[0], 'beta');
+  const prompt = generateVariantsPrompt(withQuery, 'fp', ['beta'], 3);
+  assert.match(prompt, /bayes-canvas-variants@1/u);
+  assert.match(prompt, /Propose 3 alternative/u);
+  const envelope = validateVariantsEnvelope({ variantsVersion: 'bayes-canvas-variants@1', variants: [{ label: 'A', model: document }] });
+  assert.equal(envelope.variants[0].label, 'A');
+  assert.throws(() => validateVariantsEnvelope({ variantsVersion: 'bayes-canvas-variants@1', variants: [] }), /1つ以上/u);
+  assert.throws(() => validateVariantsEnvelope({ variantsVersion: 'bayes-canvas-variants@1', variants: [{ label: 'B' }] }), /model/u);
 });

@@ -21,7 +21,8 @@ The current semantic coverage and the distinction between distributions, observa
 `http://127.0.0.1:5173/#/score` で、ノードグラフを使わない実験的ワークベンチ **Model Score** を開けます。
 モデルを生成順に並んだ文の列として読み、式・物語・形・実装の4つの読み方、belief sparkline、支持レール、
 意味の差分による案比較を同じ画面で扱います。正本は同じ `ModelDocument + LayoutDocument` で、モデル案と Evidence の保存先も既存UIと共有します。
-設計と3案比較は [`docs/model-score.md`](./docs/model-score.md) にまとめています。
+「案」の一列から開く **結論の地図** では、案ごとの推定目標の 90% 区間を仮定の種類で群にして並べ、結論を割っている仮定を1文で示します。AI に代替案を作らせる prompt と、その返答の一括取り込みもここから使えます。
+設計と3案比較は [`docs/model-score.md`](./docs/model-score.md)、Evidence 形式（`bayes-canvas-evidence@2`）は [`docs/model-evidence-format.md`](./docs/model-evidence-format.md) にまとめています。
 
 ## MVP scope
 

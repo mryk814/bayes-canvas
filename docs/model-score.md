@@ -14,6 +14,7 @@
 | 外部記録 | モデル案 `bayes-canvas:model-variants` | 既存UIと同じキー・同じ `ModelVariant` 形式 |
 | 外部記録 | Evidence `bayes-canvas:model-evidence` | 既存UIと同じキー。`specificationFingerprint` で現行仕様に結び付ける |
 | 照合用 | 意味の指紋の対応表 `bayes-canvas:score:semantic-index` | 表示した版ごとに「実装指紋 → 意味の指紋」を記録（最大200件）。Evidence format は変えない |
+| 表示設定 | 結論の地図 `bayes-canvas:score:space` | 開閉と選んだ推定目標だけ。消えても地図は正本から作り直せる |
 | 外部記録 | Implementation Receipt | 読み込み時に fingerprint を照合。保存はしない（セッション内） |
 
 既存UIでは React Flow の nodes/edges が実質の編集状態で、そこから `ModelDocument` を毎回組み立てている。
@@ -132,13 +133,53 @@ handoff manifest・Evidence・Receipt の `specificationFingerprint` は意味�
 
 モデル案の一列では、意味の指紋が同じ案を破線の枠で束ね「同じモデル」と出す。現在と実装指紋が同じ案は `= 現在`、意味だけ同じ案は `≈ 現在`。
 
-## 9. 既知の制限
+## 9. 結論の地図（Model Space）
+
+AI が書いた案や問いから分岐した案を1つの空間に置き、**結論を割っている仮定**を見えるようにする。「案」の一列の「結論の地図」で開く（独立ページは増やさない）。
+
+| 要素 | 決め方 |
+|------|--------|
+| 点 | 現在のモデルと保存済みの案。意味の指紋が同じ案は1行に束ね、`= 案 2、案 1` と出す |
+| 群 | `meaningDiff(現在, 案)` のうち確率モデルを変える変更の種類（観測モデル / prior / 階層 / index / 構造 / 仮定）。推定目標の追加だけの案は「推定目標」の群。実装方針・ノート・rationale は群を分けない |
+| 結論 | 選んだ推定目標の 90% 区間。最新の Evidence `posterior` 要約 → `prior` 要約 → ブラウザ内の prior 試算の順。事前は破線で描き「事後ではない」と凡例に出す |
+| 食い違い | 基準（現在）と同じ種類どうしでだけ比べる（事後と事後、事前と事前）。両方が0を除外し反対側なら「符号反転」、区間が重ならなければ「ずれ」、幅が2倍以上違えば「幅が違う」。種類が違えば「比較不可」 |
+| 重み | Evidence の `assessment`。stacking weight、なければ elpd_loo。divergence・R-hat・ESS の注意を併記。なければ「未評価」で灰色にし、捨てない |
+| 見出し | 食い違う群が一部だけなら「観測モデルを変えた案だけ beta の符号が反転する。」のように1文で出す。事後がまだない間は「事前分布の」と付け、結論と読ませない |
+
+- 軸は、事後で比べているときは事後の区間で決める。はみ出す事前の帯は端で切り、矢印を付ける。
+- 案の名前を押すと、その案と現在の比較（A→B の変形）に入る。
+- 「削除」は束ねた案をまとめて外し、通知から取り消せる。
+- 「表をコピー」は群・案・分位点・食い違い・重み・診断・違いの文を TSV でコピーする。
+- fingerprint が現在とも保存済みの案とも合わない Evidence は、支持にも結論にも数えない。
+
+### AI に案を作らせる
+
+「AIに案を作らせる」は、現在の ModelDocument と推定目標（宣言がなければ地図で選んだ記号）を渡し、仮定を1種類ずつ変えた代替モデルを返させる prompt をコピーする。返答の形式:
+
+```json
+{
+  "variantsVersion": "bayes-canvas-variants@1",
+  "baseFingerprint": "sha256 fingerprint of the current model",
+  "variants": [
+    { "label": "Student-t likelihood", "rationale": "One sentence.", "model": { "schemaVersion": "1.0.0", "...": "complete ModelDocument or portable package" } }
+  ]
+}
+```
+
+- 「案を取り込む」（または「読み込む」）へ貼ると、案ごとに通常の portable import 検証を通し、変わる仮定の種類・理由・エラーを並べて見せる。
+- 既存の案や現在と意味の指紋が同じ案は既定で外す。壊れた案は選べない。
+- 追加しても現在のモデルは変えない。モデル案は20件までで、超える分は古い案から外れることを事前に表示し、追加後は通知から取り消せる。
+- 一度に取り込めるのは12案まで。
+
+## 10. 既知の制限
 
 - prior predictive はブラウザ内で Normal / HalfNormal / StudentT / Exponential / HalfCauchy / LogNormal / Cauchy / Uniform / Beta / Gamma の単変量のみ抽出する。対応外の分布を含む場合はその旨を表示し、外部検証 prompt に誘導する。
 - `x` の probe 値は「標準化済み predictor の -2..2」と仮定して表示する（データ契約から範囲を取れる場合はそれを使う）。
 - 編集できるのは prior の数値引数・観測分布の置換・問い由来の patch のみ。エンティティ追加は既存UIを使う。
 - Score 自身の作業状態は `bayes-canvas:score:document` に保存する。既存UIの canvas 状態とは同期しない（モデル案・Evidence は共有）。
 - 案の系譜は保存順の一列で、分岐の親子関係は保存していない。
+- 結論の地図は推定目標を記号で照合する。案どうしで記号を変えた量は同じ推定目標として並ばない。
+- 地図の prior 試算は案ごとに 1200 draws をブラウザ内で抽出する。対応外の分布を含む案は「結論なし」になる。
 - サンプルの canvas 投影では、shape で宣言した軸（`J`, `N`）と plate 由来の軸（`GROUP`, `OBS`）が別々に登録される。Score はこれを「軸の二重化」として検出し、統合 patch を提案する。
 
 ## ファイル
@@ -150,10 +191,13 @@ handoff manifest・Evidence・Receipt の `specificationFingerprint` は意味�
 | `app/src/score/geometry.ts` | 漏斗の検出、首の細さ、non-centered 座標、親との同時分布（純粋関数、テストあり） |
 | `app/src/score/GeometryView.tsx` | 散布図・±2sd 帯・1歩の幅・宣言操作 |
 | `app/src/score/priorSim.ts` | `ModelDocument` からの prior 前向き抽出、KDE、区間幅の変化（純粋関数、テストあり） |
+| `app/src/score/modelSpace.ts` | 結論の地図: 案の束ね、群分け、結論の選択、食い違い判定、見出し、AI への案依頼 prompt と返答の検証（純粋関数、テストあり） |
+| `app/src/score/ModelSpaceView.tsx` | 結論の地図の forest plot |
+| `app/src/score/ImportSheet.tsx` | 読み込み: モデル・案の一覧・Evidence・Receipt の判別とプレビュー |
 | `app/src/score/useScoreDocument.ts` | 正本 state、JSON Patch 適用、Undo/Redo、保存、意味の指紋の対応表 |
 | `app/src/score/Sheet.tsx` | 楽譜本体：依存ガター、plate 括弧、4つの読み方、支持レール |
 | `app/src/score/Dossier.tsx` | 行をその場で開いたときの信念・つながり・問い・根拠 |
-| `app/src/score/ScoreApp.tsx` | 問い・案・比較・Ledger・読み込み |
+| `app/src/score/ScoreApp.tsx` | 問い・案・地図・比較・Ledger の接続 |
 
 ## 検証
 
@@ -162,4 +206,4 @@ npm run test
 npm run build
 ```
 
-`app/test/score.test.mjs` が生成順、軸統合 patch の compile、意味の差分、prior 抽出の決定性と下流への波及、意味の指紋（書き方違いで一致・確率モデルの変更で不一致）、Evidence の2段照合、案の束ねを確認する。
+`app/test/score.test.mjs` が生成順、軸統合 patch の compile、意味の差分、prior 抽出の決定性と下流への波及、意味の指紋（書き方違いで一致・確率モデルの変更で不一致）、Evidence の2段照合、案の束ね、結論の地図（群分け・食い違い・見出し・未評価）、Evidence @2 の検証と @1 の互換、案の一覧の検証を確認する。
