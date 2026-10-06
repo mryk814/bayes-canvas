@@ -16,6 +16,13 @@ Canvas, Story, Equations, Structure, and Contract are synchronized projections o
 
 The current semantic coverage and the distinction between distributions, observation processes, structural blocks, and constraints are documented in [`docs/model-coverage.md`](./docs/model-coverage.md).
 
+## Model Score prototype
+
+`http://127.0.0.1:5173/#/score` で、ノードグラフを使わない実験的ワークベンチ **Model Score** を開けます。
+モデルを生成順に並んだ文の列として読み、式・物語・形・実装の4つの読み方、belief sparkline、支持レール、
+意味の差分による案比較を同じ画面で扱います。正本は同じ `ModelDocument + LayoutDocument` で、モデル案と Evidence の保存先も既存UIと共有します。
+設計と3案比較は [`docs/model-score.md`](./docs/model-score.md) にまとめています。
+
 ## MVP scope
 
 - Node-based visual model editor
