@@ -16,6 +16,8 @@ export const PROBES = [-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2];
 export interface PriorSimulation {
   /** Pooled marginal draws per entity (all plate members flattened). */
   marginals: Record<string, number[]>;
+  /** One value per draw, aligned across entities: plated entities use their first member, observation rows the middle probe. */
+  joint: Record<string, number[]>;
   /** One group's conditional members, for plated entities. */
   fan?: { predictor: string; outcome: string; probes: number[]; quantiles: number[][] };
   unsupported: string[];
@@ -184,6 +186,7 @@ export function simulatePrior(document: ModelDocument, projection: ScoreProjecti
   };
 
   const marginals: Record<string, number[]> = {};
+  const joint: Record<string, number[]> = {};
   const globalRows = projection.rows.filter((row) => !row.entity.plateIds.some((plateId) => observationPlates.has(plateId)));
   const obsRows = projection.rows.filter((row) => row.entity.plateIds.some((plateId) => observationPlates.has(plateId)));
   for (const row of [...globalRows, ...obsRows]) {
@@ -192,7 +195,7 @@ export function simulatePrior(document: ModelDocument, projection: ScoreProjecti
       unsupported.push(`${entity.symbol}: ${entity.distribution.distributionId}`);
     }
   }
-  if (unsupported.length) return { marginals, unsupported };
+  if (unsupported.length) return { marginals, joint, unsupported };
 
   const quantiles: number[][] = PROBES.map(() => []);
   const outcomeDraws: number[][] = PROBES.map(() => []);
@@ -212,9 +215,11 @@ export function simulatePrior(document: ModelDocument, projection: ScoreProjecti
         const value: Value = members ? Array.from({ length: members }, one) : one();
         env.set(entity.symbol, value);
         (marginals[entity.id] ??= []).push(...(typeof value === 'number' ? [value] : value));
+        (joint[entity.id] ??= []).push(typeof value === 'number' ? value : value[0]!);
       }
       if (!observation) continue;
-      const group = Math.floor(rng.uniform() * GROUPS);
+      // Groups are exchangeable, so probing group 0 keeps every joint draw aligned with alpha[0].
+      const group = 0;
       PROBES.forEach((probe, probeIndex) => {
         const local = new Map(env);
         for (const row of obsRows) {
@@ -227,13 +232,16 @@ export function simulatePrior(document: ModelDocument, projection: ScoreProjecti
             ? sampleCall(entity.id, entity.distribution, local, parse, rng)
             : entity.kind === 'deterministic' ? scalar(evaluate(parse(entity.id, entity.expression.source), local)) : 0;
           local.set(entity.symbol, value);
-          if (probeIndex === Math.floor(PROBES.length / 2) || !predictor) (marginals[entity.id] ??= []).push(value);
+          if (probeIndex === Math.floor(PROBES.length / 2) || !predictor) {
+            (marginals[entity.id] ??= []).push(value);
+            (joint[entity.id] ??= []).push(value);
+          }
         }
         outcomeDraws[probeIndex]!.push(local.get(observation.entity.symbol) as number);
       });
     }
   } catch (error) {
-    if (error instanceof Unsupported) return { marginals: {}, unsupported: [error.message] };
+    if (error instanceof Unsupported) return { marginals: {}, joint: {}, unsupported: [error.message] };
     throw error;
   }
   outcomeDraws.forEach((draws, index) => {
@@ -242,6 +250,7 @@ export function simulatePrior(document: ModelDocument, projection: ScoreProjecti
   });
   return {
     marginals,
+    joint,
     fan: observation ? {
       predictor: predictor?.entity.symbol ?? '—',
       outcome: observation.entity.symbol,

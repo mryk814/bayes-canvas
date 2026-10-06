@@ -2,6 +2,8 @@ import { useRef, useState } from 'react';
 import type { Diagnostic, JsonPatchOperation } from '../lib/core/diagnostics';
 import type { ModelDocument, RandomVariableEntity } from '../lib/core/model';
 import { findDistribution } from '../lib/distributionRegistry';
+import type { FunnelSpec } from './geometry';
+import { GeometryStrip } from './GeometryView';
 import { DensityPlot, FanPlot } from './Plots';
 import type { PriorSimulation } from './priorSim';
 import {
@@ -29,6 +31,7 @@ export interface DossierProps {
   onEdit: (label: string, operations: JsonPatchOperation[]) => void;
   onFork: (label: string, variantLabel: string, operations: JsonPatchOperation[]) => void;
   onFocus: (id: string) => void;
+  funnels: FunnelSpec[];
 }
 
 export function Dossier(props: DossierProps) {
@@ -48,6 +51,7 @@ export function Dossier(props: DossierProps) {
         <h3>根拠</h3>
         <Grounds row={row} support={props.support} />
       </section>
+      <GeometryStrip row={row} document={document} sim={props.sim} funnels={props.funnels} onEdit={props.onEdit} />
     </div>
   );
 }

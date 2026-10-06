@@ -74,3 +74,24 @@ test('prior simulation is deterministic and a wider hyperprior widens everything
   for (const id of ['alpha_bar', 'alpha', 'mu', 'y']) assert.ok(shifts[id] > 1.2, `${id} widens`);
   assert.equal(shifts.beta, undefined);
 });
+
+test('prior geometry finds the hierarchical funnel and the non-centered coordinates remove the neck', async () => {
+  const { findFunnels, funnelGeometry, pairGeometry } = await import('../dist-test/score/geometry.js');
+  const document = sample();
+  const projection = projectScore(document, compileModel(document, registry));
+  const funnels = findFunnels(document, projection);
+  assert.deepEqual(funnels.map((spec) => [spec.childId, spec.scaleId, spec.locationId, spec.nonCentered]), [['alpha', 'tau_alpha', 'alpha_bar', false]]);
+
+  const sim = simulatePrior(document, projection);
+  const geometry = funnelGeometry(funnels[0], sim, document);
+  assert.ok(geometry.neck > 8, `centered neck ratio ${geometry.neck}`);
+  const widths = geometry.nonCentered.envelope.map((bin) => bin.hi - bin.lo);
+  assert.ok(Math.max(...widths) / Math.min(...widths) < 2, 'non-centered spread is roughly constant across the scale');
+
+  const declared = patch(document, [{ op: 'add', path: '/entities/alpha/hints', value: [{ kind: 'parameterization', value: 'non_centered' }] }]);
+  assert.equal(findFunnels(declared, projectScore(declared, compileModel(declared, registry)))[0].nonCentered, true);
+
+  const pairs = pairGeometry(projection.byId.y, sim, document);
+  assert.deepEqual(pairs.map((pair) => pair.parentId).sort(), ['sigma']);
+  assert.equal(pairs[0].cloud.xLabel, 'log sigma');
+});

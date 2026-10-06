@@ -18,6 +18,7 @@ import {
 } from '../lib/modelEvidence';
 import { createModelVariant, loadModelVariants, persistModelVariants, type ModelVariant } from '../lib/modelWorkbench';
 import { Dossier } from './Dossier';
+import { findFunnels, funnelGeometry } from './geometry';
 import { intervalShifts, simulatePrior } from './priorSim';
 import {
   MEANING_LABEL,
@@ -99,6 +100,19 @@ export function ScoreApp() {
   }, [draft, draftBaseline, compare, sim]);
   const draftMeaning = useMemo(() => (draft ? meaningDiff(document, shown.document) : []), [draft, document, shown.document]);
 
+  const funnels = useMemo(() => findFunnels(shown.document, projection), [shown.document, projection]);
+  const geoFlags = useMemo(() => {
+    const flags: Record<string, string> = {};
+    for (const spec of funnels) {
+      if (spec.nonCentered) continue;
+      const geometry = funnelGeometry(spec, sim, shown.document);
+      if (!geometry || geometry.neck <= 8) continue;
+      const label = `漏斗 ×${Number.isFinite(geometry.neck) ? geometry.neck.toFixed(0) : '∞'}`;
+      flags[spec.childId] = label;
+      flags[spec.scaleId] ??= label;
+    }
+    return flags;
+  }, [funnels, sim, shown.document]);
   const findings = useMemo(() => findDuplicateAxes(shown.document), [shown.document]);
   const receiptMatch = useMemo(() => (receipt ? compareReceiptFingerprint(receipt, fingerprint) : null), [receipt, fingerprint]);
   const supports = useMemo(() => {
@@ -394,6 +408,7 @@ export function ScoreApp() {
           ghostSparks={draft ? draftBaseline?.marginals : compare?.sim.marginals}
           sparkT={draft ? 1 : t}
           shifts={shifts}
+          geoFlags={geoFlags}
           renderDossier={(row) => (
             <Dossier
               row={row}
@@ -410,6 +425,7 @@ export function ScoreApp() {
               onEdit={edit}
               onFork={fork}
               onFocus={setFocus}
+              funnels={funnels}
             />
           )}
         />

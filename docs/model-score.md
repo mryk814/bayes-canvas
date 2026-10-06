@@ -96,7 +96,18 @@ A の連続的な見方の変化は「読み方の切替を行ごとの変形ア
 
 実装 receipt の有無は別の印（`impl`）として同じレールに付く。
 
-## 6. 既知の制限
+## 6. 事前の幾何
+
+計算が壊れる場所は、ほとんどが分布の形で説明できる。Score は prior の前向き抽出から、draw ごとに揃えた同時サンプル（`PriorSimulation.joint`）を取り、行を開いたときに形として見せる。
+
+- **漏斗（funnel）**: plate を持つ潜在変数の scale 引数が確率変数を直接参照しているとき（`alpha[j] ~ Normal(alpha_bar, tau_alpha)`）、`(log tau, alpha_j − alpha_bar)` は首の細い漏斗になる。首の細さは scale 上位10% と下位10% での幅の比で、行には `漏斗 ×N` と出す（N > 8）。
+- **1歩の幅**: scale が大きい所に合わせた1歩を、小さい所にも同じ長さで描く。centered では首の壁を越え、non-centered 座標 `z = (alpha_j − alpha_bar) / tau` では同じ1歩がどこでも収まる。HMC の step size が合わない理由を、そのまま図にしている。
+- **宣言**: 「右の座標で実装すると宣言する」は `hints: parameterization = non_centered` を追加する JSON Patch で、確率モデルは変えない。意味の差分では「実装方針」として表示される。
+- **依存の形**: 漏斗以外の行では、確率的な親との同時分布を散布図と ±2sd 帯で示す。相関がゼロでも幅が変われば独立ではない。
+
+いずれも事前分布の形で、事後分布ではない。グループあたりのデータが少ないほど、事後分布はこの形を引き継ぐ。
+
+## 7. 既知の制限
 
 - prior predictive はブラウザ内で Normal / HalfNormal / StudentT / Exponential / HalfCauchy / LogNormal / Cauchy / Uniform / Beta / Gamma の単変量のみ抽出する。対応外の分布を含む場合はその旨を表示し、外部検証 prompt に誘導する。
 - `x` の probe 値は「標準化済み predictor の -2..2」と仮定して表示する（データ契約から範囲を取れる場合はそれを使う）。
@@ -110,6 +121,8 @@ A の連続的な見方の変化は「読み方の切替を行ごとの変形ア
 | ファイル | 責任 |
 |----------|------|
 | `app/src/score/scoreModel.ts` | 生成順・stage・数式・物語・shape・support grade・問い・意味の差分（純粋関数、テストあり） |
+| `app/src/score/geometry.ts` | 漏斗の検出、首の細さ、non-centered 座標、親との同時分布（純粋関数、テストあり） |
+| `app/src/score/GeometryView.tsx` | 散布図・±2sd 帯・1歩の幅・宣言操作 |
 | `app/src/score/priorSim.ts` | `ModelDocument` からの prior 前向き抽出、KDE、区間幅の変化（純粋関数、テストあり） |
 | `app/src/score/useScoreDocument.ts` | 正本 state、JSON Patch 適用、Undo/Redo、保存 |
 | `app/src/score/Sheet.tsx` | 楽譜本体：依存ガター、plate 括弧、4つの読み方、支持レール |

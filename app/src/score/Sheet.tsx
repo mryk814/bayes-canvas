@@ -49,6 +49,7 @@ export interface SheetProps {
   ghostSparks?: Record<string, number[]>;
   sparkT: number;
   shifts: Record<string, number>;
+  geoFlags: Record<string, string>;
 }
 
 export function Sheet(props: SheetProps) {
@@ -196,7 +197,8 @@ export function Sheet(props: SheetProps) {
                   </span>
                   {changes?.length ? (
                     <span className="row-change">{[...new Set(changes.map((change) => MEANING_LABEL[change.kind]))].join('・')}</span>
-                  ) : compare && !before ? <span className="row-change">追加</span> : null}
+                  ) : compare && !before ? <span className="row-change">追加</span>
+                    : props.geoFlags[row.id] ? <span className="row-geo" title="事前の幾何に漏斗がある。行を開くと形を見られる">{props.geoFlags[row.id]}</span> : null}
                   <span className={`rail rail-${grade}`}>
                     {showGrade && <span className="rail-label">{SUPPORT_LABEL[grade]}</span>}
                     {support?.implementation && <span className="rail-impl" title={`${support.implementation.file}`}>impl</span>}
