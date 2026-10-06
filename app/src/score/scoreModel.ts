@@ -391,10 +391,42 @@ export const SUPPORT_LABEL: Record<SupportGrade, string> = {
   contested: '疑義あり',
 };
 
+/**
+ * How an Evidence bundle relates to the current specification:
+ * - implementation: run against exactly this document
+ * - semantic: run against a document with the same probabilistic model, written differently
+ * - stale: run against a different model
+ */
+export type EvidenceMatch = 'implementation' | 'semantic' | 'stale';
+
+export interface SpecificationKeys {
+  implementation: string;
+  semantic: string;
+  /** Implementation fingerprint → semantic fingerprint, for documents seen in this browser. */
+  semanticOf: Readonly<Record<string, string>>;
+}
+
+export function evidenceMatch(bundle: ModelEvidenceBundle, keys: SpecificationKeys): EvidenceMatch {
+  if (bundle.specificationFingerprint === keys.implementation) return 'implementation';
+  return keys.semanticOf[bundle.specificationFingerprint] === keys.semantic ? 'semantic' : 'stale';
+}
+
+/** Bundle items that share a semantic fingerprint, keeping first-appearance order. */
+export function groupBySemantics<T>(items: readonly T[], semanticOf: (item: T) => string): T[][] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const key = semanticOf(item);
+    const group = groups.get(key);
+    if (group) group.push(item);
+    else groups.set(key, [item]);
+  }
+  return [...groups.values()];
+}
+
 export interface RowSupport {
   grade: SupportGrade;
   diagnostics: Diagnostic[];
-  evidence: Array<{ bundle: ModelEvidenceBundle; label: string; status: 'pass' | 'review' | 'fail'; detail?: string }>;
+  evidence: Array<{ bundle: ModelEvidenceBundle; match: Exclude<EvidenceMatch, 'stale'>; label: string; status: 'pass' | 'review' | 'fail'; detail?: string }>;
   staleEvidence: number;
   implementation?: ImplementationReceipt['mappings'][number];
 }
@@ -407,7 +439,7 @@ export function supportFor(
   row: ScoreRow,
   diagnostics: readonly Diagnostic[],
   evidence: readonly ModelEvidenceBundle[],
-  fingerprint: string,
+  keys: SpecificationKeys,
   receipt: ImplementationReceipt | null,
   receiptMatches: boolean,
   extraFindings: readonly Finding[],
@@ -420,12 +452,13 @@ export function supportFor(
     const metrics = bundle.metrics.filter((metric) => metric.entityIds.some((id) => ids.includes(id)));
     const findings = bundle.findings.filter((finding) => finding.entityIds.some((id) => ids.includes(id)));
     if (!metrics.length && !findings.length) continue;
-    if (bundle.specificationFingerprint !== fingerprint) {
+    const match = evidenceMatch(bundle, keys);
+    if (match === 'stale') {
       stale += 1;
       continue;
     }
-    for (const metric of metrics) linked.push({ bundle, label: `${metric.label}: ${metric.value}${metric.unit ? ` ${metric.unit}` : ''}`, status: metric.status, detail: metric.note });
-    for (const finding of findings) linked.push({ bundle, label: finding.title, status: finding.severity === 'info' ? 'pass' : finding.severity === 'warning' ? 'review' : 'fail', detail: finding.detail });
+    for (const metric of metrics) linked.push({ bundle, match, label: `${metric.label}: ${metric.value}${metric.unit ? ` ${metric.unit}` : ''}`, status: metric.status, detail: metric.note });
+    for (const finding of findings) linked.push({ bundle, match, label: finding.title, status: finding.severity === 'info' ? 'pass' : finding.severity === 'warning' ? 'review' : 'fail', detail: finding.detail });
   }
   const implementation = receipt && receiptMatches ? receipt.mappings.find((mapping) => ids.includes(mapping.entityId)) : undefined;
 

@@ -327,7 +327,7 @@ function Grounds({ row, support }: { row: ScoreRow; support: RowSupport }) {
             <li key={index} className={`ev ev-${item.status}`}>
               <span className="ev-status">{item.status === 'pass' ? '支持' : item.status === 'review' ? '要確認' : '反証'}</span>
               <span>{item.label}</span>
-              <span className="ev-run num">{item.bundle.runType} · {item.bundle.backend}</span>
+              <span className="ev-run num">{item.bundle.runType} · {item.bundle.backend}{item.match === 'semantic' && ' · 書き方違いの同じモデル'}</span>
             </li>
           ))}
         </ul>

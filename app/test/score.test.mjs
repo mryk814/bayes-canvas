@@ -5,7 +5,9 @@ import { applyJsonPatch } from '../dist-test/lib/core/json-patch.js';
 import { compileModel } from '../dist-test/lib/core/compiler.js';
 import { InMemoryDistributionRegistry } from '../dist-test/lib/core/registry.js';
 import { DISTRIBUTIONS, toCompilerDistributionDefinition } from '../dist-test/lib/distributionRegistry.js';
-import { findDuplicateAxes, meaningDiff, projectScore, questionsFor } from '../dist-test/score/scoreModel.js';
+import { evidenceMatch, findDuplicateAxes, groupBySemantics, meaningDiff, projectScore, questionsFor } from '../dist-test/score/scoreModel.js';
+import { createStableFingerprint } from '../dist-test/lib/core/fingerprint.js';
+import { semanticFingerprint } from '../dist-test/lib/core/semantic-fingerprint.js';
 import { intervalShifts, simulatePrior } from '../dist-test/score/priorSim.js';
 import { initialEdges, initialNodes } from '../dist-test/samples/hierarchicalRegression.js';
 
@@ -94,4 +96,62 @@ test('prior geometry finds the hierarchical funnel and the non-centered coordina
   const pairs = pairGeometry(projection.byId.y, sim, document);
   assert.deepEqual(pairs.map((pair) => pair.parentId).sort(), ['sigma']);
   assert.equal(pairs[0].cloud.xLabel, 'log sigma');
+});
+
+const semantic = (document) => semanticFingerprint(document).value;
+
+test('semantic fingerprint ignores how the same model is written down', () => {
+  const document = sample();
+  const rewritten = patch(document, [
+    { op: 'replace', path: '/revision', value: document.revision + 7 },
+    { op: 'replace', path: '/documentId', value: 'other_document' },
+    { op: 'replace', path: '/model/name', value: 'renamed model' },
+    { op: 'add', path: '/entities/alpha/label', value: 'group intercepts' },
+    { op: 'add', path: '/entities/alpha/notes', value: 'a note' },
+    { op: 'add', path: '/entities/alpha/hints', value: [{ kind: 'parameterization', value: 'non_centered' }] },
+    { op: 'add', path: '/entities/beta/priorRationale', value: 'effects are small on the standardized scale' },
+    { op: 'replace', path: '/entityOrder', value: [...document.entityOrder].reverse() },
+  ]);
+  assert.notEqual(createStableFingerprint(rewritten).value, createStableFingerprint(document).value);
+  assert.equal(semantic(rewritten), semantic(document));
+});
+
+test('semantic fingerprint normalizes the id of a generated observation binding', () => {
+  const document = sample();
+  const { obs_y: binding, ...rest } = document.entities;
+  const renamed = {
+    ...document,
+    entities: { ...rest, y_data: { ...binding, id: 'y_data', authorship: 'imported' }, y: { ...document.entities.y, observedDataId: 'y_data' } },
+    entityOrder: document.entityOrder.map((id) => (id === 'obs_y' ? 'y_data' : id)),
+  };
+  assert.equal(semantic(renamed), semantic(document));
+});
+
+test('semantic fingerprint changes when the probabilistic model changes', () => {
+  const document = sample();
+  const base = semantic(document);
+  const changes = {
+    distribution: [{ op: 'replace', path: '/entities/beta/distribution/distributionId', value: 'student_t' }],
+    scale: [{ op: 'replace', path: '/entities/beta/distribution/args/sigma/source', value: '2.5' }],
+    plate: [{ op: 'replace', path: '/entities/alpha/plateIds', value: [] }],
+    observation: [{ op: 'add', path: '/entities/y/observationProcess', value: { kind: 'censored', direction: 'right' } }],
+    assumption: [{ op: 'replace', path: '/plates/group/assumption', value: 'exchangeable' }],
+  };
+  for (const [name, operations] of Object.entries(changes)) {
+    assert.notEqual(semantic(patch(document, operations)), base, name);
+  }
+});
+
+test('evidence matches the implementation first, then the same probabilistic model', () => {
+  const bundle = (fingerprint) => ({ specificationFingerprint: fingerprint });
+  const keys = { implementation: 'impl-now', semantic: 'model-a', semanticOf: { 'impl-old': 'model-a', 'impl-other': 'model-b' } };
+  assert.equal(evidenceMatch(bundle('impl-now'), keys), 'implementation');
+  assert.equal(evidenceMatch(bundle('impl-old'), keys), 'semantic');
+  assert.equal(evidenceMatch(bundle('impl-other'), keys), 'stale');
+  assert.equal(evidenceMatch(bundle('impl-unknown'), keys), 'stale');
+});
+
+test('variants with the same semantic fingerprint are bundled in order', () => {
+  const items = [{ id: 'a', key: 'x' }, { id: 'b', key: 'y' }, { id: 'c', key: 'x' }];
+  assert.deepEqual(groupBySemantics(items, (item) => item.key).map((group) => group.map((item) => item.id)), [['a', 'c'], ['b']]);
 });

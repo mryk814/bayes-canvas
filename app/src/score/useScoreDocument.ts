@@ -5,12 +5,15 @@ import { createStableFingerprint } from '../lib/core/fingerprint';
 import { applyJsonPatch } from '../lib/core/json-patch';
 import type { LayoutDocument, ModelDocument } from '../lib/core/model';
 import { InMemoryDistributionRegistry } from '../lib/core/registry';
+import { semanticFingerprint } from '../lib/core/semantic-fingerprint';
 import { compileCanvas } from '../lib/canvasProjector';
 import { DISTRIBUTIONS, toCompilerDistributionDefinition } from '../lib/distributionRegistry';
 import { initialEdges, initialNodes } from '../samples/hierarchicalRegression';
 
 const STORAGE_KEY = 'bayes-canvas:score:document';
+const SEMANTIC_INDEX_KEY = 'bayes-canvas:score:semantic-index';
 const HISTORY_LIMIT = 60;
+const SEMANTIC_INDEX_LIMIT = 200;
 
 export const registry = new InMemoryDistributionRegistry(DISTRIBUTIONS.map(toCompilerDistributionDefinition));
 
@@ -20,6 +23,25 @@ export function compile(document: ModelDocument) {
 
 export function fingerprintOf(document: ModelDocument): string {
   return createStableFingerprint(document).value;
+}
+
+export function semanticFingerprintOf(document: ModelDocument): string {
+  return semanticFingerprint(document).value;
+}
+
+/**
+ * Evidence carries only the implementation fingerprint. Every version shown
+ * here is recorded as implementation → semantic, so Evidence produced from an
+ * earlier export can still be matched to the same probabilistic model.
+ */
+function loadSemanticIndex(): Record<string, string> {
+  try {
+    const value = JSON.parse(localStorage.getItem(SEMANTIC_INDEX_KEY) ?? '{}') as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+  } catch {
+    return {};
+  }
 }
 
 interface Stored {
@@ -111,12 +133,30 @@ export function useScoreDocument() {
 
   const semantic = useMemo(() => compile(current.document), [current.document]);
   const fingerprint = useMemo(() => fingerprintOf(current.document), [current.document]);
+  const semanticKey = useMemo(() => semanticFingerprintOf(current.document), [current.document]);
+  const [semanticIndex, setSemanticIndex] = useState(loadSemanticIndex);
+
+  useEffect(() => {
+    setSemanticIndex((index) => {
+      if (index[fingerprint] === semanticKey) return index;
+      const entries = Object.entries(index).filter(([key]) => key !== fingerprint);
+      const next = Object.fromEntries([...entries.slice(-SEMANTIC_INDEX_LIMIT + 1), [fingerprint, semanticKey]]);
+      try {
+        localStorage.setItem(SEMANTIC_INDEX_KEY, JSON.stringify(next));
+      } catch {
+        // The index is a cache of computable pairs; the document save reports storage failures.
+      }
+      return next;
+    });
+  }, [fingerprint, semanticKey]);
 
   return {
     document: current.document,
     layout: current.layout,
     semantic,
     fingerprint,
+    semanticFingerprint: semanticKey,
+    semanticIndex,
     restored: initial.restored,
     saveError,
     apply,

@@ -13,6 +13,7 @@
 | 派生 | 認識の確からしさ（support grade） | priorRationale・診断・Evidence・receipt から計算 |
 | 外部記録 | モデル案 `bayes-canvas:model-variants` | 既存UIと同じキー・同じ `ModelVariant` 形式 |
 | 外部記録 | Evidence `bayes-canvas:model-evidence` | 既存UIと同じキー。`specificationFingerprint` で現行仕様に結び付ける |
+| 照合用 | 意味の指紋の対応表 `bayes-canvas:score:semantic-index` | 表示した版ごとに「実装指紋 → 意味の指紋」を記録（最大200件）。Evidence format は変えない |
 | 外部記録 | Implementation Receipt | 読み込み時に fingerprint を照合。保存はしない（セッション内） |
 
 既存UIでは React Flow の nodes/edges が実質の編集状態で、そこから `ModelDocument` を毎回組み立てている。
@@ -80,7 +81,7 @@ A の連続的な見方の変化は「読み方の切替を行ごとの変形ア
 | prior の scale をドラッグ | JSON Patch を作り、sandbox compile と prior predictive をその場で更新。確定まで正本は変わらない |
 | 問いから代替案を作る | 「裾は十分か？」→ Student-t 案。現行を案Aとして保存し、案Bへ移ってから意味の差分を表示 |
 | 比較 | 行を揃えて A→B の変形をスクラブで再生。差分は「priorが2倍広くなった」「観測の裾が厚くなった」のように意味で要約 |
-| Evidence / Receipt を読み込む | fingerprint で照合し、metric・finding・mapping が該当行の支持レールに付く |
+| Evidence / Receipt を読み込む | fingerprint で照合し、metric・finding・mapping が該当行の支持レールに付く。Evidence は意味の指紋でも照合する（§8） |
 
 ## 5. 不確かさの表現
 
@@ -90,7 +91,7 @@ A の連続的な見方の変化は「読み方の切替を行ごとの変形ア
 |-------|------|----|
 | `stated` | 書いただけ（根拠なし） | 点線 |
 | `reasoned` | prior intent / rationale あり | 破線 |
-| `checked` | 現行 fingerprint の Evidence が pass | 実線 |
+| `checked` | 現行仕様、または同じ確率モデル（意味の指紋が一致）の Evidence が pass | 実線 |
 | `contested` | 診断 warning/error、Evidence が review/fail | 途切れた線＋警告色 |
 | data | 観測された事実 | 太い実線 |
 
@@ -107,7 +108,31 @@ A の連続的な見方の変化は「読み方の切替を行ごとの変形ア
 
 いずれも事前分布の形で、事後分布ではない。グループあたりのデータが少ないほど、事後分布はこの形を引き継ぐ。
 
-## 7. 既知の制限
+## 7. 意味の指紋
+
+`specificationFingerprint` は文書全体の hash で、`revision`・label・hints まで含む。Score は編集ごとに `revision` を上げるため、値を戻しても指紋は戻らず、non-centered を宣言しただけで別仕様になる。
+
+そこで `semanticFingerprint(document)`（`app/src/lib/core/semantic-fingerprint.ts`）を追加の照合キーとして持つ。
+
+- 含める: axes（symbol, size）、plates（軸, index, 親, assumption）、entity の確率的意味（kind, symbol, valueType, plate, distribution, expression, 観測データ参照, observationProcess, constraints, transform, queryRole, block の入出力と config）、macro の bindings と config。
+- 除外する: `revision`, `documentId`, model の name/description/intent, label, notes, tags, authorship, `hints`, `priorRationale`, `extensions`, entity の順序, macro の status, LayoutDocument。
+- id は symbol 由来のキーに置き換える。生成された観測 binding（`obs_y`）と取り込んだ binding（`y_data`）は symbol が同じなら一致する。symbol を変えると式も変わるので、別の指紋になる（保守的な側に倒す）。
+
+handoff manifest・Evidence・Receipt の `specificationFingerprint` は意味を変えていない。
+
+## 8. Evidence の2段照合
+
+| 照合 | 条件 | 扱い |
+|------|------|------|
+| 実装 | Evidence の `specificationFingerprint` が現行の実装指紋と一致 | この実装の検証。`checked` |
+| 意味 | 実装指紋は違うが、対応表で引いた意味の指紋が現行と一致 | 同じ確率モデルの検証（書き方違い）。`checked`、Grounds と「試したこと」に「書き方違い」と出す |
+| 不一致 | どちらも違う、または対応表にない | 支持に数えない（以前の仕様として件数だけ出す） |
+
+対応表は、Score で表示した版とモデル案から作る。Score を通らずに作った文書の Evidence は、意味の照合ができない（実装指紋が一致すれば従来どおり照合される）。
+
+モデル案の一列では、意味の指紋が同じ案を破線の枠で束ね「同じモデル」と出す。現在と実装指紋が同じ案は `= 現在`、意味だけ同じ案は `≈ 現在`。
+
+## 9. 既知の制限
 
 - prior predictive はブラウザ内で Normal / HalfNormal / StudentT / Exponential / HalfCauchy / LogNormal / Cauchy / Uniform / Beta / Gamma の単変量のみ抽出する。対応外の分布を含む場合はその旨を表示し、外部検証 prompt に誘導する。
 - `x` の probe 値は「標準化済み predictor の -2..2」と仮定して表示する（データ契約から範囲を取れる場合はそれを使う）。
@@ -120,11 +145,12 @@ A の連続的な見方の変化は「読み方の切替を行ごとの変形ア
 
 | ファイル | 責任 |
 |----------|------|
-| `app/src/score/scoreModel.ts` | 生成順・stage・数式・物語・shape・support grade・問い・意味の差分（純粋関数、テストあり） |
+| `app/src/lib/core/semantic-fingerprint.ts` | 意味の指紋（確率モデルだけの hash、純粋関数、テストあり） |
+| `app/src/score/scoreModel.ts` | 生成順・stage・数式・物語・shape・support grade・Evidence の2段照合・案の束ね・問い・意味の差分（純粋関数、テストあり） |
 | `app/src/score/geometry.ts` | 漏斗の検出、首の細さ、non-centered 座標、親との同時分布（純粋関数、テストあり） |
 | `app/src/score/GeometryView.tsx` | 散布図・±2sd 帯・1歩の幅・宣言操作 |
 | `app/src/score/priorSim.ts` | `ModelDocument` からの prior 前向き抽出、KDE、区間幅の変化（純粋関数、テストあり） |
-| `app/src/score/useScoreDocument.ts` | 正本 state、JSON Patch 適用、Undo/Redo、保存 |
+| `app/src/score/useScoreDocument.ts` | 正本 state、JSON Patch 適用、Undo/Redo、保存、意味の指紋の対応表 |
 | `app/src/score/Sheet.tsx` | 楽譜本体：依存ガター、plate 括弧、4つの読み方、支持レール |
 | `app/src/score/Dossier.tsx` | 行をその場で開いたときの信念・つながり・問い・根拠 |
 | `app/src/score/ScoreApp.tsx` | 問い・案・比較・Ledger・読み込み |
@@ -136,4 +162,4 @@ npm run test
 npm run build
 ```
 
-`app/test/score.test.mjs` が生成順、軸統合 patch の compile、意味の差分、prior 抽出の決定性と下流への波及を確認する。
+`app/test/score.test.mjs` が生成順、軸統合 patch の compile、意味の差分、prior 抽出の決定性と下流への波及、意味の指紋（書き方違いで一致・確率モデルの変更で不一致）、Evidence の2段照合、案の束ねを確認する。

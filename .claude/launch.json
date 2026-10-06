@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev", "--", "--port", "5175", "--strictPort"],
       "port": 5175,
       "cwd": "app"
+    },
+    {
+      "name": "app-alt",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5176", "--strictPort"],
+      "port": 5176,
+      "cwd": "app"
     }
   ]
 }

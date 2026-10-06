@@ -23,7 +23,9 @@ import { intervalShifts, simulatePrior } from './priorSim';
 import {
   MEANING_LABEL,
   SUPPORT_LABEL,
+  evidenceMatch,
   findDuplicateAxes,
+  groupBySemantics,
   meaningDiff,
   projectScore,
   queryOperations,
@@ -32,11 +34,12 @@ import {
   supportFor,
   type MeaningChange,
   type RowSupport,
+  type SpecificationKeys,
   type SupportGrade,
 } from './scoreModel';
 import { READING_MODES, Sheet, type ReadingMode } from './Sheet';
 import { Tex } from './Tex';
-import { compile, fingerprintOf, patchDocument, useScoreDocument } from './useScoreDocument';
+import { compile, fingerprintOf, patchDocument, semanticFingerprintOf, useScoreDocument } from './useScoreDocument';
 import './score.css';
 
 interface Draft {
@@ -55,7 +58,7 @@ const IMPORT_LIMITS = { maxBytes: 4 * 1024 * 1024, maxDepth: 64 };
 
 export function ScoreApp() {
   const model = useScoreDocument();
-  const { document, layout, semantic, fingerprint } = model;
+  const { document, layout, semantic, fingerprint, semanticIndex } = model;
   const [mode, setMode] = useState<ReadingMode>('math');
   const [focus, setFocus] = useState<string | null>(null);
   const [brushed, setBrushed] = useState<string | null>(null);
@@ -81,6 +84,17 @@ export function ScoreApp() {
   }, [document, semantic, draft]);
   const projection = useMemo(() => projectScore(shown.document, shown.semantic), [shown]);
   const sim = useMemo(() => simulatePrior(shown.document, projection), [shown.document, projection]);
+
+  const variantKeys = useMemo(() => new Map(variants.map((variant) => [variant.id, {
+    implementation: fingerprintOf(variant.document),
+    semantic: semanticFingerprintOf(variant.document),
+  }])), [variants]);
+  const keys = useMemo<SpecificationKeys>(() => ({
+    implementation: fingerprint,
+    semantic: model.semanticFingerprint,
+    semanticOf: { ...semanticIndex, ...Object.fromEntries([...variantKeys.values()].map((key) => [key.implementation, key.semantic])) },
+  }), [fingerprint, model.semanticFingerprint, semanticIndex, variantKeys]);
+  const matchedEvidence = useMemo(() => evidence.filter((item) => evidenceMatch(item, keys) !== 'stale'), [evidence, keys]);
 
   const compareVariant = variants.find((variant) => variant.id === compareId) ?? null;
   const compare = useMemo(() => {
@@ -118,10 +132,10 @@ export function ScoreApp() {
   const supports = useMemo(() => {
     const out: Record<string, RowSupport> = {};
     for (const row of [...projection.rows, ...projection.queries]) {
-      out[row.id] = supportFor(row, shown.semantic.diagnostics, evidence, fingerprint, receipt, Boolean(receiptMatch?.matches), findings);
+      out[row.id] = supportFor(row, shown.semantic.diagnostics, evidence, keys, receipt, Boolean(receiptMatch?.matches), findings);
     }
     return out;
-  }, [projection, shown.semantic.diagnostics, evidence, fingerprint, receipt, receiptMatch, findings]);
+  }, [projection, shown.semantic.diagnostics, evidence, keys, receipt, receiptMatch, findings]);
 
   const gradeCounts = useMemo(() => {
     const counts: Partial<Record<SupportGrade, number>> = {};
@@ -327,7 +341,8 @@ export function ScoreApp() {
 
         <Alternatives
           variants={variants}
-          currentFingerprint={fingerprint}
+          variantKeys={variantKeys}
+          current={keys}
           compareId={compareId}
           onCompare={(id) => { setCompareId(id === compareId ? null : id); }}
           onSave={(label) => {
@@ -369,7 +384,7 @@ export function ScoreApp() {
               </ol>
             ) : <p className="missing">A と現在のモデルは意味の上で同じです。</p>}
             <ShiftList shifts={shifts} document={shown.document} onFocus={setFocus} />
-            <EvidenceDelta evidence={evidence} a={fingerprintOf(compare.document)} b={fingerprint} />
+            <EvidenceDelta evidence={evidence} a={variantKeys.get(compareVariant.id)!} b={keys} />
           </section>
         )}
 
@@ -432,13 +447,13 @@ export function ScoreApp() {
 
         <Ledger
           evidence={evidence}
-          fingerprint={fingerprint}
+          keys={keys}
           onHover={(ids) => setHighlight(new Set(ids))}
           blocking={blocking}
           receipt={receipt}
           receiptMessage={receiptMatch?.message}
           onCopyProtocol={() => copy(generateCriticismPrompt(document, fingerprint, buildSensitivityScenarios(document)), '検証protocol')}
-          onCopyCard={() => copy(generateModelCardMarkdown(document, semantic.diagnostics, buildModelScorecard(document, semantic.diagnostics), evidence.filter((item) => item.specificationFingerprint === fingerprint)), 'Model Card')}
+          onCopyCard={() => copy(generateModelCardMarkdown(document, semantic.diagnostics, buildModelScorecard(document, semantic.diagnostics), matchedEvidence), 'Model Card')}
           onCopyPackage={() => copy(JSON.stringify(buildPortablePackage(document, layout, semantic, 'review'), null, 2), 'portable package')}
           onCopyHandoff={() => copy(JSON.stringify(buildHandoffBundle(document, semantic, 'numpyro'), null, 2), 'handoff bundle')}
           onImport={() => setImportOpen(true)}
@@ -463,7 +478,12 @@ export function ScoreApp() {
               const next = persistModelEvidence([bundle, ...evidence]);
               setEvidence(next);
               setImportOpen(false);
-              notify(bundle.specificationFingerprint === fingerprint ? 'Evidence を取り込み、該当する文へ結び付けました。' : 'Evidence を取り込みました。fingerprint が現在の仕様と異なるため、支持には数えません。');
+              const match = evidenceMatch(bundle, keys);
+              notify(match === 'implementation'
+                ? 'Evidence を取り込み、該当する文へ結び付けました。'
+                : match === 'semantic'
+                  ? 'Evidence を取り込みました。書き方の違う同じ確率モデルの検証として、該当する文へ結び付けました。'
+                  : 'Evidence を取り込みました。fingerprint が現在の仕様と異なるため、支持には数えません。');
             } catch (error) {
               notify((error as Error).message, { tone: 'danger' });
             }
@@ -514,31 +534,54 @@ function Certainty({ counts, total, assumptions, grounded }: { counts: Partial<R
   );
 }
 
-function Alternatives({ variants, currentFingerprint, compareId, onCompare, onSave }: {
+function Alternatives({ variants, variantKeys, current, compareId, onCompare, onSave }: {
   variants: ModelVariant[];
-  currentFingerprint: string;
+  variantKeys: ReadonlyMap<string, { implementation: string; semantic: string }>;
+  current: SpecificationKeys;
   compareId: string | null;
   onCompare: (id: string) => void;
   onSave: (label: string) => void;
 }) {
   const [naming, setNaming] = useState<string | null>(null);
-  const entries = useMemo(() => variants.slice(0, 8).map((variant) => ({ variant, same: fingerprintOf(variant.document) === currentFingerprint })), [variants, currentFingerprint]);
+  const groups = useMemo(
+    () => groupBySemantics(variants.slice(0, 8), (variant) => variantKeys.get(variant.id)?.semantic ?? variant.id),
+    [variants, variantKeys],
+  );
+  const relation = (variant: ModelVariant) => {
+    const key = variantKeys.get(variant.id);
+    if (key?.implementation === current.implementation) return 'same';
+    return key?.semantic === current.semantic ? 'rewritten' : 'different';
+  };
   return (
     <section className="alternatives" aria-label="モデル案">
       <span className="eyebrow">案</span>
       <span className="alt alt-current"><span className="alt-dot" />現在</span>
-      {entries.map(({ variant, same }) => (
-        <button
-          key={variant.id}
-          type="button"
-          className={`alt${compareId === variant.id ? ' is-on' : ''}${same ? ' is-same' : ''}`}
-          aria-pressed={compareId === variant.id}
-          aria-label={`${variant.label}${same ? '（現在と同じ仕様）' : 'と現在を比較する'}`}
-          onClick={() => onCompare(variant.id)}
-        >
-          <span className="alt-dot" />{variant.label}{same && <span className="alt-same">= 現在</span>}
-        </button>
-      ))}
+      {groups.map((group) => {
+        const chips = group.map((variant) => {
+          const kind = relation(variant);
+          return (
+            <button
+              key={variant.id}
+              type="button"
+              className={`alt${compareId === variant.id ? ' is-on' : ''}${kind !== 'different' ? ' is-same' : ''}`}
+              aria-pressed={compareId === variant.id}
+              aria-label={`${variant.label}${kind === 'same' ? '（現在と同じ仕様）' : kind === 'rewritten' ? '（現在と同じモデル、書き方違い）' : 'と現在を比較する'}`}
+              onClick={() => onCompare(variant.id)}
+            >
+              <span className="alt-dot" />{variant.label}
+              {kind === 'same' && <span className="alt-same">= 現在</span>}
+              {kind === 'rewritten' && <span className="alt-same">≈ 現在</span>}
+            </button>
+          );
+        });
+        if (group.length === 1) return chips[0];
+        return (
+          <span key={group[0]!.id} className="alt-group" role="group" aria-label={`同じモデル（書き方違い）${group.length} 案`}>
+            {chips}
+            <span className="alt-group-label">同じモデル</span>
+          </span>
+        );
+      })}
       {naming === null ? (
         <button type="button" className="quiet" onClick={() => setNaming(`案 ${variants.length + 1}`)}>この版を案として保存</button>
       ) : (
@@ -576,20 +619,22 @@ function ShiftList({ shifts, document, exclude, onFocus }: { shifts: Record<stri
   );
 }
 
-function EvidenceDelta({ evidence, a, b }: { evidence: ModelEvidenceBundle[]; a: string; b: string }) {
-  const countA = evidence.filter((item) => item.specificationFingerprint === a).length;
-  const countB = evidence.filter((item) => item.specificationFingerprint === b).length;
+function EvidenceDelta({ evidence, a, b }: { evidence: ModelEvidenceBundle[]; a: { implementation: string; semantic: string }; b: SpecificationKeys }) {
+  const countA = evidence.filter((item) => evidenceMatch(item, { ...a, semanticOf: b.semanticOf }) !== 'stale').length;
+  const countB = evidence.filter((item) => evidenceMatch(item, b) !== 'stale').length;
   return (
     <p className="evidence-delta">
       Evidence: A <span className="num">{countA}</span> 件 → 現在 <span className="num">{countB}</span> 件
-      {countB < countA && <span className="missing">。仕様が変わったため、A の検証結果は現在の案を支持しません。</span>}
+      {a.semantic === b.semantic
+        ? <span className="missing">。確率モデルは同じなので、A の検証結果は現在の案にも数えます。</span>
+        : countB < countA && <span className="missing">。仕様が変わったため、A の検証結果は現在の案を支持しません。</span>}
     </p>
   );
 }
 
 function Ledger(props: {
   evidence: ModelEvidenceBundle[];
-  fingerprint: string;
+  keys: SpecificationKeys;
   onHover: (ids: string[]) => void;
   blocking: number;
   receipt: ImplementationReceipt | null;
@@ -600,7 +645,10 @@ function Ledger(props: {
   onCopyHandoff: () => void;
   onImport: () => void;
 }) {
-  const current = props.evidence.filter((item) => item.specificationFingerprint === props.fingerprint);
+  const fingerprint = props.keys.implementation;
+  const current = props.evidence
+    .map((run) => ({ run, match: evidenceMatch(run, props.keys) }))
+    .filter((item) => item.match !== 'stale');
   const stale = props.evidence.length - current.length;
   return (
     <section className="ledger" aria-label="検証と受け渡し">
@@ -608,19 +656,19 @@ function Ledger(props: {
         <h2>試したこと</h2>
         {current.length ? (
           <ol className="runs">
-            {current.map((run, index) => {
+            {current.map(({ run, match }, index) => {
               const ids = [...run.metrics.flatMap((metric) => metric.entityIds), ...run.findings.flatMap((finding) => finding.entityIds)];
               return (
                 <li key={index} className={`run run-${run.status}`} onMouseEnter={() => props.onHover(ids)} onMouseLeave={() => props.onHover([])}>
                   <span className="run-status">{run.status === 'passed' ? '支持' : run.status === 'review' ? '要確認' : '反証'}</span>
                   <span className="run-type">{run.runType}</span>
                   <span className="run-meta num">{run.backend} · {new Date(run.createdAt).toLocaleDateString('ja-JP')}</span>
-                  <span className="run-links num">{new Set(ids).size} 文に関係</span>
+                  <span className="run-links num">{new Set(ids).size} 文に関係{match === 'semantic' && ' · 書き方違い'}</span>
                 </li>
               );
             })}
           </ol>
-        ) : <p className="missing">現在の仕様（fingerprint <span className="num">{props.fingerprint.slice(0, 10)}</span>）ではまだ何も検証していません。</p>}
+        ) : <p className="missing">現在の仕様（fingerprint <span className="num">{fingerprint.slice(0, 10)}</span>）ではまだ何も検証していません。</p>}
         {stale > 0 && <p className="note">別の仕様に対する Evidence が {stale} 件あります。</p>}
         <div className="ledger-acts">
           <button type="button" className="act" onClick={props.onCopyProtocol}>検証protocolをコピー</button>
@@ -631,7 +679,7 @@ function Ledger(props: {
         <h2>渡す</h2>
         <p className={props.blocking ? 'handoff-blocked' : 'handoff-ready'}>
           {props.blocking ? `${props.blocking} 件の診断が受け渡しを止めています。` : '受け渡しできます。'}
-          <span className="num"> sha256:{props.fingerprint.slice(0, 12)}</span>
+          <span className="num"> sha256:{fingerprint.slice(0, 12)}</span>
         </p>
         <div className="ledger-acts">
           <button type="button" className="act" onClick={props.onCopyHandoff}>handoff bundle をコピー</button>

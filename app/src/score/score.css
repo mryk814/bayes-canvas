@@ -182,6 +182,15 @@ button.alt:active { background: var(--color-border); }
 .alt-form input { font: inherit; font-size: var(--text-sm); padding: 3px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); }
 .alt-form input:focus { outline: none; box-shadow: var(--focus-ring); }
 .alt-same { font-size: var(--text-xs); color: var(--color-text-tertiary); }
+.alt-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-2) 0 0;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+.alt-group-label { font-size: var(--text-xs); color: var(--color-text-tertiary); }
 .alt + .alt::before {
   content: "";
   width: 10px;
