@@ -6,6 +6,7 @@ import { post, useAction, type ApiError } from "./api.ts";
 import { fmt } from "./format.ts";
 import { nodeHtml } from "./tex.ts";
 import { WorldPlot, sharedDomains } from "./WorldPlot.tsx";
+import { DatasetPassport } from "./DatasetPassport.tsx";
 
 export function ErrorNote({ error }: { error: ApiError | null }) {
   if (!error) return null;
@@ -287,6 +288,7 @@ export function EvidenceList({ state, modelId, onShowRun }: { state: State; mode
               .join(" · ")}
             {d.note && ` · ${d.note}`}
           </p>
+          <DatasetPassport passport={d.passport}/>
         </article>
       ))}
     </div>

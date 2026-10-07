@@ -127,12 +127,19 @@ export type ModelVersion = z.infer<typeof ModelVersionSchema>;
 
 // ---------- data and runs: evidence, never edits ----------------------------------
 
+export const DatasetPassportSchema = z.object({
+  sampling: z.string().trim().min(1).max(2000).optional(),
+  instrument: z.string().trim().min(1).max(2000).optional(),
+  preprocessing: z.string().trim().min(1).max(2000).optional(),
+}).strict().refine(v => Object.values(v).some(value => value !== undefined), "パスポートには少なくとも1項目を記録してください");
+
 export const DatasetSchema = z.object({
   id: z.string(),
   modelId: z.string(),
   createdAt: z.string(),
   label: z.string().min(1),
   provenance: z.enum(["real", "synthetic"]),
+  passport: DatasetPassportSchema.optional(),
   note: z.string().default(""),
   plates: z.record(z.string(), z.number().int().min(1).max(5000)),
   columns: z.record(z.string(), z.array(z.number())),

@@ -3,7 +3,7 @@ import type { Dataset, ModelSpec, ModelVersion } from "./contracts.ts";
 import { parseCsv } from "./csv.ts";
 import { datasetProblems } from "./evidence-validation.ts";
 
-export type ImportOptions = { label: string; provenance: "real" | "synthetic"; columns: Record<string, { source: string; unit: string }> };
+export type ImportOptions = { label: string; provenance: "real" | "synthetic"; passport?: Dataset["passport"]; columns: Record<string, { source: string; unit: string }> };
 export function modelCsvFields(spec: ModelSpec) {
   return [...spec.data.map(d => ({ name: d.name, label: d.label, unit: d.unit, plate: d.plate as string | null, indexOf: d.indexOf })),
     ...spec.nodes.filter(n => n.role === "observed").map(n => ({ name: n.name, label: n.label, unit: n.unit, plate: n.plate, indexOf: null as string | null }))];
@@ -64,6 +64,7 @@ export function previewModelCsv(version: ModelVersion, text: string, options: Im
   for (const header of parsed.headers) if (!selected.includes(header)) warnings.push(`列「${header}」は取り込み対象外です。`);
   const input = {
     modelId: version.modelId, label: options.label.trim(), provenance: options.provenance, plates, columns,
+    ...(options.passport === undefined ? {} : { passport: options.passport }),
     note: `CSV取込・確認対象版 ${version.id}\n列・単位対応: ${JSON.stringify(options.columns)}\n群対応（配列位置=0始まり添字）: ${JSON.stringify(groups)}`,
   };
   const validated = AgentDatasetInput.safeParse(input);

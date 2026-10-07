@@ -388,7 +388,7 @@ export class Store {
           checkResults: s.checkResults.filter((result) => result.modelId === m.id).map(({ replicatedValues, ...summary }) => ({
             ...summary, replicationCount: replicatedValues.length,
           })),
-          datasets: s.datasets.filter((x) => x.modelId === m.id).map((x) => ({ id: x.id, label: x.label, provenance: x.provenance, note: x.note, plates: x.plates })),
+          datasets: s.datasets.filter((x) => x.modelId === m.id).map((x) => ({ id: x.id, label: x.label, provenance: x.provenance, note: x.note, plates: x.plates, ...(x.passport === undefined ? {} : { passport: x.passport }) })),
           runs: s.runs
             .filter((r) => r.modelId === m.id)
             .map((r) => ({

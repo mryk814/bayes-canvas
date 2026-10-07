@@ -3,6 +3,7 @@ import type { Dataset, Model, ModelVersion, Run } from "../shared/contracts.ts";
 import { createCapsule, readCapsule, type CapsuleRead } from "../shared/capsule.ts";
 import { post, useAction } from "./api.ts";
 import { ErrorNote } from "./Ledger.tsx";
+import { DatasetPassport } from "./DatasetPassport.tsx";
 
 export function Capsule({ version, dataset, run }: { version: ModelVersion | null; dataset: Dataset | null; run: Run | null }) {
   const [input, setInput] = useState("");
@@ -43,6 +44,7 @@ export function Capsule({ version, dataset, run }: { version: ModelVersion | nul
       <p className="muted">モデル版・観測データ・同時標本を、同じJSONで持ち出せます。</p>
       {exported.error ? <p role="status">{exported.error}</p> : <>
         <p className="small muted">v{version.number} · {dataset?.label} · run {run?.id}</p>
+        <DatasetPassport passport={dataset?.passport}/>
         <label className="field"><span>選択した証拠のJSON（読み取り専用）</span>
           <textarea rows={8} readOnly value={exported.text} spellCheck={false} onFocus={(event) => event.currentTarget.select()} />
         </label>
@@ -61,6 +63,7 @@ export function Capsule({ version, dataset, run }: { version: ModelVersion | nul
           <p>{result.capsule.modelVersion.spec.title} · v{result.capsule.modelVersion.number}</p>
           <p className="small">モデル {result.capsule.modelVersion.modelId} / 版 {result.capsule.modelVersion.id}</p>
           <p>データ: {result.capsule.dataset.label}（{result.capsule.dataset.provenance === "real" ? "実データ" : "合成データ"}）</p>
+          <DatasetPassport passport={result.capsule.dataset.passport}/>
           <p className="small">データID {result.capsule.dataset.id} / run {result.capsule.run.id}</p>
           <p>方法: {result.capsule.run.method} · 同時標本 {Object.values(result.capsule.run.draws)[0]?.length ?? 0} 行</p>
           <p className="small muted">新しいIDのモデル・版・データ・runを作ります。既存の記録は上書きせず、元の提案・知識・巻き戻し履歴は復元しません。同じJSONを再度取り込むと別コピーになります。</p>

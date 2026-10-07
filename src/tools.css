@@ -60,3 +60,8 @@
 .question-contract .diff-table { table-layout:fixed; }
 .question-contract .diff-table th,.question-contract .diff-table td { white-space:pre-wrap; overflow-wrap:anywhere; }
 .question-contract .diff-table th:first-child { width:24%; }
+.dataset-passport { overflow-wrap:anywhere; margin-top:12px; }
+.dataset-passport dl { display:grid; gap:5px; margin:10px 0; }
+.dataset-passport dt { color:var(--muted); font-size:12px; }
+.dataset-passport dd { margin:0 0 7px; white-space:pre-wrap; }
+.dataset-passport-input summary { min-height:44px; padding:10px 0; cursor:pointer; }
