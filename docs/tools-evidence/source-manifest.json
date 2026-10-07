@@ -1,0 +1,158 @@
+﻿{
+    "sources":  [
+                    {
+                        "sha256":  "ce434a288098cba778b0dd66445f8264abddffd40bc62836eb02a665877fef54",
+                        "path":  "shared/capsule.ts"
+                    },
+                    {
+                        "sha256":  "717ca7a2d1a92cc1beb0309244b0c1efb03982e3aa5e7e37158a20de8a919755",
+                        "path":  "shared/codegen.ts"
+                    },
+                    {
+                        "sha256":  "52ffad82e631a70cccfc6828e4f9e04ce189c5a7b7758c26c7a3f0875e8b02d7",
+                        "path":  "shared/contracts.ts"
+                    },
+                    {
+                        "sha256":  "94cc562dcf3faaf1a90aab7ff78de19837adcb571adeece3aade82a240ae063b",
+                        "path":  "shared/csv.ts"
+                    },
+                    {
+                        "sha256":  "f1656e7971e4987ad4940472990ea7f5b6817b0cb577790923fcff35a790c662",
+                        "path":  "shared/diagnose.ts"
+                    },
+                    {
+                        "sha256":  "9019e450932cf80b6b66a1ade1e1789c35090387b3fdfb43f8a4a42a45514dcb",
+                        "path":  "shared/evidence-validation.ts"
+                    },
+                    {
+                        "sha256":  "76ce42a083988ae0e34bb6bd3a0c975fe807e5ccd319f188fc7adf0e7c3089b4",
+                        "path":  "shared/example.ts"
+                    },
+                    {
+                        "sha256":  "de12af6b0f4a38ab5ce357c408dd1caedc829d9fe9195f57e8ac9980bfcb9a31",
+                        "path":  "shared/expr.ts"
+                    },
+                    {
+                        "sha256":  "e0ae0e0775409ef2a1003bc761dcd45cec1e7791e23526753ea3e5a45077d328",
+                        "path":  "shared/identify.ts"
+                    },
+                    {
+                        "sha256":  "d803ad83adea14575045470c130d95a43690f9a4c1a6a188434584df518cb110",
+                        "path":  "shared/import-csv.ts"
+                    },
+                    {
+                        "sha256":  "da79c4dae2bdc9edda710a61ee1b9d375c734d64788fe794670a52a371c0f22b",
+                        "path":  "shared/joint.ts"
+                    },
+                    {
+                        "sha256":  "1d5efaf302faec1649070a19dd4e3adedd5f7e609a892b9c48ca28222a3a41aa",
+                        "path":  "shared/run-joint.ts"
+                    },
+                    {
+                        "sha256":  "9c392d563fc78021235e0d4020523ffaec9e99858055f46a5bed10698791b11d",
+                        "path":  "shared/shape.ts"
+                    },
+                    {
+                        "sha256":  "2b5c49ad4cfebf92309214b39d6ffec5b69b89b898499c6c2f43cb74b33ebd62",
+                        "path":  "shared/sim.ts"
+                    },
+                    {
+                        "sha256":  "e92890519d3991aacdc129f0dc6c53b76f757e95ac9e7c3f9a13c6e630cd3a52",
+                        "path":  "shared/stan.ts"
+                    },
+                    {
+                        "sha256":  "e7a9efca1c58df92a97240a740c3db76d91d854409504b57432024b3946a7a67",
+                        "path":  "src/Anatomy.tsx"
+                    },
+                    {
+                        "sha256":  "de69b36c2aa89fab7fc8808d1030459ee6a8fbe88a01524f9f90d329b53830d0",
+                        "path":  "src/api.ts"
+                    },
+                    {
+                        "sha256":  "89eca4fa8c61a6b3f463af8762c291e7a62a027b7eb46af936a5a67471c25b3c",
+                        "path":  "src/App.tsx"
+                    },
+                    {
+                        "sha256":  "5c2c4fc48949a74f9ad24afeb784bfde00078fd1f6ca76b51c180a36dee5b24a",
+                        "path":  "src/Capsule.tsx"
+                    },
+                    {
+                        "sha256":  "dc268b8dfd6de016c1e2418a067ed8a95bee663053b88d3855d51c27225043f1",
+                        "path":  "src/Conversation.tsx"
+                    },
+                    {
+                        "sha256":  "e45e35dbbcfb3f2fdd2b64f0c2da2057c6edf959e29b6bc83309dd887ca351fa",
+                        "path":  "src/Diagnostics.tsx"
+                    },
+                    {
+                        "sha256":  "c246f31331598a6dcf68663b35e87cdca3100e0020ba20f0e7847ac962844761",
+                        "path":  "src/format.ts"
+                    },
+                    {
+                        "sha256":  "c4be4fc3e806c7055f13e7ffc81aac1fb0340b4802d4e5b1c0d95e28b07ea92d",
+                        "path":  "src/ImportCsv.tsx"
+                    },
+                    {
+                        "sha256":  "1dcd7d09fefaa361808f5739f0961b6a75aa2d75311a4d1580c7f4b1a5b3a6e4",
+                        "path":  "src/Ledger.tsx"
+                    },
+                    {
+                        "sha256":  "3d5ae13731b024a9b2e8ab118fd97e36b5d7f3fcee88097116e9c3c755f1c923",
+                        "path":  "src/Lens.tsx"
+                    },
+                    {
+                        "sha256":  "fb7072fcd38ad58783d9918b00e3459c3dad5e42378ec561a919f84f5610d469",
+                        "path":  "src/main.tsx"
+                    },
+                    {
+                        "sha256":  "99743848a2d08a06aeef1d29909bace2ff88ac7cf3dbec58ced9b596f517aae7",
+                        "path":  "src/ModelTools.tsx"
+                    },
+                    {
+                        "sha256":  "c991c1f29e1226ef6c55f4272fe5fb74a3110507a502ca03e6110268f6bb028f",
+                        "path":  "src/RunJoint.tsx"
+                    },
+                    {
+                        "sha256":  "d7e6e6cfbb4756e8fbeb335f6dc99b08eced0132258148e83da3511064f70cd8",
+                        "path":  "src/Shape.tsx"
+                    },
+                    {
+                        "sha256":  "3826c235b81cab4a9a19c5b97a6a61ec2abfff79504ef5b244b8cf3a6e68a613",
+                        "path":  "src/Stage.tsx"
+                    },
+                    {
+                        "sha256":  "eff94b5020583ceea14f096c8a6b43f6c002286881dfd2d817a1bcc7498e504c",
+                        "path":  "src/styles.css"
+                    },
+                    {
+                        "sha256":  "e256116717c6dc17ab58cd579f405e088446459a12ff4baef59d80699e9b568a",
+                        "path":  "src/tex.ts"
+                    },
+                    {
+                        "sha256":  "e2bfa4d25f96a8ef5199b022d898bb7dffd089634571a77d9c61ea0e04d93e35",
+                        "path":  "src/tools.css"
+                    },
+                    {
+                        "sha256":  "ded0e4c9fc6d3b8fa641af540335982f218eb2ffdbae82040799ba9b46afd768",
+                        "path":  "src/WorldPlot.tsx"
+                    },
+                    {
+                        "sha256":  "a752de0900a93f1999cb9b9fe672febbd549b0e4eee7fdc77902c7852e520002",
+                        "path":  "server/main.ts"
+                    },
+                    {
+                        "sha256":  "5a3952f3ea363ca3d3dc94dd40e9718cf9bc08fac300a42cf5965ca416dc6157",
+                        "path":  "server/migrate.ts"
+                    },
+                    {
+                        "sha256":  "05f682d1475ef496976bdc4ad8d5161f7b29aeebaf9ef1c6a67242fd901c7a6a",
+                        "path":  "server/store.ts"
+                    },
+                    {
+                        "sha256":  "bc6ec8927d1818f69b6eaa3e5c03a52d8e886027b4d10923a91e90da4af223c7",
+                        "path":  "test/seed-tools-demo.ts"
+                    }
+                ],
+    "baseCommit":  "58badca4f2c7ceacf9e09b7287b2063bb3ee4dd6",
+    "captured":  "2026-10-08"
+}

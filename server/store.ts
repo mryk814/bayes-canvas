@@ -31,6 +31,7 @@ import { EXAMPLES } from "../shared/example.ts";
 import { numpyroScript } from "../shared/codegen.ts";
 import { stanProgram } from "../shared/stan.ts";
 import { migrate } from "./migrate.ts";
+import { datasetProblems, runProblems } from "../shared/evidence-validation.ts";
 
 export class HttpError extends Error {
   status: number;
@@ -46,32 +47,6 @@ const newId = (prefix: string) => `${prefix}_${randomUUID().replace(/-/g, "").sl
 const now = () => new Date().toISOString();
 
 export type ChangeEvent = { kind: string; id?: string };
-
-// Which nodes a run must carry: everything unobserved that is sampled.
-export function runSites(spec: ModelSpec) {
-  return spec.nodes.filter((n) => n.role === "param" || n.role === "latent");
-}
-
-// A dataset fits a spec when every known input and every observation is present with the right length.
-export function datasetProblems(spec: ModelSpec, ds: Pick<Dataset, "plates" | "columns">): string[] {
-  const problems: string[] = [];
-  for (const p of spec.plates) if (!(p.name in ds.plates)) problems.push(`データにプレート ${p.name} の大きさがありません`);
-  const need = [
-    ...spec.data.map((d) => ({ name: d.name, plate: d.plate as string | null, indexOf: d.indexOf })),
-    ...spec.nodes.filter((n) => n.role === "observed").map((n) => ({ name: n.name, plate: n.plate, indexOf: null as string | null })),
-  ];
-  for (const c of need) {
-    const col = ds.columns[c.name];
-    const size = c.plate ? ds.plates[c.plate] : 1;
-    if (!col) problems.push(`データに列 ${c.name} がありません`);
-    else if (col.length !== size) problems.push(`列 ${c.name} の長さ ${col.length} が ${c.plate} の大きさ ${size} と合いません`);
-    else if (c.indexOf) {
-      const m = ds.plates[c.indexOf] ?? 0;
-      if (col.some((v) => !Number.isInteger(v) || v < 0 || v >= m)) problems.push(`添字の列 ${c.name} は 0〜${m - 1} の整数にしてください`);
-    }
-  }
-  return problems;
-}
 
 export class Store {
   path: string;
@@ -563,24 +538,7 @@ export class Store {
     const v = this.version(input.versionId);
     const ds = this.dataset(input.datasetId);
     if (ds.modelId !== v.modelId) throw new HttpError(400, "データセットと版が別のモデルです");
-    const problems = datasetProblems(v.spec, ds);
-    const sites = runSites(v.spec);
-    let k: number | null = null;
-    for (const n of sites) {
-      const draws = input.draws[n.name];
-      const size = n.plate ? ds.plates[n.plate] : 1;
-      if (!draws) {
-        problems.push(`draws に ${n.name} がありません`);
-        continue;
-      }
-      if (k === null) k = draws.length;
-      if (draws.length !== k) problems.push(`${n.name} の draw 数 ${draws.length} が他と揃っていません（${k}）`);
-      if (draws.some((row) => row.length !== size)) problems.push(`${n.name} の各 draw は長さ ${size} にしてください`);
-    }
-    if (k !== null && (k < 1 || k > 1000)) problems.push("draw 数は 1〜1000 にしてください");
-    for (const name of Object.keys(input.draws)) {
-      if (!sites.some((n) => n.name === name)) problems.push(`${name} はこの版のパラメータ・潜在変数ではありません`);
-    }
+    const problems = runProblems(v.spec, ds, input);
     if (problems.length) throw new HttpError(400, "run が版・データと合いません", problems);
     return this.change(
       (d) => {

@@ -8,6 +8,7 @@ import { DraftTray, IntentCard } from "./Conversation.tsx";
 import { ErrorNote, EvidenceList, KnowledgeList, ModelSummary, ProposalCard, VersionList } from "./Ledger.tsx";
 import { Stage, type Focus, type Source, type StageMode } from "./Stage.tsx";
 import { sharedDomains, type Tool } from "./WorldPlot.tsx";
+import { ModelTools } from "./ModelTools.tsx";
 
 const WORLD_COUNT = 12;
 
@@ -26,6 +27,7 @@ type Tab = "talk" | "proposals" | "knowledge" | "evidence" | "model";
 function Workspace({ state, agentConnected, dataPath, live }: { state: State; agentConnected: boolean; dataPath: string; live: boolean }) {
   const [modelId, setModelId] = useStoredState<string | null>("possible-worlds:model", null);
   const [creating, setCreating] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const model = state.models.find((m) => m.id === modelId) ?? state.models[state.models.length - 1] ?? null;
   const showEmpty = creating || !model;
 
@@ -76,6 +78,7 @@ function Workspace({ state, agentConnected, dataPath, live }: { state: State; ag
           )}
         </div>
         <div className="topbar-right">
+          {!showEmpty && <button className="btn btn-quiet" aria-pressed={toolsOpen} onClick={() => setToolsOpen(!toolsOpen)}>{toolsOpen ? "世界に戻る" : "問いの道具"}</button>}
           {!live && <span className="badge badge-warn">サーバーとの接続が切れています</span>}
           <span className={`agent-status ${agentConnected ? "on" : "off"}`} title={agentConnected ? "MCP ブリッジが接続中" : "Claude Code の MCP ブリッジが未接続"}>
             {agentConnected ? <IconPlugConnected size={16} /> : <IconPlugConnectedX size={16} />}
@@ -89,20 +92,29 @@ function Workspace({ state, agentConnected, dataPath, live }: { state: State; ag
       {showEmpty ? (
         <EmptyState state={state} onCancel={state.models.length ? () => setCreating(false) : null} />
       ) : (
-        <ModelWorkspace key={model!.id} state={state} modelId={model!.id} agentConnected={agentConnected} />
+        <ModelSession key={model!.id} state={state} modelId={model!.id} agentConnected={agentConnected} toolsOpen={toolsOpen}/>
       )}
     </div>
   );
 }
 
-function ModelWorkspace({ state, modelId, agentConnected }: { state: State; modelId: string; agentConnected: boolean }) {
+// One selection owns both views; hiding a view preserves its unfinished inputs.
+function ModelSession({ state, modelId, agentConnected, toolsOpen }: { state: State; modelId: string; agentConnected: boolean; toolsOpen: boolean }) {
+  const [runId, setRunId] = useStoredState<string | null>(`possible-worlds:run:${modelId}`, null);
+  return <>
+    <div hidden={toolsOpen}><ModelWorkspace state={state} modelId={modelId} agentConnected={agentConnected} runId={runId} onRun={setRunId}/></div>
+    <div hidden={!toolsOpen}><ModelTools state={state} modelId={modelId} runId={runId} onRun={setRunId} active={toolsOpen}/></div>
+  </>;
+}
+
+function ModelWorkspace({ state, modelId, agentConnected, runId, onRun }: { state: State; modelId: string; agentConnected: boolean; runId: string | null; onRun: (id: string | null) => void }) {
   const model = state.models.find((m) => m.id === modelId)!;
   const current = state.versions.find((v) => v.id === model.currentVersionId)!;
   const [seed, setSeed] = useStoredState(`possible-worlds:seed:${modelId}`, 1);
-  const [runId, setRunId] = useStoredState<string | null>(`possible-worlds:run:${modelId}`, null);
   const [draft, setDraft] = useStoredState<Draft>(`possible-worlds:draft:${modelId}`, EMPTY_DRAFT);
   const [focus, setFocus] = useState<Focus>(null);
   const [opened, setOpened] = useState<number | null>(null);
+  useEffect(() => { setFocus(null); setOpened(null); }, [runId]);
   const [tool, setTool] = useState<Tool>("look");
   const [showObs, setShowObs] = useState(true);
   const [tab, setTab] = useState<Tab>("talk");
@@ -179,7 +191,7 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
     });
   const freshRuns = runs.filter((r) => r.versionId === current.id).length;
   const showRun = (id: string | null) => {
-    setRunId(id);
+    onRun(id);
     setFocus(null);
     setOpened(null);
   };

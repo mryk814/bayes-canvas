@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCsv, previewCsv, CSV_EXAMPLES } from "../lab/csv.ts";
+import { parseCsv, previewCsv, CSV_EXAMPLES } from "../shared/csv.ts";
 
 const mapping = { columns: { temperature: "temp", strength: "load", group: "batch" }, units: { temperature: "K", strength: "kPa" } };
 

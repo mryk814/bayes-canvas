@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { JOINT_FIXTURES, queryJoint } from "../lab/joint.ts";
-import type { JointDataset } from "../lab/joint.ts";
+import { JOINT_FIXTURES, queryJoint } from "../shared/joint.ts";
+import type { JointDataset } from "../shared/joint.ts";
 
 test("negative dependence uses the same draw and includes endpoint draws", () => {
   const fixture = JOINT_FIXTURES[0];

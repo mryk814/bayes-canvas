@@ -56,6 +56,17 @@ type Route = { method: string; pattern: RegExp; handle: (m: RegExpMatchArray, bo
 const routes: Route[] = [
   { method: "GET", pattern: /^\/api\/state$/, handle: () => ({ state: store.state, agentConnected: agentStreams.size > 0, dataPath }) },
   { method: "POST", pattern: /^\/api\/human\/example$/, handle: async (_, b) => store.startExample(HumanExampleInput.parse(await b()).exampleId) },
+  {
+    method: "POST", pattern: /^\/api\/human\/datasets$/,
+    handle: async (_, b) => {
+      const body = await b();
+      const input = AgentDatasetInput.parse(body);
+      const versionId = (body as { versionId?: unknown }).versionId;
+      const model = store.state.models.find(m => m.id === input.modelId);
+      if (!model || model.currentVersionId !== versionId) throw new HttpError(409, "モデル版が変わりました。現在の版でCSVを再確認してください。");
+      return store.attachDataset(input);
+    },
+  },
   { method: "POST", pattern: /^\/api\/human\/intents$/, handle: async (_, b) => store.createIntent(HumanIntentInput.parse(await b())) },
   {
     method: "POST",
