@@ -39,5 +39,15 @@
 .tools-table th,.tools-table td { text-align:left; padding:9px; border-bottom:1px solid var(--line); white-space:nowrap; }
 .tools-table caption { text-align:left; padding-bottom:8px; }
 .check-values { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+.assumption-impact { overflow-wrap:anywhere; }
+.assumption-impact ul { padding-left:22px; }
+.assumption-impact summary { min-height:44px; padding:10px 0; cursor:pointer; }
+.impact-change { border-left:3px solid var(--accent); padding:8px 16px; background:var(--accent-soft); }
+.impact-change dl { display:grid; grid-template-columns:90px minmax(0,1fr); gap:8px 12px; font-size:13px; margin:10px 0; }
+.impact-change dt { color:var(--muted); }
+.impact-change dd { margin:0; }
+.impact-definitions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:12px; }
+.impact-definitions pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; line-height:1.6; }
+@media(max-width:760px) { .impact-definitions { grid-template-columns:1fr; } }
 @media(max-width:760px) { .check-fields>label:first-child { flex-basis:100%; } }
 @media(max-width:760px) { .model-tools { padding:20px 14px 40px; } .tools-columns { grid-template-columns:1fr; } .tools-nav { display:grid; grid-template-columns:1fr 1fr; } .tools-heading h1 { font-size:20px; } }
