@@ -28,7 +28,7 @@ export function sharedDomains(sets: ViewPoint[][], data: DataPoint[] = []): Doma
   };
 }
 
-function strokePath(points: [number, number][], size: number) {
+export function strokePath(points: [number, number][], size: number) {
   const outline = getStroke(points, { size, thinning: 0.55, smoothing: 0.6, streamline: 0.45, simulatePressure: true });
   if (!outline.length) return "";
   const d = outline.reduce(

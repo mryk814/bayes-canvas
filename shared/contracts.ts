@@ -173,6 +173,15 @@ export const MarkSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("layer"), world, unit: z.number().int().nonnegative(), node: ident }),
   // Two quantities that move together in a run, and two draws from opposite ends of that ridge.
   z.object({ kind: z.literal("ridge"), a: ident, b: ident, worlds: z.tuple([world, world]) }),
+  // The shape the person believes one argument of the observation has along x (a gesture, not data).
+  z.object({
+    kind: z.literal("shape"),
+    arg: ident,
+    group: z.number().int().nonnegative().nullable(),
+    points: z.array(z.tuple([z.number(), z.number()])).min(2).max(400),
+  }),
+  // One bin of the shape check the person finds suspicious.
+  z.object({ kind: z.literal("bin"), arg: ident, group: z.number().int().nonnegative().nullable(), from: z.number(), to: z.number() }),
 ]);
 export type Mark = z.infer<typeof MarkSchema>;
 

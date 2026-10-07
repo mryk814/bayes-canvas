@@ -25,6 +25,7 @@ import {
   type State,
 } from "../shared/contracts.ts";
 import { identifiability } from "../shared/identify.ts";
+import { bandWorlds, binnedCheck, functionBand, shapeArgs } from "../shared/shape.ts";
 import { anatomy, compileSpec, runInputs, simulateWorld, summarizeWorld, type Compiled, type World } from "../shared/sim.ts";
 import { EXAMPLES } from "../shared/example.ts";
 import { numpyroScript } from "../shared/codegen.ts";
@@ -389,7 +390,11 @@ export class Store {
       .filter((i) => i.status === "pending")
       .map((i) => {
         const v = this.version(i.scene.modelVersionId);
-        const worlds = [...new Set(i.marks.flatMap((m) => (m.kind === "ridge" ? m.worlds : [m.world])).filter((w): w is number => w !== null))];
+        const worlds = [
+          ...new Set(
+            i.marks.flatMap((m) => (m.kind === "ridge" ? m.worlds : m.kind === "shape" || m.kind === "bin" ? [] : [m.world])).filter((w): w is number => w !== null),
+          ),
+        ];
         const run = i.scene.runId ? this.run(i.scene.runId) : null;
         const referencedWorlds = worlds.map((w) => {
           const { compiled, world } = this.worldOf(i.scene, w);
@@ -403,8 +408,28 @@ export class Store {
         });
         const lens =
           run && i.marks.some((m) => m.kind === "ridge") ? identifiability(this.compiled(i.scene.modelVersionId), run) : null;
+        const shapes = i.marks.flatMap((m) => {
+          if (m.kind !== "shape" && m.kind !== "bin") return [];
+          const c = this.compiled(i.scene.modelVersionId);
+          const ds = run ? this.dataset(run.datasetId) : null;
+          const band = functionBand(c, bandWorlds(c, run, ds, 120), m.arg, m.group);
+          // a few points along x are enough for the agent; the person sees the full band
+          const step = Math.max(1, Math.floor(band.length / 8));
+          const arg = shapeArgs(c).find((a) => a.arg === m.arg);
+          return [{
+            mark: m,
+            modelBand: band.filter((_, k) => k % step === 0).map((b) => ({ x: b.x, q05: b.q[0], q50: b.q[2], q95: b.q[4] })),
+            check: run && ds && arg ? binnedCheck(c, run, ds, arg.stat, m.group, 6, 120) : null,
+          }];
+        });
         return {
           ...i,
+          shapes: shapes.length
+            ? {
+                items: shapes,
+                note: "modelBand はモデルが観測の引数に与えている関数（draw 間の 5/50/95%）。shape の points は人が信じる形のなぞり線で、データではない。check は区間ごとの事後予測チェック（新しい個体での複製と同じ統計量）。区間が小さいので偶然外れる区間が出る。",
+              }
+            : null,
           identifiability: lens && {
             ...lens,
             note: "contraction = 1 − 事後分散/事前分散（正の量は対数尺度）。0 に近い量はデータでほとんど絞られておらず prior が値を決めている。ridges は事後 draw の順位相関。局所的な手がかりで、識別可能性の証明ではない",

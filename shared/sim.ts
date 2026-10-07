@@ -242,7 +242,7 @@ export type SimInputs = {
   clamp?: Record<string, number[]>;
 };
 
-function resolver(c: Compiled, values: Record<string, number[]>, i: number) {
+export function resolver(c: Compiled, values: Record<string, number[]>, i: number) {
   return (name: string, index: string | null) => {
     const arr = values[name];
     if (!arr) return NaN;

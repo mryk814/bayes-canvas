@@ -1703,3 +1703,96 @@ select {
 .compare td.num {
   text-align: right;
 }
+
+/* ---------- shape lens ---------- */
+
+.shape {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.shape-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.shape-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shape-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.shape-panel-head .section-title {
+  margin: 0 auto 0 0;
+}
+
+.band-90 {
+  fill: var(--accent);
+  fill-opacity: 0.14;
+}
+
+.band-50 {
+  fill: var(--accent);
+  fill-opacity: 0.3;
+}
+
+.band-median-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.check-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.check-bin:hover .check-hit,
+.check-bin:focus-visible .check-hit {
+  fill: color-mix(in srgb, var(--gesture) 10%, transparent);
+}
+
+.check-bin:focus-visible {
+  outline: none;
+}
+
+.check-bin.is-marked .check-hit {
+  fill: color-mix(in srgb, var(--gesture) 16%, transparent);
+  stroke: var(--gesture);
+}
+
+.check-rep {
+  stroke: var(--accent);
+  stroke-width: 6;
+  stroke-opacity: 0.35;
+  stroke-linecap: round;
+}
+
+.check-rep-mid {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.check-data {
+  fill: var(--surface);
+  stroke: var(--data);
+  stroke-width: 2;
+}
+
+.check-bin.out .check-data {
+  fill: var(--no);
+  stroke: var(--no);
+}

@@ -144,8 +144,9 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
         (m.kind === "verdict" && x.kind === "verdict" && x.world === m.world) ||
         (m.kind === "point" && x.kind === "point" && x.world === m.world && x.unit === m.unit) ||
         (m.kind === "layer" && x.kind === "layer" && x.world === m.world && x.unit === m.unit && x.node === m.node) ||
-        (m.kind === "ridge" && x.kind === "ridge" && x.a === m.a && x.b === m.b);
-      if (m.kind === "verdict" || m.kind === "point" || m.kind === "layer" || m.kind === "ridge") {
+        (m.kind === "ridge" && x.kind === "ridge" && x.a === m.a && x.b === m.b) ||
+        (m.kind === "bin" && x.kind === "bin" && x.arg === m.arg && x.group === m.group && x.from === m.from);
+      if (m.kind === "verdict" || m.kind === "point" || m.kind === "layer" || m.kind === "ridge" || m.kind === "bin") {
         const existing = base.marks.find(same);
         const others = base.marks.filter((x) => !same(x));
         const toggledOff = !!existing && (existing.kind !== "verdict" || (m.kind === "verdict" && existing.verdict === m.verdict));
@@ -204,7 +205,7 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
           showObs={showObs}
           reseedBlocked={draft.marks.length > 0}
           opened={opened}
-          mode={run ? mode : "worlds"}
+          mode={!run && mode === "lens" ? "worlds" : mode}
           onMode={setMode}
           onSource={showRun}
           onFocus={(f) => {

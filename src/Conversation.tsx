@@ -9,6 +9,9 @@ export const ASK_PHRASE = "Possible Worlds に届いた意図を見て、候補�
 
 export function markLabel(m: Mark, spec: ModelSpec | null, posterior = false) {
   const nodeLabel = (name: string) => spec?.nodes.find((n) => n.name === name)?.label ?? name;
+  const groupLabel = (g: number | null) => (g === null ? "全体" : `群 ${String.fromCharCode(65 + g)}`);
+  if (m.kind === "shape") return `「${m.arg}」の形をなぞった · ${groupLabel(m.group)}`;
+  if (m.kind === "bin") return `「${m.arg}」の検査で ${m.from}–${m.to} が気になる · ${groupLabel(m.group)}`;
   if (m.kind === "ridge") return `「${nodeLabel(m.a)}」と「${nodeLabel(m.b)}」が一緒に動く · draw ${m.worlds[0]} / ${m.worlds[1]}`;
   const where = m.world === null ? "重ね表示" : posterior ? `draw ${m.world}` : `世界 ${pad(m.world)}`;
   if (m.kind === "verdict") return `${where} · ${m.verdict === "implausible" ? "あり得ない" : "あり得る"}`;

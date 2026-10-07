@@ -255,3 +255,20 @@ test("the identifiability lens finds a sum-only ridge and prior-carried quantiti
   const tau = lens.params.find((p) => p.name === "tau_bias")!;
   assert.ok(tau.contraction < 0.3, "a quantity left as wide as its prior is marked as prior-carried");
 });
+
+test("the shape lens evaluates the model's own function and checks bins with new-unit replicates", async () => {
+  const { bandWorlds, binnedCheck, functionBand, shapeArgs } = await import("../shared/shape.ts");
+  const c = compile();
+  assert.deepEqual(shapeArgs(c).map((a) => [a.arg, a.stat]), [["mu", "mean"], ["sigma", "sd"]]);
+  const band = functionBand(c, bandWorlds(c, null, null, 50), "sigma", null);
+  assert.equal(band.length, 36);
+  assert.ok(band.every((b, i) => i === 0 || b.x >= band[i - 1].x), "sorted along x");
+  assert.ok(band.every((b) => b.q[2] === band[0].q[2]), "constant measurement error gives a flat band");
+  // data simulated from the model itself: bins cover every record of the group
+  const w = simulateWorld(c, 3, 0);
+  const ds = { plates: { specimen: 36, machine: 3 }, columns: { T: w.values.T, machine_of: w.values.machine_of, recorded: w.values.recorded } };
+  const run = { draws: Object.fromEntries(["s20", "decline", "sigma_mat", "true_strength", "tau_bias", "bias", "sigma_meas"].map((k) => [k, Array.from({ length: 40 }, () => w.values[k])])) };
+  const bins = binnedCheck(c, run, ds, "sd", 2, 4, 40);
+  assert.equal(bins.reduce((s, b) => s + b.n, 0), 12);
+  assert.ok(bins.every((b) => b.rep[0] <= b.rep[2]));
+});
