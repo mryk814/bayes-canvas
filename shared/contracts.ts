@@ -247,7 +247,7 @@ export type Proposal = z.infer<typeof ProposalSchema>;
 
 export const SavedCheckSchema = z.object({
   id: z.string().min(1), modelId: z.string().min(1), datasetId: z.string().min(1), createdAt: z.string(),
-  label: z.string().trim().min(1).max(200), xMin: z.number(), xMax: z.number(), statistic: z.enum(["mean", "max"]),
+  label: z.string().trim().min(1).max(200), xMin: z.number(), xMax: z.number(), statistic: z.enum(["mean", "max", "sd"]),
   x: ident, y: ident, xUnit: z.string(), yUnit: z.string(),
   groupColumn: ident.nullable(), groupIndex: z.number().int().nonnegative().nullable(),
 }).refine(v => v.xMin <= v.xMax, "区間の下限は上限以下にしてください");
@@ -293,7 +293,7 @@ export const HumanChooseInput = z.object({ candidateId: z.string() });
 export const HumanExampleInput = z.object({ exampleId: z.string() });
 export const HumanSaveCheckInput = z.object({
   runId: z.string().min(1), label: z.string().trim().min(1).max(200), xMin: z.number(), xMax: z.number(),
-  statistic: z.enum(["mean", "max"]), groupIndex: z.number().int().nonnegative().nullable(), seed: z.number().int(),
+  statistic: z.enum(["mean", "max", "sd"]), groupIndex: z.number().int().nonnegative().nullable(), seed: z.number().int(),
 }).refine(v => v.xMin <= v.xMax, "区間の下限は上限以下にしてください");
 export const HumanRerunCheckInput = z.object({ runId: z.string().min(1), seed: z.number().int() });
 

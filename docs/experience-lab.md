@@ -58,7 +58,7 @@ Claude側で採用するときは、このブランチの追加差分をレビ�
 |---|---|---|
 | P03 | `shared/joint.ts`の`queryJoint`を`shared/run-joint.ts`から使う。`src/RunJoint.tsx`で量・プレート添字・単位、旧版、再生・静止表、既存intent本文への保存を接続 | 理解の比較評価と実推論結果での確認。intentの専用markは作らず条件・draw参照を本文に記録 |
 | P06 | `shared/csv.ts`の`parseCsv`を本体取り込みでも利用。`shared/import-csv.ts`と`src/ImportCsv.tsx`で入力・観測列へ対応し、確認後にDataset作成APIへ保存 | 同一行プレートの矩形CSV以外、任意単位の換算、実データ・ファイル選択経路の検証。ラボの候補JSONは本体Datasetとは別 |
-| U16 | `shared/checks.ts`の`bindCheck` / `runCheck`を`shared/run-check.ts`から再利用。`src/SavedChecks.tsx`で保存したrange/binから区間・群を読み込み、平均／最大の定義と全結果を永続化。同じDataset・軸・単位・群対応の別版runへ明示的に再実行。表・details・狭幅表示をGUI検証 | 任意の検査構成、ばらつき統計量、自動再bind |
+| U16 | `shared/checks.ts`の`bindCheck` / `runCheck`を`shared/run-check.ts`から再利用。`src/SavedChecks.tsx`で保存したrange/binから区間・群を読み込み、平均／最大／標準偏差の定義と全結果を永続化。同じDataset・軸・単位・群対応の別版runへ明示的に再実行。標準偏差はNで割る記述統計。表・details・狭幅表示をGUI検証 | 任意の検査構成、自動再bind |
 
 本体にはU10の診断案内とU34の証拠カプセルも追加した。カプセルはモデル版・Dataset・runのJSON化と貼り付け検証までで、復元保存はしない。本体接続のテスト56件（HTTP検証を含む）・型検証・本体build・ラボbuildは通過した。
 
@@ -139,6 +139,8 @@ UIはそのまま移植する完成案ではなく、操作順序を比べるた
 - 画像は `docs/lab-evidence/`。`manifest.json` は撮影時のパス（移動前の`lab/joint.ts`・`lab/csv.ts`を含む）・ソースSHA-256・画面状態をそのまま保持する。画面から取得した操作イベント実例は `lab/examples/joint-intent.json`、保存検査実例は `lab/examples/saved-check.json`。現在の本体GUIの証拠として読み替えない。
 
 ## 利用者評価に渡す課題
+
+本体の保存検査には、その後、件数Nで割る標準偏差を追加した。95テスト・型検証・本体／ラボbuild成功。合成fixtureで群1・180〜260°Cの定義を旧版から新版へ再実行し、reload後の2結果保持と390pxの選択欄・説明・表を確認した。[標準偏差の検証記録](sd-evidence/README.md)。独立ラボのUI選択肢は平均／最大のまま。
 
 共同標本の静止表と図を順序を入れ替えて提示し、両条件の同時割合と根拠を回答してもらう。
 続いて見たことのない二例目で同じ問いを出し、正答・根拠の正確さ・所要時間を分けて記録する。

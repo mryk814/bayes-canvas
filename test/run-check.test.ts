@@ -5,6 +5,7 @@ import { CURVE_EXAMPLE, OBSERVATION_EXAMPLE } from "../shared/example.ts";
 import { compileSpec, simulateWorld } from "../shared/sim.ts";
 import { bindCheck, runCheck } from "../shared/checks.ts";
 import type { Dataset, ModelVersion, Run, SavedCheck } from "../shared/contracts.ts";
+import { SavedCheckSchema, HumanSaveCheckInput } from "../shared/contracts.ts";
 
 function fixture(spec = CURVE_EXAMPLE) {
   const compiled = compileSpec(spec); if (!compiled.ok) throw new Error(compiled.problems.join());
@@ -34,6 +35,21 @@ test("inclusive group interval and maximum select the same rows in observed and 
   const result = evaluateSavedCheck(d, version, dataset, run, -1);
   assert.equal(result.observedCount, 2);
   assert.equal(result.observedValue, Math.max(dataset.columns.recorded[0], dataset.columns.recorded[3]));
+});
+
+test("sd contracts and run adapter retain population spread for the selected group across all draws", () => {
+  const { definition, version, dataset, run } = fixture(OBSERVATION_EXAMPLE);
+  const d = { ...definition, statistic: "sd" as const, xMin: dataset.columns.T[0], xMax: dataset.columns.T[3], groupIndex: 0 };
+  assert.equal(SavedCheckSchema.parse(d).statistic, "sd");
+  assert.equal(HumanSaveCheckInput.parse({ runId: run.id, label: "spread", xMin: d.xMin, xMax: d.xMax, statistic: "sd", groupIndex: 0, seed: 1 }).statistic, "sd");
+  const result = evaluateSavedCheck(d, version, dataset, run, 9);
+  assert.equal(result.observedCount, 2);
+  assert.ok(Math.abs(result.observedValue - Math.abs(dataset.columns.recorded[0] - dataset.columns.recorded[3]) / 2) < 1e-10);
+  assert.equal(result.replicatedValues.length, 4);
+  assert.ok(result.replicatedValues.every(value => Number.isFinite(value) && value >= 0));
+  const singleton = evaluateSavedCheck({ ...d, xMax: d.xMin }, version, dataset, run, 9);
+  assert.equal(singleton.observedValue, 0);
+  assert.deepEqual(singleton.replicatedValues, [0, 0, 0, 0]);
 });
 
 test("new-unit replicas ignore individual latent draws but retain group and scalar draws", () => {

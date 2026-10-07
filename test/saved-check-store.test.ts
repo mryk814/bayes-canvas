@@ -91,3 +91,38 @@ test("agent overview exposes model-scoped check definitions and referenced resul
   assert.equal("replicatedValues" in own.checkResults[0], false);
   assert.deepEqual(f.store.state.checkResults[0], result, "overview must retain the full stored evidence");
 });
+
+test("sd checks persist their statistic, rerun on the same dataset across versions and appear in agent overview", () => {
+  const f = setup();
+  const saved = f.store.saveCheck({ ...input, label: "区間の記録値の標準偏差", statistic: "sd", runId: f.run.id });
+  assert.equal(saved.check.statistic, "sd");
+  assert.ok(Number.isFinite(saved.result.observedValue));
+  assert.ok(saved.result.observedValue > 0);
+  const ys = f.dataset.columns.strength;
+  const mean = ys.reduce((sum, value) => sum + value, 0) / ys.length;
+  const expected = Math.sqrt(ys.reduce((sum, value) => sum + (value - mean) ** 2, 0) / ys.length);
+  assert.ok(Math.abs(saved.result.observedValue - expected) < 1e-9);
+  assert.equal(saved.result.replicatedValues.length, 4);
+  const before = structuredClone(saved.result);
+  const nextSpec = structuredClone(f.version.spec);
+  nextSpec.nodes.find(n => n.name === "sigma")!.dist!.args.sigma = "80";
+  const proposal = f.store.propose({ modelId: f.model.id, spec: nextSpec, summary: "spread revision", knowledgeIds: [] });
+  const nextVersion = f.store.adopt(proposal.id);
+  const nextRun = f.runFor(nextVersion.id);
+  const next = f.store.rerunCheck(saved.check.id, { runId: nextRun.id, seed: 7 });
+  assert.equal(next.datasetId, saved.result.datasetId);
+  assert.equal(next.versionId, nextVersion.id);
+  assert.equal(next.observedValue, saved.result.observedValue);
+  assert.notDeepEqual(next.replicatedValues, saved.result.replicatedValues);
+  const loaded = new Store(f.path);
+  assert.deepEqual(loaded.state.checks, [saved.check]);
+  assert.deepEqual(loaded.state.checkResults, [before, next]);
+  const overview = loaded.overview().models.find(m => m.id === f.model.id)!;
+  assert.equal(overview.checks[0].statistic, "sd");
+  assert.equal(overview.checkResults.length, 2);
+  assert.equal(overview.checkResults[1].runId, nextRun.id);
+  assert.equal(overview.checkResults[1].replicationCount, 4);
+  for (const statistic of ["mean", "max"] as const) {
+    assert.equal(loaded.saveCheck({ ...input, statistic, runId: nextRun.id }).check.statistic, statistic);
+  }
+});

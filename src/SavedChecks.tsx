@@ -5,6 +5,8 @@ import { ErrorNote } from "./Ledger.tsx";
 import { savedCheckIntervals } from "./check-intervals.ts";
 
 const numberText = (value: number) => Number.isFinite(value) ? value.toPrecision(5) : "—";
+const statisticLabels = { mean: "平均", max: "最大値", sd: "標準偏差（Nで割る）" };
+const sdExplanation = "標準偏差 = √(Σ(y−平均)² / N)。Nは選択した記録の件数で、1件なら0です。区間内の傾向・群差・打ち切りも含む記録値のばらつきで、測定誤差だけを推定した値ではありません。単位は元のyと同じです。";
 
 export function SavedChecks({ state, modelId, version, dataset, run }: { state: State; modelId: string; version: ModelVersion; dataset: Dataset | null; run: Run | null }) {
   const checks = state.checks.filter(c => c.modelId === modelId);
@@ -24,7 +26,8 @@ export function SavedChecks({ state, modelId, version, dataset, run }: { state: 
       <label>保存した検査<select value={checkId} onChange={e => { setCheckId(e.target.value); setMessage(""); action.clear(); }}><option value="">検査を選んでください</option>{checks.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>
       {!checks.length && <p className="muted">まだ検査がありません。上で定義して保存できます。</p>}
       {selected && <>
-        <p>{selected.x}: {selected.xMin}〜{selected.xMax} {selected.xUnit}（両端を含む）／{selected.groupIndex === null ? "全群" : `${selected.groupColumn}[${selected.groupIndex}]`}／{selected.y}の{selected.statistic === "mean" ? "平均" : "最大値"} ({selected.yUnit})</p>
+        <p>{selected.x}: {selected.xMin}〜{selected.xMax} {selected.xUnit}（両端を含む）／{selected.groupIndex === null ? "全群" : `${selected.groupColumn}[${selected.groupIndex}]`}／{selected.y}の{statisticLabels[selected.statistic]} ({selected.yUnit})</p>
+        {selected.statistic === "sd" && <p className="small muted">{sdExplanation}</p>}
         <p className="small muted">データ: {state.datasets.find(d => d.id === selected.datasetId)?.label ?? selected.datasetId}。同じデータ・列名・単位・群列のrunだけ再実行できます。対応が変わった場合は新しい検査を作ってください。</p>
         <div className="tools-inline"><label>再実行のseed<input type="number" step="1" value={seed} onChange={e => setSeed(e.target.value)}/></label><button className="btn" disabled={!run || action.busy || !seed.trim() || !Number.isSafeInteger(Number(seed))} onClick={() => { setMessage(""); return action.run(async () => {
           await post(`/api/human/checks/${selected.id}/run`, { runId: run!.id, seed: Number(seed) });
@@ -65,7 +68,8 @@ function CheckForm({ state, version, dataset, run, onSaved }: { state: State; ve
     }}><option value="">手入力する</option>{marks.map(item => <option key={item.id} value={item.id}>{item.mark.from}〜{item.mark.to} · {item.mark.kind === "bin" ? `群 ${item.mark.group ?? "全体"}` : "範囲"} · {item.id}</option>)}</select></label>}
     <label>検査の名前<input value={label} maxLength={120} onChange={e => setLabel(e.target.value)} placeholder="高温側の平均が合うか"/></label>
     <div className="tools-inline"><label>区間の下端<input type="number" value={from} onChange={e => setFrom(e.target.value)}/></label><label>区間の上端<input type="number" value={to} onChange={e => setTo(e.target.value)}/></label></div>
-    <div className="tools-inline check-fields"><label>対象の群<select value={group} onChange={e => setGroup(e.target.value)}><option value="">全群</option>{groups.map(g => <option key={g} value={g}>{view.group}[{g}]</option>)}</select></label><label>集計する統計量<select value={statistic} onChange={e => setStatistic(e.target.value)}><option value="mean">平均</option><option value="max">最大値</option></select></label><label>複製生成のseed<input type="number" step="1" value={seed} onChange={e => setSeed(e.target.value)}/></label></div>
+    <div className="tools-inline check-fields"><label>対象の群<select value={group} onChange={e => setGroup(e.target.value)}><option value="">全群</option>{groups.map(g => <option key={g} value={g}>{view.group}[{g}]</option>)}</select></label><label>集計する統計量<select value={statistic} onChange={e => setStatistic(e.target.value)}>{Object.entries(statisticLabels).map(([value, text]) => <option key={value} value={value}>{value === "sd" ? "標準偏差" : text}</option>)}</select></label><label>複製生成のseed<input type="number" step="1" value={seed} onChange={e => setSeed(e.target.value)}/></label></div>
+    {statistic === "sd" && <p className="small muted">{sdExplanation}</p>}
     <button className="btn btn-primary" disabled={!valid || action.busy} onClick={() => action.run(async () => {
       const response = await post<{check: SavedCheck}>("/api/human/checks", {runId:run.id,label:label.trim(),xMin:Number(from),xMax:Number(to),groupIndex:group === "" ? null : Number(group),statistic,seed:Number(seed)});
       onSaved(response.check.id);

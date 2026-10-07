@@ -5,7 +5,7 @@ export type CheckDefinition = {
   xMin: number;
   xMax: number;
   group?: string;
-  statistic: 'mean' | 'max';
+  statistic: 'mean' | 'max' | 'sd';
 };
 
 export type CheckContext = { modelVersionId: string; datasetId: string; runId: string };
@@ -44,13 +44,27 @@ export function bindCheck(definition: CheckDefinition, context: CheckContext): B
   if (!Number.isFinite(definition.xMin) || !Number.isFinite(definition.xMax) || definition.xMin > definition.xMax) {
     throw new Error('Check interval must have finite bounds with xMin <= xMax.');
   }
-  if (definition.statistic !== 'mean' && definition.statistic !== 'max') throw new Error('Unsupported check statistic.');
+  if (definition.statistic !== 'mean' && definition.statistic !== 'max' && definition.statistic !== 'sd') throw new Error('Unsupported check statistic.');
   if (typeof definition.id !== 'string' || !definition.id.trim() || typeof definition.label !== 'string' || !definition.label.trim()) {
     throw new Error('Check id and label are required.');
   }
   if (definition.group !== undefined && typeof definition.group !== 'string') throw new Error('Check group must be a string.');
   validateContext(context);
   return Object.freeze({ definition: Object.freeze({ ...definition }), context: Object.freeze({ ...context }) });
+}
+
+function populationSd(points: readonly CheckPoint[]): number {
+  const scale = points.reduce((maximum, point) => Math.max(maximum, Math.abs(point.y)), 0);
+  if (scale === 0) return 0;
+  // Subtract before scaling to preserve small spreads around a large common offset.
+  // Opposite-sign extremes can overflow subtraction; normalize first only then.
+  const anchor = points[0].y;
+  const offset = (value: number) => Number.isFinite(value - anchor)
+    ? (value - anchor) / scale : value / scale - anchor / scale;
+  const meanOffset = points.reduce((sum, point) => sum + offset(point.y) / points.length, 0);
+  const variance = points.reduce((sum, point) => sum + (offset(point.y) - meanOffset) ** 2 / points.length, 0);
+  // A population bounded by [-1, 1] has variance <= 1; trim floating-point overshoot.
+  return scale * Math.sqrt(Math.min(1, variance));
 }
 
 function summarize(points: readonly CheckPoint[], definition: CheckDefinition): { value: number; count: number } {
@@ -60,6 +74,7 @@ function summarize(points: readonly CheckPoint[], definition: CheckDefinition): 
   if (!selected.length) throw new Error('Check selection is empty in observed or replicated evidence.');
   const value = definition.statistic === 'max'
     ? selected.reduce((maximum, point) => Math.max(maximum, point.y), -Infinity)
+    : definition.statistic === 'sd' ? populationSd(selected)
     : selected.reduce((sum, point) => sum + point.y / selected.length, 0);
   if (!Number.isFinite(value)) throw new Error('Check statistic must be finite.');
   return { value, count: selected.length };

@@ -69,6 +69,27 @@ test("saved-check HTTP creates, reruns across versions and preserves history on 
     assert.equal((await post("/api/human/checks/missing/run", { runId: fixture.firstRun.id, seed: 42 })).status, 404);
     assert.equal((await post("/api/human/checks", { ...input, runId: "missing" })).status, 404);
     assert.equal(readFileSync(path, "utf8"), persisted, "rejected requests must not change saved state");
+
+    const sdResponse = await post("/api/human/checks", { ...input, label: "記録値の標準偏差", statistic: "sd" });
+    assert.equal(sdResponse.status, 200);
+    const sd = await sdResponse.json() as { check: SavedCheck; result: SavedCheckResult };
+    assert.equal(sd.check.statistic, "sd");
+    const sdRerun = await post(`/api/human/checks/${sd.check.id}/run`, { runId: fixture.secondRun.id, seed: 41 });
+    assert.equal(sdRerun.status, 200);
+    const sdNext = await sdRerun.json() as SavedCheckResult;
+    assert.equal(sdNext.versionId, fixture.second.id);
+    assert.equal(sdNext.datasetId, sd.result.datasetId);
+    assert.equal(sdNext.observedValue, sd.result.observedValue);
+    const withSd = new Store(path);
+    assert.deepEqual(withSd.state.checkResults.filter(result => result.checkId === sd.check.id), [sd.result, sdNext]);
+    assert.deepEqual(withSd.state.checkResults.filter(result => result.checkId === saved.check.id), [saved.result, secondResult]);
+    const overview = await (await fetch(`http://127.0.0.1:${port}/api/agent/overview`)).json();
+    const own = overview.models.find((model: { id: string }) => model.id === fixture.model.id);
+    assert.equal(own.checks.find((check: SavedCheck) => check.id === sd.check.id).statistic, "sd");
+    assert.equal(own.checkResults.filter((result: SavedCheckResult) => result.checkId === sd.check.id).length, 2);
+    const maxResponse = await post("/api/human/checks", { ...input, statistic: "max" });
+    assert.equal(maxResponse.status, 200);
+    assert.equal((await maxResponse.json()).check.statistic, "max");
   } finally {
     if (child.exitCode === null) { const exited = once(child, "exit"); child.kill(); await exited; }
   }
