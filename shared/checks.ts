@@ -5,7 +5,8 @@ export type CheckDefinition = {
   xMin: number;
   xMax: number;
   group?: string;
-  statistic: 'mean' | 'max' | 'sd';
+  statistic: 'mean' | 'max' | 'sd' | 'exceedance';
+  threshold?: number;
 };
 
 export type CheckContext = { modelVersionId: string; datasetId: string; runId: string };
@@ -44,7 +45,10 @@ export function bindCheck(definition: CheckDefinition, context: CheckContext): B
   if (!Number.isFinite(definition.xMin) || !Number.isFinite(definition.xMax) || definition.xMin > definition.xMax) {
     throw new Error('Check interval must have finite bounds with xMin <= xMax.');
   }
-  if (definition.statistic !== 'mean' && definition.statistic !== 'max' && definition.statistic !== 'sd') throw new Error('Unsupported check statistic.');
+  if (definition.statistic !== 'mean' && definition.statistic !== 'max' && definition.statistic !== 'sd' && definition.statistic !== 'exceedance') throw new Error('Unsupported check statistic.');
+  if (definition.statistic === 'exceedance' ? !Number.isFinite(definition.threshold) : definition.threshold !== undefined) {
+    throw new Error('A finite threshold is required only for exceedance checks.');
+  }
   if (typeof definition.id !== 'string' || !definition.id.trim() || typeof definition.label !== 'string' || !definition.label.trim()) {
     throw new Error('Check id and label are required.');
   }
@@ -75,6 +79,7 @@ function summarize(points: readonly CheckPoint[], definition: CheckDefinition): 
   const value = definition.statistic === 'max'
     ? selected.reduce((maximum, point) => Math.max(maximum, point.y), -Infinity)
     : definition.statistic === 'sd' ? populationSd(selected)
+    : definition.statistic === 'exceedance' ? selected.filter(point => point.y > definition.threshold!).length / selected.length
     : selected.reduce((sum, point) => sum + point.y / selected.length, 0);
   if (!Number.isFinite(value)) throw new Error('Check statistic must be finite.');
   return { value, count: selected.length };

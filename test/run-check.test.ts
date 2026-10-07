@@ -97,3 +97,19 @@ test("replications are summarized as they arrive, without retaining every point 
   assert.equal(result.tailFraction, 0.75);
   assert.throws(() => runCheck(bound, { context, observed: [{ x: 0, y: 2 }], replicated: [][Symbol.iterator]() }), /replication/i);
 });
+
+test("exceedance uses capped recorded observations and every replicated draw with strict equality excluded", () => {
+  const { definition, version, dataset, run } = fixture(OBSERVATION_EXAMPLE);
+  dataset.columns.recorded = dataset.columns.recorded.map(() => 520);
+  const d = { ...definition, statistic: "exceedance" as const, threshold: 520 };
+  const result = evaluateSavedCheck(d, version, dataset, run, 9);
+  assert.equal(result.observedValue, 0);
+  assert.deepEqual(result.replicatedValues, [0, 0, 0, 0]);
+  assert.deepEqual(result.predictiveRange, [0, 0]);
+  assert.equal(result.tailFraction, 1);
+  assert.equal(evaluateSavedCheck({ ...d, threshold: 519 }, version, dataset, run, 9).observedValue, 1);
+  for (const invalid of [{ ...d, threshold: undefined }, { ...d, threshold: Infinity }, { ...definition, threshold: 520 }]) {
+    assert.equal(SavedCheckSchema.safeParse(invalid).success, false);
+    assert.throws(() => evaluateSavedCheck(invalid, version, dataset, run, 9));
+  }
+});

@@ -39,7 +39,7 @@ export function evaluateSavedCheck(definition: SavedCheck, version: ModelVersion
   };
   const context = { modelVersionId: version.id, datasetId: dataset.id, runId: run.id };
   const bound = bindCheck({ id: definition.id, label: definition.label, xMin: definition.xMin, xMax: definition.xMax,
-    statistic: definition.statistic, group: definition.groupIndex === null ? undefined : String(definition.groupIndex) }, context);
+    statistic: definition.statistic, threshold: definition.threshold, group: definition.groupIndex === null ? undefined : String(definition.groupIndex) }, context);
   const groupPlate = group?.indexOf ?? null;
   function* replications() {
     for (let k = 0; k < totalDraws; k++) {

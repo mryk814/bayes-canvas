@@ -615,6 +615,7 @@ export class Store {
     const check: SavedCheck = {
       id: newId("check"), modelId: version.modelId, datasetId: dataset.id, createdAt: now(),
       label: input.label, xMin: input.xMin, xMax: input.xMax, statistic: input.statistic,
+      ...(input.threshold === undefined ? {} : { threshold: input.threshold }),
       x: view.x, y: view.y, xUnit: x.unit, yUnit: y.unit,
       groupColumn: view.group ?? null, groupIndex: input.groupIndex,
     };

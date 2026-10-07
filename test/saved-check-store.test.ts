@@ -24,6 +24,31 @@ function setup() {
 }
 const input = { label: "全区間平均", xMin: -1000, xMax: 1000, statistic: "mean" as const, groupIndex: null, seed: 7 };
 
+test("exceedance threshold persists unchanged across rerun, reload and overview; invalid thresholds never write", () => {
+  const f = setup();
+  const saved = f.store.saveCheck({ ...input, runId: f.run.id, statistic: "exceedance", threshold: 400 });
+  assert.equal(saved.check.threshold, 400);
+  const ys = f.dataset.columns.strength;
+  assert.equal(saved.result.observedValue, ys.filter(y => y > 400).length / ys.length);
+  const proposal = f.store.propose({ modelId: f.model.id, spec: f.version.spec, summary: "next", knowledgeIds: [] });
+  const version2 = f.store.adopt(proposal.id), run2 = f.runFor(version2.id);
+  const next = f.store.rerunCheck(saved.check.id, { runId: run2.id, seed: 7 });
+  assert.equal(next.observedValue, saved.result.observedValue);
+  const loaded = new Store(f.path);
+  assert.deepEqual(loaded.state.checks, [saved.check]);
+  assert.deepEqual(loaded.state.checkResults, [saved.result, next]);
+  assert.equal(loaded.overview().models[0].checks[0].threshold, 400);
+  const memory = structuredClone(f.store.state), disk = readFileSync(f.path, "utf8");
+  for (const invalid of [
+    { ...input, statistic: "exceedance" as const }, { ...input, statistic: "exceedance" as const, threshold: Infinity },
+    ...(["mean", "max", "sd"] as const).map(statistic => ({ ...input, statistic, threshold: 0 })),
+  ]) {
+    assert.throws(() => f.store.saveCheck({ ...invalid, runId: f.run.id }));
+    assert.deepEqual(f.store.state, memory);
+    assert.equal(readFileSync(f.path, "utf8"), disk);
+  }
+});
+
 test("save and explicit rerun append version-bound results and survive reload", () => {
   const f = setup();
   const saved = f.store.saveCheck({ ...input, runId: f.run.id });

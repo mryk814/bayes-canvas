@@ -102,3 +102,29 @@ test('sd retains small spread around a large common offset', () => {
   const result = runCheck(bound, { context, observed, replicated: [observed] })
   assert.ok(Math.abs(result.observedValue - Math.sqrt(2 / 3)) < 1e-14)
 })
+
+test('exceedance counts strictly greater selected records, keeps ties in the separate predictive tail', () => {
+  const context = checkFixtures[0].context
+  const def = { ...definition, statistic: 'exceedance' as const, threshold: -2 }
+  const points = (ys: number[]) => ys.map(y => ({ x: 2, y, group: 'A' }))
+  const observed = [...points([-3, -2, -1, 1e308]), { x: 1, y: 99, group: 'A' }, { x: 2, y: 99, group: 'B' }]
+  const result = runCheck(bindCheck(def, context), { context, observed, replicated: [points([-2, -3]), points([0, 1]), points([-2, 0])] })
+  assert.equal(result.observedValue, 0.5)
+  assert.equal(result.observedCount, 4)
+  assert.deepEqual(result.replicatedValues, [0, 1, 0.5])
+  assert.equal(result.tailFraction, 2 / 3)
+  for (const threshold of [-Number.MAX_VALUE, Number.MAX_VALUE]) {
+    const result = runCheck(bindCheck({ ...def, threshold }, context), { context, observed: points([-1e308, 1e308]), replicated: [points([0])] })
+    assert.equal(result.observedValue, threshold < 0 ? 1 : 0)
+  }
+  const bound = bindCheck(def, context)
+  assert.throws(() => runCheck(bound, { context, observed: [], replicated: [points([0])] }), /empty/)
+  assert.throws(() => runCheck(bound, { context, observed, replicated: [[]] }), /empty/)
+  for (const y of [Infinity, -Infinity, NaN]) assert.throws(() => runCheck(bound, { context, observed: [...observed, { x: 99, y }], replicated: [points([0])] }), /finite/)
+})
+
+test('threshold is finite and required only for exceedance at the calculation boundary', () => {
+  const context = checkFixtures[0].context
+  for (const threshold of [undefined, NaN, Infinity, -Infinity]) assert.throws(() => bindCheck({ ...definition, statistic: 'exceedance', threshold }, context), /threshold/i)
+  for (const statistic of ['mean', 'max', 'sd'] as const) assert.throws(() => bindCheck({ ...definition, statistic, threshold: 0 }, context), /threshold/i)
+})

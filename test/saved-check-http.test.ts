@@ -90,6 +90,25 @@ test("saved-check HTTP creates, reruns across versions and preserves history on 
     const maxResponse = await post("/api/human/checks", { ...input, statistic: "max" });
     assert.equal(maxResponse.status, 200);
     assert.equal((await maxResponse.json()).check.statistic, "max");
+    const exceeding = await post("/api/human/checks", { ...input, statistic: "exceedance", threshold: 400 });
+    assert.equal(exceeding.status, 200);
+    const exceeded = await exceeding.json() as { check: SavedCheck; result: SavedCheckResult };
+    assert.equal(exceeded.check.threshold, 400);
+    assert.ok(exceeded.result.observedValue >= 0 && exceeded.result.observedValue <= 1);
+    const repeated = await post(`/api/human/checks/${exceeded.check.id}/run`, { runId: fixture.secondRun.id, seed: 41 });
+    assert.equal(repeated.status, 200);
+    const finalState = new Store(path);
+    assert.equal(finalState.state.checks.find(c => c.id === exceeded.check.id)!.threshold, 400);
+    assert.equal(finalState.state.checkResults.filter(r => r.checkId === exceeded.check.id).length, 2);
+    const preserved = readFileSync(path, "utf8");
+    for (const invalid of [
+      { ...input, statistic: "exceedance" }, { ...input, statistic: "exceedance", threshold: null },
+      { ...input, statistic: "exceedance", threshold: "400" }, { ...input, statistic: "exceedance", threshold: Infinity },
+      ...["mean", "max", "sd"].map(statistic => ({ ...input, statistic, threshold: 400 })),
+    ]) {
+      assert.equal((await post("/api/human/checks", invalid)).status, 400);
+      assert.equal(readFileSync(path, "utf8"), preserved);
+    }
   } finally {
     if (child.exitCode === null) { const exited = once(child, "exit"); child.kill(); await exited; }
   }
