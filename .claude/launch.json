@@ -2,25 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "app",
+      "name": "worlds",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5175", "--strictPort"],
-      "port": 5175,
-      "cwd": "app"
-    },
-    {
-      "name": "app-alt",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5176", "--strictPort"],
-      "port": 5176,
-      "cwd": "app"
-    },
-    {
-      "name": "app-preview",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "preview", "--", "--port", "5177", "--strictPort"],
-      "port": 5177,
-      "cwd": "app"
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 5199
     }
   ]
 }

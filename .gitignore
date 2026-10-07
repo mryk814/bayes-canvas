@@ -1,6 +1,5 @@
 node_modules/
 dist/
-dist-test/
-dist-cli/
-.DS_Store
+data/
 .env
+.DS_Store
