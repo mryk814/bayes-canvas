@@ -51,3 +51,12 @@
 @media(max-width:760px) { .impact-definitions { grid-template-columns:1fr; } }
 @media(max-width:760px) { .check-fields>label:first-child { flex-basis:100%; } }
 @media(max-width:760px) { .model-tools { padding:20px 14px 40px; } .tools-columns { grid-template-columns:1fr; } .tools-nav { display:grid; grid-template-columns:1fr 1fr; } .tools-heading h1 { font-size:20px; } }
+.question-contract { overflow-wrap:anywhere; }
+.question-contract fieldset { border:0; padding:0; margin:0; min-width:0; }
+.question-contract-summary { display:grid; gap:8px; margin:12px 0; overflow-wrap:anywhere; }
+.question-contract-summary dt { color:var(--muted); font-size:13px; }
+.question-contract-summary dd { margin:0 0 8px; white-space:pre-wrap; }
+.question-contract-text { white-space:pre-wrap; }
+.question-contract .diff-table { table-layout:fixed; }
+.question-contract .diff-table th,.question-contract .diff-table td { white-space:pre-wrap; overflow-wrap:anywhere; }
+.question-contract .diff-table th:first-child { width:24%; }

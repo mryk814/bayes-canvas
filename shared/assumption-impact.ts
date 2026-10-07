@@ -67,6 +67,8 @@ export function structuralImpact(before: ModelSpec | null, after: ModelSpec): St
   if (key(before?.view) !== key(after.view)) add("view", "view", "表示する量", before?.view, after.view);
   if (before && (before.title !== after.title || before.question !== after.question)) add("metadata", "model", "題・問い",
     { title: before.title, question: before.question }, { title: after.title, question: after.question });
+  if (key(before?.questionContract) !== key(after.questionContract)) add("metadata", "questionContract", "問いの契約",
+    before?.questionContract, after.questionContract);
   return { ok: true, changes, problems: [] };
 }
 

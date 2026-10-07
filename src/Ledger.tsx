@@ -50,6 +50,7 @@ export function ModelSummary({ spec }: { spec: ModelSpec }) {
     <div className="model-summary">
       <h3>{spec.title}</h3>
       {spec.question && <p className="muted">{spec.question}</p>}
+      <QuestionContractSummary spec={spec}/>
       {spec.data.length > 0 && (
         <p className="small muted">
           既知の入力: {spec.data.map((d) => `${d.label}（${d.name}${d.indexOf ? ` → ${d.indexOf}` : ""}）`).join("、")}
@@ -79,6 +80,16 @@ export function ModelSummary({ spec }: { spec: ModelSpec }) {
       })}
     </div>
   );
+}
+
+export function QuestionContractSummary({ spec }: { spec: ModelSpec }) {
+  const contract = spec.questionContract;
+  if (!contract) return <p className="small muted">問いの契約（対象・量・判断）は未設定です。</p>;
+  return <dl className="question-contract-summary">
+    <dt>対象母集団・適用範囲</dt><dd>{contract.population}</dd>
+    <dt>推定したい量・比較・単位</dt><dd>{contract.estimand}</dd>
+    <dt>判断への使い方</dt><dd>{contract.decision}</dd>
+  </dl>;
 }
 
 export function SpecDiff({ before, after }: { before: ModelSpec | null; after: ModelSpec }) {

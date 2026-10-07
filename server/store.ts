@@ -15,6 +15,7 @@ import {
   HumanIntentInput,
   HumanSaveCheckInput,
   HumanRerunCheckInput,
+  HumanQuestionContractInput,
   StateSchema,
   emptyState,
   type Dataset,
@@ -156,6 +157,17 @@ export class Store {
   }
 
   // ---- human side ------------------------------------------------------------
+
+  proposeQuestionContract(raw: unknown) {
+    const input = HumanQuestionContractInput.parse(raw);
+    const base = this.version(input.baseVersionId);
+    if (this.model(base.modelId).currentVersionId !== base.id) throw new HttpError(409, "問いの契約は現在の版を基に提案してください");
+    if (base.spec.question === input.question && (["population", "estimand", "decision"] as const).every(key => base.spec.questionContract?.[key] === input.questionContract[key])) {
+      throw new HttpError(400, "問いと契約が現在の版と同じです");
+    }
+    return this.propose({ modelId: base.modelId, spec: { ...base.spec, question: input.question, questionContract: input.questionContract },
+      summary: "問いと目的の契約を更新する提案", knowledgeIds: [] });
+  }
 
   importCapsule(raw: unknown) {
     const read = readCapsule(raw);

@@ -81,9 +81,16 @@ export const ViewSchema = z.object({
   group: ident.optional(),
 });
 
+export const QuestionContractSchema = z.object({
+  population: z.string().trim().min(1).max(2000),
+  estimand: z.string().trim().min(1).max(2000),
+  decision: z.string().trim().min(1).max(2000),
+}).strict();
+
 export const ModelSpecSchema = z.object({
   title: z.string().min(1),
   question: z.string().default(""),
+  questionContract: QuestionContractSchema.optional(),
   plates: z.array(PlateSchema).max(8).default([]),
   data: z.array(DataColumnSchema).max(32).default([]),
   nodes: z.array(NodeSchema).min(1).max(64),
@@ -298,6 +305,9 @@ export const HumanIntentInput = z.object({
 export const HumanFollowUpInput = z.object({ text: z.string().trim().min(1).max(4000) });
 export const HumanChooseInput = z.object({ candidateId: z.string() });
 export const HumanExampleInput = z.object({ exampleId: z.string() });
+export const HumanQuestionContractInput = z.object({
+  baseVersionId: z.string().min(1), question: z.string().trim().min(1).max(2000), questionContract: QuestionContractSchema,
+}).strict();
 export const HumanSaveCheckInput = z.object({
   runId: z.string().min(1), label: z.string().trim().min(1).max(200), xMin: z.number(), xMax: z.number(),
   statistic: z.enum(["mean", "max", "sd", "exceedance"]), threshold: z.number().optional(), groupIndex: z.number().int().nonnegative().nullable(), seed: z.number().int(),

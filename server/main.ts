@@ -56,6 +56,7 @@ function send(res: ServerResponse, status: number, body: unknown) {
 type Route = { method: string; pattern: RegExp; handle: (m: RegExpMatchArray, body: () => Promise<unknown>) => unknown };
 
 const routes: Route[] = [
+  { method: "POST", pattern: /^\/api\/human\/question-contracts$/, handle: async (_, b) => store.proposeQuestionContract(await b()) },
   { method: "POST", pattern: /^\/api\/human\/capsules$/, handle: async (_, b) => store.importCapsule(await b()) },
   { method: "POST", pattern: /^\/api\/human\/checks$/, handle: async (_, b) => store.saveCheck(HumanSaveCheckInput.parse(await b())) },
   { method: "POST", pattern: /^\/api\/human\/checks\/([\w-]+)\/run$/, handle: async (m, b) => store.rerunCheck(m[1], HumanRerunCheckInput.parse(await b())) },

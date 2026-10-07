@@ -82,6 +82,29 @@ test("change records carry their exact before and after entries, including metad
   assert.equal(changes.find(c => c.name === "model")!.after, JSON.stringify({ title: after.title, question: after.question }, null, 2));
 });
 
+test("question contracts add, change and remove exact metadata without numeric impact", () => {
+  const contract = { population: "対象の試料", estimand: "温度による平均強度差 MPa", decision: "今回は記述のみ" };
+  const withContract = { ...structuredClone(CURVE_EXAMPLE), questionContract: contract };
+  const revised = { ...withContract, question: "新しい問い", questionContract: { ...contract, decision: "追加測定の判断に使う" } };
+  for (const [before, after] of [[CURVE_EXAMPLE, withContract], [withContract, revised], [withContract, CURVE_EXAMPLE], [null, withContract]] as const) {
+    const impact = structuralImpact(before, after);
+    assert.equal(impact.ok, true);
+    const change = impact.changes.find(c => c.name === "questionContract");
+    assert.ok(change);
+    assert.equal(change.kind, "metadata");
+    assert.equal(change.before, before && "questionContract" in before ? JSON.stringify(before.questionContract, null, 2) : "なし");
+    assert.equal(change.after, "questionContract" in after ? JSON.stringify(after.questionContract, null, 2) : "なし");
+    assert.deepEqual(change.downstream, []);
+    assert.deepEqual(change.observed, []);
+    assert.deepEqual(change.views, []);
+  }
+  const questionChange = structuralImpact(withContract, revised).changes.find(c => c.name === "model")!;
+  assert.equal(questionChange.kind, "metadata");
+  assert.deepEqual(questionChange.downstream, []);
+  assert.equal(JSON.parse(questionChange.after).question, revised.question);
+  assert.deepEqual(structuralImpact(withContract, structuredClone(withContract)).changes, []);
+});
+
 function stateFixture() {
   const state = emptyState();
   const common = { modelId: "m", createdAt: "", summary: "" };
