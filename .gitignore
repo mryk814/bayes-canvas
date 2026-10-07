@@ -1,6 +1,8 @@
 node_modules/
 dist/
+dist-lab/
 data/
 .env
 .DS_Store
 work/
+__pycache__/

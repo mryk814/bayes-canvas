@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // possible-worlds@1 stored one curve model ({x, y, params, mean, noise}).
-// @2 stores generative programs under named models. This upgrades a file in memory;
-// the store writes it back only on the next change, keeping the @1 file as .bak.
+// @2 stores generative programs; @3 adds saved checks and result histories.
+// Upgrade only in memory until the next change, preserving the old file as .bak.
 import { STATE_SCHEMA } from "../shared/contracts.ts";
 
 type V1Dist = { family: string } & Record<string, number | string>;
@@ -40,6 +40,7 @@ function upgradeSpec(s: V1Spec) {
 }
 
 export function migrate(raw: any): any {
+  if (raw?.schema === "possible-worlds@2") return { ...raw, schema: STATE_SCHEMA, checks: [], checkResults: [] };
   if (raw?.schema !== "possible-worlds@1") return raw;
   const modelId = "mdl_migrated";
   const versions = (raw.versions ?? []).map((v: any) => ({
@@ -63,5 +64,7 @@ export function migrate(raw: any): any {
     proposals: (raw.proposals ?? []).map((p: any) => ({ ...p, modelId, spec: upgradeSpec(p.spec) })),
     datasets: [],
     runs: [],
+    checks: [],
+    checkResults: [],
   };
 }

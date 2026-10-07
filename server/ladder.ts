@@ -9,7 +9,8 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AgentRunInput, type Job, type JobStage } from "../shared/contracts.ts";
 import { approximationGaps, approximationTrusted, diagnosticWarnings } from "../shared/compare.ts";
-import { datasetProblems, type Store } from "./store.ts";
+import { datasetProblems } from "../shared/evidence-validation.ts";
+import type { Store } from "./store.ts";
 
 const RANK: Record<JobStage, number> = { approximate: 0, mcmc: 1 };
 const PHASES: Record<string, string> = {

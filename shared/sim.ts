@@ -459,6 +459,11 @@ export function diffSpecs(a: ModelSpec | null, b: ModelSpec): SpecChange[] {
     if (before !== after) out.push({ what, before, after });
   };
   cmp("題", a.title, b.title);
+  cmp("問い", a.question, b.question);
+  for (const [key, label] of [["population", "対象母集団・適用範囲"], ["estimand", "推定したい量・比較・単位"], ["decision", "判断への使い方"]] as const) {
+    const before = a.questionContract?.[key], after = b.questionContract?.[key];
+    if (before !== after) out.push({ what: label + (before === undefined ? " を追加" : after === undefined ? " を削除" : ""), before: before ?? "なし", after: after ?? "なし" });
+  }
   const plates = (s: ModelSpec) => new Map(s.plates.map((p) => [p.name, `${p.label} × ${p.size}`]));
   diffMaps(out, "プレート", plates(a), plates(b));
   const data = (s: ModelSpec) => new Map(s.data.map((d) => [d.name, `${d.plate}${d.indexOf ? ` → ${d.indexOf}` : ""} · ${d.generate.kind}`]));

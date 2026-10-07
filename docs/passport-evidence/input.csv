@@ -1,0 +1,5 @@
+temperature_K,strength_kPa,machine
+293.15,420000,A
+373.15,380000,B
+453.15,320000,A
+513.15,280000,C

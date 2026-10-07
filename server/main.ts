@@ -14,6 +14,8 @@ import {
   HumanExampleInput,
   HumanFollowUpInput,
   HumanIntentInput,
+  HumanSaveCheckInput,
+  HumanRerunCheckInput,
 } from "../shared/contracts.ts";
 import { HttpError, Store, type ChangeEvent } from "./store.ts";
 import { Ladder } from "./ladder.ts";
@@ -64,6 +66,10 @@ function send(res: ServerResponse, status: number, body: unknown) {
 type Route = { method: string; pattern: RegExp; handle: (m: RegExpMatchArray, body: () => Promise<unknown>) => unknown };
 
 const routes: Route[] = [
+  { method: "POST", pattern: /^\/api\/human\/question-contracts$/, handle: async (_, b) => store.proposeQuestionContract(await b()) },
+  { method: "POST", pattern: /^\/api\/human\/capsules$/, handle: async (_, b) => store.importCapsule(await b()) },
+  { method: "POST", pattern: /^\/api\/human\/checks$/, handle: async (_, b) => store.saveCheck(HumanSaveCheckInput.parse(await b())) },
+  { method: "POST", pattern: /^\/api\/human\/checks\/([\w-]+)\/run$/, handle: async (m, b) => store.rerunCheck(m[1], HumanRerunCheckInput.parse(await b())) },
   { method: "GET", pattern: /^\/api\/state$/, handle: () => ({ state: store.state, agentConnected: agentStreams.size > 0, dataPath, ladder: ladderInfo() }) },
   {
     method: "POST",
@@ -82,6 +88,17 @@ const routes: Route[] = [
     },
   },
   { method: "POST", pattern: /^\/api\/human\/example$/, handle: async (_, b) => store.startExample(HumanExampleInput.parse(await b()).exampleId) },
+  {
+    method: "POST", pattern: /^\/api\/human\/datasets$/,
+    handle: async (_, b) => {
+      const body = await b();
+      const input = AgentDatasetInput.parse(body);
+      const versionId = (body as { versionId?: unknown }).versionId;
+      const model = store.state.models.find(m => m.id === input.modelId);
+      if (!model || model.currentVersionId !== versionId) throw new HttpError(409, "モデル版が変わりました。現在の版でCSVを再確認してください。");
+      return store.attachDataset(input);
+    },
+  },
   { method: "POST", pattern: /^\/api\/human\/intents$/, handle: async (_, b) => store.createIntent(HumanIntentInput.parse(await b())) },
   {
     method: "POST",
