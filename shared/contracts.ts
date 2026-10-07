@@ -245,7 +245,22 @@ export const ProposalSchema = z.object({
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 
-export const STATE_SCHEMA = "possible-worlds@2";
+export const SavedCheckSchema = z.object({
+  id: z.string().min(1), modelId: z.string().min(1), datasetId: z.string().min(1), createdAt: z.string(),
+  label: z.string().trim().min(1).max(200), xMin: z.number(), xMax: z.number(), statistic: z.enum(["mean", "max"]),
+  x: ident, y: ident, xUnit: z.string(), yUnit: z.string(),
+  groupColumn: ident.nullable(), groupIndex: z.number().int().nonnegative().nullable(),
+}).refine(v => v.xMin <= v.xMax, "区間の下限は上限以下にしてください");
+export type SavedCheck = z.infer<typeof SavedCheckSchema>;
+
+export const SavedCheckResultSchema = z.object({
+  id: z.string().min(1), checkId: z.string().min(1), modelId: z.string().min(1), versionId: z.string().min(1), datasetId: z.string().min(1), runId: z.string().min(1),
+  createdAt: z.string(), seed: z.number().int(), observedValue: z.number(), observedCount: z.number().int().positive(),
+  replicatedValues: z.array(z.number()).min(1), predictiveRange: z.tuple([z.number(), z.number()]), tailFraction: z.number().min(0).max(1),
+});
+export type SavedCheckResult = z.infer<typeof SavedCheckResultSchema>;
+
+export const STATE_SCHEMA = "possible-worlds@3";
 
 export const StateSchema = z.object({
   schema: z.literal(STATE_SCHEMA),
@@ -256,11 +271,13 @@ export const StateSchema = z.object({
   proposals: z.array(ProposalSchema),
   datasets: z.array(DatasetSchema),
   runs: z.array(RunSchema),
+  checks: z.array(SavedCheckSchema),
+  checkResults: z.array(SavedCheckResultSchema),
 });
 export type State = z.infer<typeof StateSchema>;
 
 export function emptyState(): State {
-  return { schema: STATE_SCHEMA, models: [], versions: [], intents: [], knowledge: [], proposals: [], datasets: [], runs: [] };
+  return { schema: STATE_SCHEMA, models: [], versions: [], intents: [], knowledge: [], proposals: [], datasets: [], runs: [], checks: [], checkResults: [] };
 }
 
 // ---------- inputs accepted at the boundary --------------------------------------
@@ -274,6 +291,11 @@ export const HumanIntentInput = z.object({
 export const HumanFollowUpInput = z.object({ text: z.string().trim().min(1).max(4000) });
 export const HumanChooseInput = z.object({ candidateId: z.string() });
 export const HumanExampleInput = z.object({ exampleId: z.string() });
+export const HumanSaveCheckInput = z.object({
+  runId: z.string().min(1), label: z.string().trim().min(1).max(200), xMin: z.number(), xMax: z.number(),
+  statistic: z.enum(["mean", "max"]), groupIndex: z.number().int().nonnegative().nullable(), seed: z.number().int(),
+}).refine(v => v.xMin <= v.xMax, "区間の下限は上限以下にしてください");
+export const HumanRerunCheckInput = z.object({ runId: z.string().min(1), seed: z.number().int() });
 
 export const AgentReplyInput = z.object({
   intentId: z.string(),

@@ -14,8 +14,8 @@ import "@fontsource-variable/jetbrains-mono";
 import { JOINT_FIXTURES, queryJoint } from "../shared/joint.ts";
 import { CSV_EXAMPLES, previewCsv } from "../shared/csv.ts";
 import type { CsvMapping } from "../shared/csv.ts";
-import { bindCheck, runCheck, checkFixtures } from "./checks.ts";
-import type { CheckDefinition, CheckResult } from "./checks.ts";
+import { bindCheck, runCheck, checkFixtures } from "../shared/checks.ts";
+import type { CheckDefinition, CheckResult } from "../shared/checks.ts";
 import "./style.css";
 
 const percent = (value: number) => `${(value * 100).toFixed(0)}%`;

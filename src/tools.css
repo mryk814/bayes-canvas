@@ -38,4 +38,6 @@
 .tools-table table { border-collapse:collapse; width:100%; font-size:12px; }
 .tools-table th,.tools-table td { text-align:left; padding:9px; border-bottom:1px solid var(--line); white-space:nowrap; }
 .tools-table caption { text-align:left; padding-bottom:8px; }
+.check-values { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+@media(max-width:760px) { .check-fields>label:first-child { flex-basis:100%; } }
 @media(max-width:760px) { .model-tools { padding:20px 14px 40px; } .tools-columns { grid-template-columns:1fr; } .tools-nav { display:grid; grid-template-columns:1fr 1fr; } .tools-heading h1 { font-size:20px; } }

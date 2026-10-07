@@ -15,8 +15,8 @@
 
 ## 実装範囲
 
-`lab/`に専用画面・HTML入口・保存検査を置き、`test/lab-*.test.ts`で検証する。CSVとjoint queryの計算は本体でも使うため`shared/csv.ts`、`shared/joint.ts`へ移した。
-同じ依存を使い、追加の推論基盤・永続化層・汎用schemaは作らない。
+`lab/`に専用画面・HTML入口を置き、`test/lab-*.test.ts`で検証する。CSV・joint query・検査集計は本体でも使うため`shared/csv.ts`、`shared/joint.ts`、`shared/checks.ts`へ移した。
+ラボは同じ依存を使い、追加の推論基盤や永続化層を持たない。本体の保存検査は既存Storeと契約へ追加している。
 各計算境界は先に失敗するテストを確認してから実装する。
 
 ## 体験設計
@@ -56,7 +56,7 @@ Claude側で採用するときは、このブランチの追加差分をレビ�
 |---|---|---|
 | P03 | `shared/joint.ts`の`queryJoint`を`shared/run-joint.ts`から使う。`src/RunJoint.tsx`で量・プレート添字・単位、旧版、再生・静止表、既存intent本文への保存を接続 | 理解の比較評価と実推論結果での確認。intentの専用markは作らず条件・draw参照を本文に記録 |
 | P06 | `shared/csv.ts`の`parseCsv`を本体取り込みでも利用。`shared/import-csv.ts`と`src/ImportCsv.tsx`で入力・観測列へ対応し、確認後にDataset作成APIへ保存 | 同一行プレートの矩形CSV以外、任意単位の換算、実データ・ファイル選択経路の検証。ラボの候補JSONは本体Datasetとは別 |
-| U16 | `lab/checks.ts` の `bindCheck` / `runCheck`。定義と証拠参照のsnapshot | 本体の区間selectionから定義を作る。runの複製へ接続し、定義・履歴を永続化。新しい版の証拠で明示的に再bindする |
+| U16 | `shared/checks.ts`の`bindCheck` / `runCheck`を`shared/run-check.ts`から再利用。`src/SavedChecks.tsx`で保存したrange/binから区間・群を読み込み、平均／最大の定義と全結果を永続化。同じDataset・軸・単位・群対応の別版runへ明示的に再実行。表・details・狭幅表示をGUI検証 | 任意の検査構成、ばらつき統計量、自動再bind |
 
 本体にはU10の診断案内とU34の証拠カプセルも追加した。カプセルはモデル版・Dataset・runのJSON化と貼り付け検証までで、復元保存はしない。本体接続のテスト56件（HTTP検証を含む）・型検証・本体build・ラボbuildは通過した。
 
@@ -71,6 +71,18 @@ Claude側で採用するときは、このブランチの追加差分をレビ�
 - 390px幅の道具ヘッダーの重なりを修正後に再確認。
 
 実MCMC実行、Claude実環境との統合、実データ、スマホ実機、CSVファイル選択経路（貼り付け経路のみ検証）、利用者評価は未検証。
+
+### 保存検査の追加接続（2026-10-08）
+
+68テスト・型検証・本体／ラボbuildが成功。1265px・390px幅で合成例の保存済みrangeから群1の平均検査を保存し、v1→v2再実行、同じseedで同じ要約となることを確認した。異なるDatasetは拒否され履歴が増えず、reload・サーバー再起動後も履歴3件を保持。証拠は`docs/checks-evidence/`。390px幅で履歴領域へフォーカスし、ArrowRightを3回押して割合・複製件数・seedが読めること、複製値detailsの開閉、世界と道具の往復で検査選択と編集中の定義を保持することを確認。群選択の全幅化後に`machine_of[1]`の全表示を確認し、form-mobile・history-desktop・history-mobile画像を保存した。上の56件の記録は4道具接続時点の結果として維持する。
+
+別Dataset・priorのbinは候補から除外し、回帰テストの失敗→成功を確認した。既存agent overviewへモデル別の検査と結果要約を追加し、複製の件数・参照・要約数値を渡すが全複製値は含めない。Claude側統合、実MCMC、実データ、スマホ実機、利用者評価は未検証。
+
+複製をdrawごとに集計するため、全観測点を全draw分保持しない。1000draw×5000行の計測でRSSは約673→228MB、heapは約461→57MB、修正後所要時間は約4.18秒だった。同期計算の待ち時間は残る。
+
+複製は新しい観測個体を想定し、スカラーと群プレートの量を固定して他の潜在量と観測を再生成する。全drawを使い、seed・版・run・Datasetを結果と保存する。同じ証拠とseedで再現でき、両端を含む区間・群・集計は観測と複製で共通。軸・単位・群対応の違う版は拒否する。結果は上書きしない。
+
+本体Storeはschema @3となり、@2を空の検査配列付きで読み、@1の移行も維持する。読み込みだけで旧ファイルを書き換えない。独立ラボの画面内保存とは区別する。歴史画像とmanifestは変更しない。
 
 本体schemaに寄せるとき、ラボの小さな型を第二の正本として増殖させない。
 計算の核とテストを再利用し、参照や保存は本体の既存契約を正本とする。

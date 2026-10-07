@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { bindCheck, runCheck, checkFixtures } from '../lab/checks.ts'
-import type { CheckDefinition } from '../lab/checks.ts'
+import { bindCheck, runCheck, checkFixtures } from '../shared/checks.ts'
+import type { CheckDefinition } from '../shared/checks.ts'
 
 const definition: CheckDefinition = { id: 'late', label: '後半の平均', xMin: 2, xMax: 3, group: 'A', statistic: 'mean' }
 

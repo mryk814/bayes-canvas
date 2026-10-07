@@ -72,15 +72,17 @@ function quantile(sorted: readonly number[], probability: number): number {
   return sorted[lower] * (1 - fraction) + sorted[Math.ceil(position)] * fraction;
 }
 
-export function runCheck(bound: BoundCheck, evidence: CheckEvidence): CheckResult {
+export function runCheck(bound: BoundCheck, evidence: Omit<CheckEvidence, 'replicated'> & { replicated: Iterable<readonly CheckPoint[]> }): CheckResult {
   const snapshot = bindCheck(bound.definition, bound.context);
   validateContext(evidence.context);
   if (contextKeys.some(key => snapshot.context[key] !== evidence.context[key])) {
     throw new Error('Evidence context mismatch: explicitly bind the check to the new version before rerunning.');
   }
-  if (!evidence.replicated.length) throw new Error('At least one replication is required.');
   const observed = summarize(evidence.observed, snapshot.definition);
-  const replicatedValues = evidence.replicated.map(points => summarize(points, snapshot.definition).value);
+  const replicatedValues: number[] = [];
+  // Retain one statistic per draw, not every replicated observation in every draw.
+  for (const points of evidence.replicated) replicatedValues.push(summarize(points, snapshot.definition).value);
+  if (!replicatedValues.length) throw new Error('At least one replication is required.');
   const sorted = [...replicatedValues].sort((a, b) => a - b);
   return Object.freeze({
     ...snapshot,

@@ -13,6 +13,8 @@ import {
   HumanChooseInput,
   HumanFollowUpInput,
   HumanIntentInput,
+  HumanSaveCheckInput,
+  HumanRerunCheckInput,
   StateSchema,
   emptyState,
   type Dataset,
@@ -22,6 +24,8 @@ import {
   type ModelVersion,
   type Run,
   type SceneRef,
+  type SavedCheck,
+  type SavedCheckResult,
   type State,
 } from "../shared/contracts.ts";
 import { identifiability } from "../shared/identify.ts";
@@ -32,6 +36,7 @@ import { numpyroScript } from "../shared/codegen.ts";
 import { stanProgram } from "../shared/stan.ts";
 import { migrate } from "./migrate.ts";
 import { datasetProblems, runProblems } from "../shared/evidence-validation.ts";
+import { evaluateSavedCheck } from "../shared/run-check.ts";
 
 export class HttpError extends Error {
   status: number;
@@ -344,6 +349,10 @@ export class Store {
           currentVersion: { id: cur.id, number: cur.number, spec: cur.spec, summary: cur.summary },
           versions: s.versions.filter((v) => v.modelId === m.id).map((v) => ({ id: v.id, number: v.number, summary: v.summary, origin: v.origin })),
           knowledge: s.knowledge.filter((k) => k.modelId === m.id),
+          checks: s.checks.filter((check) => check.modelId === m.id),
+          checkResults: s.checkResults.filter((result) => result.modelId === m.id).map(({ replicatedValues, ...summary }) => ({
+            ...summary, replicationCount: replicatedValues.length,
+          })),
           datasets: s.datasets.filter((x) => x.modelId === m.id).map((x) => ({ id: x.id, label: x.label, provenance: x.provenance, note: x.note, plates: x.plates })),
           runs: s.runs
             .filter((r) => r.modelId === m.id)
@@ -548,5 +557,60 @@ export class Store {
       },
       (r) => ({ kind: "run", id: r.id }),
     );
+  }
+
+  private checkResult(check: SavedCheck, runId: string, seed: number): SavedCheckResult {
+    const run = this.run(runId);
+    const version = this.version(run.versionId);
+    const dataset = this.dataset(run.datasetId);
+    if (check.modelId !== version.modelId || check.modelId !== run.modelId || check.datasetId !== dataset.id) {
+      throw new HttpError(400, "保存検査は同じモデル・データセットのrunで再実行してください");
+    }
+    try {
+      const values = evaluateSavedCheck(check, version, dataset, run, seed);
+      return { ...values, id: newId("check_result"), checkId: check.id, modelId: version.modelId, versionId: version.id, datasetId: dataset.id, runId: run.id, createdAt: now(), seed };
+    } catch (error) {
+      throw new HttpError(400, error instanceof Error ? error.message : "検査を計算できませんでした");
+    }
+  }
+
+  saveCheck(raw: z.infer<typeof HumanSaveCheckInput>) {
+    const input = HumanSaveCheckInput.parse(raw);
+    const run = this.run(input.runId);
+    const version = this.version(run.versionId);
+    const dataset = this.dataset(run.datasetId);
+    const view = version.spec.view;
+    const x = version.spec.data.find(d => d.name === view.x);
+    const y = version.spec.nodes.find(n => n.name === view.y && n.role === "observed");
+    const group = version.spec.data.find(d => d.name === view.group);
+    if (!x || !y || !Object.hasOwn(dataset.columns, view.x) || !Object.hasOwn(dataset.columns, view.y)) {
+      throw new HttpError(400, "検査にはデータセットの直接の入力x列と観測y列が必要です");
+    }
+    if (input.groupIndex !== null && (!group?.indexOf || !Object.hasOwn(dataset.columns, group.name))) {
+      throw new HttpError(400, "群の選択には既知の添字入力列が必要です");
+    }
+    const check: SavedCheck = {
+      id: newId("check"), modelId: version.modelId, datasetId: dataset.id, createdAt: now(),
+      label: input.label, xMin: input.xMin, xMax: input.xMax, statistic: input.statistic,
+      x: view.x, y: view.y, xUnit: x.unit, yUnit: y.unit,
+      groupColumn: view.group ?? null, groupIndex: input.groupIndex,
+    };
+    const result = this.checkResult(check, run.id, input.seed);
+    return this.change(draft => {
+      draft.checks.push(check);
+      draft.checkResults.push(result);
+      return { check, result };
+    }, () => ({ kind: "check", id: check.id }));
+  }
+
+  rerunCheck(checkId: string, raw: z.infer<typeof HumanRerunCheckInput>) {
+    const input = HumanRerunCheckInput.parse(raw);
+    const check = this.state.checks.find(c => c.id === checkId);
+    if (!check) throw new HttpError(404, "保存検査が見つかりません");
+    const result = this.checkResult(check, input.runId, input.seed);
+    return this.change(draft => {
+      draft.checkResults.push(result);
+      return result;
+    }, () => ({ kind: "check.result", id: result.id }));
   }
 }

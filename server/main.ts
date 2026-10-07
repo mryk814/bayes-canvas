@@ -14,6 +14,8 @@ import {
   HumanExampleInput,
   HumanFollowUpInput,
   HumanIntentInput,
+  HumanSaveCheckInput,
+  HumanRerunCheckInput,
 } from "../shared/contracts.ts";
 import { HttpError, Store, type ChangeEvent } from "./store.ts";
 
@@ -54,6 +56,8 @@ function send(res: ServerResponse, status: number, body: unknown) {
 type Route = { method: string; pattern: RegExp; handle: (m: RegExpMatchArray, body: () => Promise<unknown>) => unknown };
 
 const routes: Route[] = [
+  { method: "POST", pattern: /^\/api\/human\/checks$/, handle: async (_, b) => store.saveCheck(HumanSaveCheckInput.parse(await b())) },
+  { method: "POST", pattern: /^\/api\/human\/checks\/([\w-]+)\/run$/, handle: async (m, b) => store.rerunCheck(m[1], HumanRerunCheckInput.parse(await b())) },
   { method: "GET", pattern: /^\/api\/state$/, handle: () => ({ state: store.state, agentConnected: agentStreams.size > 0, dataPath }) },
   { method: "POST", pattern: /^\/api\/human\/example$/, handle: async (_, b) => store.startExample(HumanExampleInput.parse(await b()).exampleId) },
   {
