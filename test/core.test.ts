@@ -272,3 +272,54 @@ test("the shape lens evaluates the model's own function and checks bins with new
   assert.equal(bins.reduce((s, b) => s + b.n, 0), 12);
   assert.ok(bins.every((b) => b.rep[0] <= b.rep[2]));
 });
+
+test("approximation gaps and diagnostics become plain warnings", async () => {
+  const { approximationGaps, diagnosticWarnings } = await import("../shared/compare.ts");
+  assert.deepEqual(diagnosticWarnings({ maxRhat: 1.0, minEss: 900, divergences: 0, chains: 4, paretoK: null }), []);
+  assert.equal(diagnosticWarnings({ maxRhat: 1.05, minEss: 120, divergences: 3, chains: 4, paretoK: null }).length, 3);
+  assert.match(diagnosticWarnings({ maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: 4.7 })[0], /Pareto k = 4.70/);
+  const mk = (center: number, spread: number) => Array.from({ length: 200 }, (_, i) => [center + spread * ((i / 199) - 0.5)]);
+  const mcmc = { draws: { s20: mk(500, 20), sigma_meas: mk(5, 4) } };
+  assert.deepEqual(approximationGaps(OBSERVATION_EXAMPLE, { draws: { s20: mk(501, 20), sigma_meas: mk(5, 4) } }, mcmc), []);
+  const gaps = approximationGaps(OBSERVATION_EXAMPLE, { draws: { s20: mk(500, 20), sigma_meas: mk(9, 1) } }, mcmc);
+  assert.equal(gaps.length, 1);
+  assert.match(gaps[0], /sigma_meas/);
+});
+
+test("the background ladder queues approximate then MCMC, and drops work for superseded versions", async () => {
+  const { Ladder } = await import("../server/ladder.ts");
+  const store = freshStore();
+  const model = store.startExample("observation");
+  const launched: string[] = [];
+  const ladder = new Ladder(store, mkdtempSync(join(tmpdir(), "auto-")), () => {}, { enabled: true, launch: (j) => launched.push(`${j.versionId}:${j.stage}`) });
+  assert.equal(ladder.jobs.length, 0, "no data, nothing to compute");
+
+  store.synthesize({ modelId: model.id, label: "合成", note: "", truth: OBSERVATION_EXAMPLE, seed: 1, plates: {} });
+  const v1 = model.currentVersionId;
+  assert.deepEqual(ladder.jobs.map((j) => [j.stage, j.status]), [["approximate", "running"], ["mcmc", "queued"]]);
+  assert.deepEqual(launched, [`${v1}:approximate`]);
+
+  const p = store.propose({ modelId: model.id, spec: OBSERVATION_EXAMPLE, summary: "同じ", knowledgeIds: [] });
+  const v2 = store.adopt(p.id);
+  const byVersion = (v: string) => ladder.jobs.filter((j) => j.versionId === v).map((j) => j.status);
+  assert.deepEqual(byVersion(v1), ["cancelled", "cancelled"]);
+  assert.deepEqual(byVersion(v2.id), ["running", "queued"]);
+});
+
+test("a Pathfinder run that fails its own check brings in a short NUTS chain before full MCMC", async () => {
+  const { Ladder } = await import("../server/ladder.ts");
+  const store = freshStore();
+  const model = store.startExample("observation");
+  const ds = store.synthesize({ modelId: model.id, label: "合成", note: "", truth: OBSERVATION_EXAMPLE, seed: 1, plates: {} });
+  const ladder = new Ladder(store, mkdtempSync(join(tmpdir(), "auto-")), () => {}, { enabled: true, launch: () => {} });
+  const w = simulateWorld(compile(), 1, 0);
+  const draws = Object.fromEntries(["s20", "decline", "sigma_mat", "true_strength", "tau_bias", "bias", "sigma_meas"].map((k) => [k, [w.values[k]]]));
+  store.attachRun({
+    versionId: model.currentVersionId, datasetId: ds.id, method: "Stan Pathfinder", fidelity: "approximate", note: "", warnings: [],
+    diagnostics: { maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: 2.7 }, draws,
+  }, "auto");
+  const approxJob = ladder.jobs.find((j) => j.stage === "approximate")!;
+  (ladder as unknown as { finish: (j: unknown, s: string, m: string) => void }).finish(approxJob, "done", "");
+  const order = ladder.jobs.filter((j) => j.status !== "done").map((j) => `${j.stage}:${j.status}`);
+  assert.deepEqual(order, ["mcmc:queued", "quick:running"]);
+});

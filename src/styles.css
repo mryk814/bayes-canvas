@@ -1796,3 +1796,158 @@ select {
   fill: var(--no);
   stroke: var(--no);
 }
+
+/* ---------- background ladder ---------- */
+
+.stage-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ladder-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.ladder-status.on {
+  color: var(--posterior);
+  border-color: color-mix(in srgb, var(--posterior) 40%, var(--line));
+}
+
+.ladder-status.off {
+  color: var(--muted);
+}
+
+.spin {
+  animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.arrival {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--posterior-soft);
+  color: var(--posterior);
+  border: 1px solid color-mix(in srgb, var(--posterior) 35%, var(--line));
+}
+
+.arrival span {
+  margin-right: auto;
+}
+
+.badge-approx {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.badge-pending-run {
+  background: var(--posterior-soft);
+  color: var(--posterior);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.run-warnings {
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.run-warnings summary {
+  cursor: pointer;
+}
+
+.run-warnings ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.jobs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.job-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.job {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.job-message {
+  grid-column: 1 / -1;
+  white-space: pre-wrap;
+  color: var(--danger);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.job-cancelled .job-message {
+  color: var(--muted);
+  font-family: var(--font);
+}
+
+.job-badge-running {
+  background: var(--posterior-soft);
+  color: var(--posterior);
+}
+
+.job-badge-done {
+  background: var(--yes-soft);
+  color: var(--yes);
+}
+
+.job-badge-failed {
+  background: var(--no-soft);
+  color: var(--no);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin,
+  .badge-pending-run {
+    animation: none !important;
+  }
+}
+.job-retry { grid-column: 1 / -1; justify-self: start; }

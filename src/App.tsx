@@ -3,7 +3,8 @@ import { IconCopy, IconDownload, IconPlus, IconPlugConnected, IconPlugConnectedX
 import type { Mark, SceneRef, State } from "../shared/contracts.ts";
 import { EXAMPLES } from "../shared/example.ts";
 import { compileSpec, datasetPoints, drawCount, runInputs, simulateWorld, viewPoints, type World } from "../shared/sim.ts";
-import { post, useAction, useAppData, useStoredState } from "./api.ts";
+import { post, useAction, useAppData, useStoredState, type LadderInfo } from "./api.ts";
+import { bestRun, JobList, LadderStatus } from "./Background.tsx";
 import { DraftTray, IntentCard } from "./Conversation.tsx";
 import { ErrorNote, EvidenceList, KnowledgeList, ModelSummary, ProposalCard, VersionList } from "./Ledger.tsx";
 import { Stage, type Focus, type Source, type StageMode } from "./Stage.tsx";
@@ -18,12 +19,12 @@ export function App() {
   const { data, live } = useAppData();
   if (data.status === "loading") return <div className="splash">読み込んでいます…</div>;
   if (data.status === "error") return <div className="splash error-note">{data.message}</div>;
-  return <Workspace state={data.state} agentConnected={data.agentConnected} dataPath={data.dataPath} live={live} />;
+  return <Workspace state={data.state} ladder={data.ladder} agentConnected={data.agentConnected} dataPath={data.dataPath} live={live} />;
 }
 
 type Tab = "talk" | "proposals" | "knowledge" | "evidence" | "model";
 
-function Workspace({ state, agentConnected, dataPath, live }: { state: State; agentConnected: boolean; dataPath: string; live: boolean }) {
+function Workspace({ state, ladder, agentConnected, dataPath, live }: { state: State; ladder: LadderInfo; agentConnected: boolean; dataPath: string; live: boolean }) {
   const [modelId, setModelId] = useStoredState<string | null>("possible-worlds:model", null);
   const [creating, setCreating] = useState(false);
   const model = state.models.find((m) => m.id === modelId) ?? state.models[state.models.length - 1] ?? null;
@@ -77,6 +78,7 @@ function Workspace({ state, agentConnected, dataPath, live }: { state: State; ag
         </div>
         <div className="topbar-right">
           {!live && <span className="badge badge-warn">サーバーとの接続が切れています</span>}
+          <LadderStatus ladder={ladder} state={state} />
           <span className={`agent-status ${agentConnected ? "on" : "off"}`} title={agentConnected ? "MCP ブリッジが接続中" : "Claude Code の MCP ブリッジが未接続"}>
             {agentConnected ? <IconPlugConnected size={16} /> : <IconPlugConnectedX size={16} />}
             <span className="agent-status-text">{agentConnected ? "Claude Code 接続中" : "Claude Code 未接続"}</span>
@@ -89,13 +91,13 @@ function Workspace({ state, agentConnected, dataPath, live }: { state: State; ag
       {showEmpty ? (
         <EmptyState state={state} onCancel={state.models.length ? () => setCreating(false) : null} />
       ) : (
-        <ModelWorkspace key={model!.id} state={state} modelId={model!.id} agentConnected={agentConnected} />
+        <ModelWorkspace key={model!.id} state={state} ladder={ladder} modelId={model!.id} agentConnected={agentConnected} />
       )}
     </div>
   );
 }
 
-function ModelWorkspace({ state, modelId, agentConnected }: { state: State; modelId: string; agentConnected: boolean }) {
+function ModelWorkspace({ state, ladder, modelId, agentConnected }: { state: State; ladder: LadderInfo; modelId: string; agentConnected: boolean }) {
   const model = state.models.find((m) => m.id === modelId)!;
   const current = state.versions.find((v) => v.id === model.currentVersionId)!;
   const [seed, setSeed] = useStoredState(`possible-worlds:seed:${modelId}`, 1);
@@ -109,7 +111,15 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
   const [mode, setMode] = useState<StageMode>("worlds");
   const send = useAction();
 
-  const run = state.runs.find((r) => r.id === runId && r.modelId === modelId) ?? null;
+  // "auto" follows the most trustworthy finished run of the current version, so the
+  // posterior grows in place: approximation first, then MCMC when it lands.
+  const best = bestRun(state, modelId);
+  const following = runId === "auto";
+  const run = following ? best : (state.runs.find((r) => r.id === runId && r.modelId === modelId) ?? null);
+  const pendingMcmc = ladder.jobs.find((j) => j.versionId === current.id && j.stage === "mcmc" && (j.status === "running" || j.status === "queued")) ?? null;
+  // Tell the person when a posterior for the current version arrives while they look at something else.
+  const [seenBest, setSeenBest] = useState<string | null>(best?.id ?? null);
+  const arrived = best && best.id !== seenBest && !following && runId !== best.id ? best : null;
   const dataset = run ? (state.datasets.find((d) => d.id === run.datasetId) ?? null) : null;
   // A run is shown with the version it was computed for, never silently with the current one.
   const viewVersion = run ? (state.versions.find((v) => v.id === run.versionId) ?? current) : current;
@@ -175,8 +185,12 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
     .reverse()
     .map((r) => {
       const v = state.versions.find((x) => x.id === r.versionId);
-      return { id: r.id, label: `事後 · v${v?.number} · ${r.method}${r.versionId !== current.id ? " · 旧版" : ""}` };
+      return {
+        id: r.id,
+        label: `事後 · v${v?.number} · ${r.fidelity === "approximate" ? "近似 · " : ""}${r.method}${r.versionId !== current.id ? " · 旧版" : ""}`,
+      };
     });
+  runOptions.unshift({ id: "auto", label: best ? "自動（いまの版のいちばん確かな事後）" : "自動（いまの版の事後を待っています）" });
   const freshRuns = runs.filter((r) => r.versionId === current.id).length;
   const showRun = (id: string | null) => {
     setRunId(id);
@@ -186,6 +200,26 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
 
   return (
     <main className="layout">
+      <div className="stage-column">
+      {arrived && (
+        <div className="arrival" role="status">
+          <span>
+            v{state.versions.find((v) => v.id === arrived.versionId)?.number} の事後分布が届きました（{arrived.fidelity === "approximate" ? "近似" : "NUTS"}）。
+          </span>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setSeenBest(arrived.id);
+              showRun("auto");
+            }}
+          >
+            自動で追いかけて見る
+          </button>
+          <button className="btn btn-quiet" onClick={() => setSeenBest(arrived.id)}>
+            あとで
+          </button>
+        </div>
+      )}
       {!compiled.ok ? (
         <div className="error-note">この版を描けません: {compiled.problems.join(" / ")}</div>
       ) : (
@@ -195,6 +229,8 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
           seed={seed}
           source={source}
           runOptions={runOptions}
+          sourceValue={runId ?? ""}
+          pending={following && run?.fidelity === "approximate" && pendingMcmc ? pendingMcmc.phase : null}
           worlds={worlds}
           points={points}
           data={data}
@@ -224,6 +260,7 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
           onOpen={setOpened}
         />
       )}
+      </div>
 
       <aside className="side">
         <nav className="tabs" role="tablist">
@@ -275,7 +312,12 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
             </div>
           )}
           {tab === "knowledge" && <KnowledgeList state={state} modelId={modelId} />}
-          {tab === "evidence" && <EvidenceList state={state} modelId={modelId} onShowRun={showRun} />}
+          {tab === "evidence" && (
+            <div className="stack">
+              <JobList ladder={ladder} state={state} modelId={modelId} />
+              <EvidenceList state={state} modelId={modelId} onShowRun={showRun} />
+            </div>
+          )}
           {tab === "model" && (
             <div className="stack">
               <ModelSummary spec={current.spec} />

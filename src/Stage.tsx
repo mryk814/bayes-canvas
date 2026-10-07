@@ -19,6 +19,8 @@ type Props = {
   seed: number;
   source: Source;
   runOptions: RunOption[];
+  sourceValue: string;
+  pending: string | null;
   worlds: World[];
   points: ViewPoint[][];
   data: DataPoint[];
@@ -68,11 +70,11 @@ export function Stage(p: Props) {
   return (
     <section className="stage" aria-label="可能世界">
       <div className="stage-bar">
-        <Provenance source={p.source} versionNumber={p.versionNumber} seed={p.seed} />
+        <Provenance source={p.source} versionNumber={p.versionNumber} seed={p.seed} pending={p.pending} />
         <div className="stage-actions">
           <label className="select">
             <span className="muted small">見る世界</span>
-            <select value={p.source.kind === "run" ? p.source.run.id : ""} onChange={(e) => p.onSource(e.target.value || null)}>
+            <select value={p.sourceValue} onChange={(e) => p.onSource(e.target.value || null)}>
               <option value="">prior</option>
               {p.runOptions.map((o) => (
                 <option key={o.id} value={o.id}>
@@ -228,7 +230,7 @@ export function Stage(p: Props) {
   );
 }
 
-function Provenance({ source, versionNumber, seed }: { source: Source; versionNumber: number; seed: number }) {
+function Provenance({ source, versionNumber, seed, pending }: { source: Source; versionNumber: number; seed: number; pending: string | null }) {
   if (source.kind === "prior") {
     return (
       <div className="provenance" title="何が表示されているか">
@@ -240,19 +242,46 @@ function Provenance({ source, versionNumber, seed }: { source: Source; versionNu
     );
   }
   const d = source.run.diagnostics;
+  const approx = source.run.fidelity === "approximate";
   const rhatBad = d.maxRhat !== null && d.maxRhat > 1.01;
   const divBad = (d.divergences ?? 0) > 0;
   const essBad = d.minEss !== null && d.minEss < 400;
   return (
     <div className="provenance">
       <span className="badge badge-posterior">事後予測の世界</span>
+      {approx && (
+        <span className="badge badge-approx" title="速い近似。自動で見ているときは NUTS の結果が届くと置き換わります">
+          近似{d.paretoK !== null ? ` · Pareto k ${fmt(d.paretoK)}` : ""}
+        </span>
+      )}
+      {approx && d.paretoK !== null && d.paretoK > 0.7 && <span className="badge badge-warn">信用できない近似</span>}
+      {source.run.origin === "auto" && (
+        <span className="badge" title="版とデータの変化を受けてアプリが自動で計算した結果">
+          自動
+        </span>
+      )}
       {source.stale && <span className="badge badge-warn" title="この run は今の版より前の版で計算されています">旧版の結果</span>}
       <span className="muted">
         {source.run.method} · データ「{source.dataset.label}」（{source.dataset.provenance === "synthetic" ? "合成データ" : "実データ"}）
       </span>
-      <span className={`diag ${rhatBad ? "bad" : ""}`}>R̂ ≤ {d.maxRhat === null ? "?" : fmt(d.maxRhat)}</span>
-      <span className={`diag ${essBad ? "bad" : ""}`}>ESS ≥ {d.minEss === null ? "?" : Math.round(d.minEss)}</span>
-      <span className={`diag ${divBad ? "bad" : ""}`}>発散 {d.divergences ?? "?"}</span>
+      {!approx && (
+        <>
+          <span className={`diag ${rhatBad ? "bad" : ""}`}>R̂ ≤ {d.maxRhat === null ? "?" : fmt(d.maxRhat)}</span>
+          <span className={`diag ${essBad ? "bad" : ""}`}>ESS ≥ {d.minEss === null ? "?" : Math.round(d.minEss)}</span>
+          <span className={`diag ${divBad ? "bad" : ""}`}>発散 {d.divergences ?? "?"}</span>
+        </>
+      )}
+      {pending && <span className="badge badge-pending-run">NUTS: {pending}</span>}
+      {source.run.warnings.length > 0 && (
+        <details className="run-warnings">
+          <summary>注意 {source.run.warnings.length} 件</summary>
+          <ul>
+            {source.run.warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }

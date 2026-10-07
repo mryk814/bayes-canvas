@@ -24,7 +24,9 @@ Answering the person:
 2. Work out which part of the model produces what they object to. Use worlds_sample if you need more worlds.
 3. worlds_reply with 2–4 genuinely different readings (e.g. a mechanism in the observation process vs. in the material; a hard constraint vs. a softer prior; a check to run). Each has a kind, a one-sentence statement written as the person's knowledge, and optionally an edit: a full new spec plus a summary. Ask a short question instead if it is too ambiguous. Write in Japanese, concise and calm.
 
-Running inference when asked:
+Background inference: when a model's current version has data that fits it, the app itself computes the posterior with Stan in the background — Pathfinder (approximate) first, then NUTS — and attaches runs with origin "auto", fidelity, and warnings (diagnostics, approximation gaps). worlds_overview shows backgroundInference.jobs. Do not start your own run for the same version and data unless the person asks for something different (another backend, more draws, a custom program).
+
+Running inference by hand when asked:
 1. worlds_overview to find the model, current version and datasets. If there is no data, ask; for checking recovery you may create a synthetic dataset with worlds_synthesize_dataset from a stated truth (say what the truth is in its note).
 2. worlds_prepare_inference writes a Stan program and CmdStanPy runner (or a NumPyro script with backend 'numpyro') and the dataset into work/. Run it with the command it returns (uv run ...). The generated code is a starting point: if the sampler struggles, look at the model (identifiability, funnels, scales) before tuning the sampler, and tell the person what you found. Read the diagnostics honestly; do not call a run converged when R-hat > 1.01, ESS is low, or there are divergences — say so in a reply or message.
 3. worlds_attach_run with the written run.json. The person can then switch the worlds to that run.

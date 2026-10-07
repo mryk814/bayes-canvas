@@ -135,6 +135,11 @@ export const RunSchema = z.object({
   datasetId: z.string(),
   createdAt: z.string(),
   method: z.string().min(1),
+  // approximate (e.g. Pathfinder) results are shown as such and replaced when MCMC lands
+  fidelity: z.enum(["approximate", "mcmc"]).default("mcmc"),
+  // who started it: the app's background ladder, or an agent by hand
+  origin: z.enum(["auto", "agent"]).default("agent"),
+  warnings: z.array(z.string()).default([]),
   note: z.string().default(""),
   diagnostics: z
     .object({
@@ -142,8 +147,10 @@ export const RunSchema = z.object({
       minEss: z.number().nullable().default(null),
       divergences: z.number().int().nullable().default(null),
       chains: z.number().int().nullable().default(null),
+      // Pathfinder's own check of its approximation; above 0.7 the approximation is not trustworthy
+      paretoK: z.number().nullable().default(null),
     })
-    .default({ maxRhat: null, minEss: null, divergences: null, chains: null }),
+    .default({ maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: null }),
   // draws[node][k] holds the node's values (one per plate element) in joint draw k.
   draws: z.record(z.string(), z.array(z.array(z.number()))),
 });
@@ -295,7 +302,24 @@ export const AgentSynthesizeInput = z.object({
   seed: z.number().int(),
   plates: z.record(z.string(), z.number().int().min(1).max(5000)).default({}),
 });
-export const AgentRunInput = RunSchema.omit({ id: true, createdAt: true, modelId: true });
+export const AgentRunInput = RunSchema.omit({ id: true, createdAt: true, modelId: true, origin: true });
+
+// Background inference: one job per (version, dataset), climbing approximate → mcmc.
+// approximate: Pathfinder. quick: one short NUTS chain, used when Pathfinder fails its own check.
+export type JobStage = "approximate" | "quick" | "mcmc";
+export type Job = {
+  id: string;
+  modelId: string;
+  versionId: string;
+  datasetId: string;
+  stage: JobStage;
+  status: "queued" | "running" | "done" | "failed" | "cancelled";
+  phase: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  message: string;
+  runId: string | null;
+};
 
 export const KIND_LABELS: Record<KnowledgeKind, string> = {
   hypothesis: "仮説",

@@ -178,6 +178,7 @@ def main():
     ap.add_argument("--chains", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--keep", type=int, default=400)
+    ap.add_argument("--method", choices=["nuts", "pathfinder"], default="nuts", help="pathfinder: fast variational approximation")
     ap.add_argument("--target-accept", type=float, default=0.8, help="adapt_delta; raise (e.g. 0.95) when there are divergences")
     args = ap.parse_args()
 
@@ -199,7 +200,35 @@ def main():
             os.environ["PATH"] = os.pathsep.join([os.path.join(rt, "mingw64", "bin"), os.path.join(rt, "usr", "bin"), os.environ["PATH"]])
 
     here = os.path.dirname(os.path.abspath(__file__))
+    print("STAGE compile", flush=True)
     model = CmdStanModel(stan_file=os.path.join(here, "model.stan"))
+    print("STAGE sample", flush=True)
+
+    if args.method == "pathfinder":
+        import contextlib, io, re
+        console = io.StringIO()
+        with contextlib.redirect_stdout(console):
+            fit = model.pathfinder(data=data, draws=args.keep, num_paths=8, seed=args.seed, show_console=True)
+        k = re.findall(r"Pareto k value \\(([0-9.eE+-]+)\\)", console.getvalue())
+        pareto_k = float(k[-1]) if k else None
+        draws = {}
+        for k in KEEP:
+            v = np.asarray(fit.stan_variable(f"n_{k}"))
+            draws[k] = v[: args.keep].reshape(min(args.keep, v.shape[0]), -1).tolist()
+        run = {
+            "versionId": VERSION_ID,
+            "datasetId": ds["id"],
+            "method": "Stan Pathfinder",
+            "fidelity": "approximate",
+            "note": "",
+            "diagnostics": {"maxRhat": None, "minEss": None, "divergences": None, "chains": None, "paretoK": pareto_k},
+            "draws": draws,
+        }
+        with open(args.out, "w", encoding="utf-8") as f:
+            json.dump(run, f)
+        print(json.dumps({"fidelity": "approximate", "paretoK": pareto_k}))
+        return
+
     fit = model.sample(data=data, chains=args.chains, iter_warmup=args.warmup, iter_sampling=args.draws, seed=args.seed, adapt_delta=args.target_accept, show_progress=False)
 
     summ = fit.summary()
@@ -219,6 +248,7 @@ def main():
         "versionId": VERSION_ID,
         "datasetId": ds["id"],
         "method": f"Stan NUTS {args.chains}x{args.draws} accept {args.target_accept}",
+        "fidelity": "mcmc",
         "note": "",
         "diagnostics": {
             "maxRhat": float(np.nanmax(summ.loc[rows, rhat_col])),

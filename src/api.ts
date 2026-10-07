@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { State } from "../shared/contracts.ts";
+import type { Job, State } from "../shared/contracts.ts";
 
 export class ApiError extends Error {
   problems: string[];
@@ -25,7 +25,8 @@ export async function post<T = unknown>(path: string, body?: unknown): Promise<T
   return json as T;
 }
 
-type Loaded = { status: "ready"; state: State; agentConnected: boolean; dataPath: string };
+export type LadderInfo = { enabled: boolean; reason: string; jobs: Job[] };
+type Loaded = { status: "ready"; state: State; agentConnected: boolean; dataPath: string; ladder: LadderInfo };
 export type AppData = { status: "loading" } | { status: "error"; message: string } | Loaded;
 
 // The server is the source of truth. The page re-reads it whenever the stream says something changed.

@@ -16,6 +16,7 @@ import {
   HumanIntentInput,
 } from "../shared/contracts.ts";
 import { HttpError, Store, type ChangeEvent } from "./store.ts";
+import { Ladder } from "./ladder.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const dev = process.argv.includes("--dev");
@@ -33,6 +34,8 @@ function broadcast(e: ChangeEvent) {
   for (const res of agentStreams) res.write(chunk);
 }
 store.subscribe(broadcast);
+const ladder = new Ladder(store, join(root, "work", "auto"), () => broadcast({ kind: "job" }));
+const ladderInfo = () => ({ enabled: ladder.enabled, reason: ladder.reason, jobs: ladder.jobs });
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -54,7 +57,23 @@ function send(res: ServerResponse, status: number, body: unknown) {
 type Route = { method: string; pattern: RegExp; handle: (m: RegExpMatchArray, body: () => Promise<unknown>) => unknown };
 
 const routes: Route[] = [
-  { method: "GET", pattern: /^\/api\/state$/, handle: () => ({ state: store.state, agentConnected: agentStreams.size > 0, dataPath }) },
+  { method: "GET", pattern: /^\/api\/state$/, handle: () => ({ state: store.state, agentConnected: agentStreams.size > 0, dataPath, ladder: ladderInfo() }) },
+  {
+    method: "POST",
+    pattern: /^\/api\/human\/ladder\/retry\/([\w-]+)$/,
+    handle: (m) => {
+      ladder.retry(m[1]);
+      return ladderInfo();
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/human\/ladder$/,
+    handle: async (_, b) => {
+      ladder.setEnabled(Boolean(((await b()) as { enabled?: boolean }).enabled));
+      return ladderInfo();
+    },
+  },
   { method: "POST", pattern: /^\/api\/human\/example$/, handle: async (_, b) => store.startExample(HumanExampleInput.parse(await b()).exampleId) },
   { method: "POST", pattern: /^\/api\/human\/intents$/, handle: async (_, b) => store.createIntent(HumanIntentInput.parse(await b())) },
   {
@@ -74,7 +93,7 @@ const routes: Route[] = [
   { method: "POST", pattern: /^\/api\/human\/proposals\/([\w-]+)\/adopt$/, handle: (m) => store.adopt(m[1]) },
   { method: "POST", pattern: /^\/api\/human\/proposals\/([\w-]+)\/reject$/, handle: (m) => store.reject(m[1]) },
   { method: "POST", pattern: /^\/api\/human\/versions\/([\w-]+)\/revert$/, handle: (m) => store.revert(m[1]) },
-  { method: "GET", pattern: /^\/api\/agent\/overview$/, handle: () => store.overview() },
+  { method: "GET", pattern: /^\/api\/agent\/overview$/, handle: () => ({ ...store.overview(), backgroundInference: ladderInfo() }) },
   { method: "GET", pattern: /^\/api\/agent\/intents$/, handle: () => store.pendingIntents() },
   {
     method: "POST",

@@ -559,7 +559,8 @@ export class Store {
     return { backend, files: { "model.py": code }, entry: "model.py", uvWith: ["numpyro", "jax"], warnings, dataset };
   }
 
-  attachRun(input: z.infer<typeof AgentRunInput>) {
+  attachRun(raw: z.input<typeof AgentRunInput>, origin: "auto" | "agent" = "agent") {
+    const input = AgentRunInput.parse(raw);
     const v = this.version(input.versionId);
     const ds = this.dataset(input.datasetId);
     if (ds.modelId !== v.modelId) throw new HttpError(400, "データセットと版が別のモデルです");
@@ -584,7 +585,7 @@ export class Store {
     if (problems.length) throw new HttpError(400, "run が版・データと合いません", problems);
     return this.change(
       (d) => {
-        const run: Run = { ...input, id: newId("run"), modelId: v.modelId, createdAt: now() };
+        const run: Run = { ...input, origin, id: newId("run"), modelId: v.modelId, createdAt: now() };
         d.runs.push(run);
         return run;
       },
