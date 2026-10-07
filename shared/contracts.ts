@@ -109,6 +109,10 @@ export const ModelVersionSchema = z.object({
     z.object({ kind: z.literal("proposal"), proposalId: z.string(), knowledgeIds: z.array(z.string()) }),
     z.object({ kind: z.literal("example"), exampleId: z.string() }),
     z.object({ kind: z.literal("revert"), toVersionId: z.string() }),
+    z.object({ kind: z.literal("capsule"), source: z.object({
+      modelId: z.string(), versionId: z.string(), versionNumber: z.number().int().positive(),
+      datasetId: z.string(), runId: z.string(), createdAt: z.string(),
+    }) }),
   ]),
   summary: z.string(),
 });

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { IconArrowBackUp, IconCopy, IconEye } from "@tabler/icons-react";
-import { KIND_LABELS, ROLE_LABELS, type Knowledge, type ModelSpec, type Proposal, type State } from "../shared/contracts.ts";
+import { KIND_LABELS, ROLE_LABELS, type Knowledge, type ModelSpec, type ModelVersion, type Proposal, type State } from "../shared/contracts.ts";
 import { compileSpec, diffSpecs, drawCount, simulateWorlds, viewPoints } from "../shared/sim.ts";
 import { post, useAction, type ApiError } from "./api.ts";
 import { fmt } from "./format.ts";
@@ -21,6 +21,24 @@ export function ErrorNote({ error }: { error: ApiError | null }) {
       )}
     </div>
   );
+}
+
+export function CapsuleOrigin({ version }: { version: ModelVersion }) {
+  if (version.origin.kind !== "capsule") return null;
+  const source = version.origin.source;
+  return <aside className="card stack" aria-label="カプセルの取り込み元" style={{ overflowWrap: "anywhere", minWidth: 0 }}>
+    <strong>カプセルから作った独立コピー · このモデルのv{version.number}</strong>
+    <p className="small muted">元の提案・知識・巻き戻し履歴は復元していません。</p>
+    <details>
+      <summary style={{ minHeight: 44, padding: "10px 0", cursor: "pointer" }}>取り込み元の参照を確認</summary>
+      <div className="stack">
+        <p className="small">取り込み元モデル: {source.modelId} / 元の版: v{source.versionNumber}（{source.versionId}）</p>
+        <p className="small">元Dataset: {source.datasetId} / 元run: {source.runId}</p>
+        <p className="small">元の版の作成日時: {source.createdAt}</p>
+        <p className="small muted">既存モデルを書き換えず、版・データ・runを新しいIDで保存しています。</p>
+      </div>
+    </details>
+  </aside>;
 }
 
 export function ModelSummary({ spec }: { spec: ModelSpec }) {
@@ -282,6 +300,7 @@ export function VersionList({ state, modelId }: { state: State; modelId: string 
               <span className="muted small">{new Date(v.createdAt).toLocaleString("ja-JP")}</span>
             </header>
             <p>{v.summary}</p>
+            {v.origin.kind === "capsule" && <CapsuleOrigin version={v}/>}
             {sources.length > 0 && <p className="from-knowledge">根拠: {sources.map((s) => `「${s}」`).join(" ")}</p>}
             {!isCurrent && (
               <div className="row-actions end">

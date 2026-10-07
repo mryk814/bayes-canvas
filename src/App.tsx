@@ -5,10 +5,11 @@ import { EXAMPLES } from "../shared/example.ts";
 import { compileSpec, datasetPoints, drawCount, runInputs, simulateWorld, viewPoints, type World } from "../shared/sim.ts";
 import { post, useAction, useAppData, useStoredState } from "./api.ts";
 import { DraftTray, IntentCard } from "./Conversation.tsx";
-import { ErrorNote, EvidenceList, KnowledgeList, ModelSummary, ProposalCard, VersionList } from "./Ledger.tsx";
+import { CapsuleOrigin, ErrorNote, EvidenceList, KnowledgeList, ModelSummary, ProposalCard, VersionList } from "./Ledger.tsx";
 import { Stage, type Focus, type Source, type StageMode } from "./Stage.tsx";
 import { sharedDomains, type Tool } from "./WorldPlot.tsx";
 import { ModelTools } from "./ModelTools.tsx";
+import { Capsule } from "./Capsule.tsx";
 
 const WORLD_COUNT = 12;
 
@@ -100,8 +101,12 @@ function Workspace({ state, agentConnected, dataPath, live }: { state: State; ag
 
 // One selection owns both views; hiding a view preserves its unfinished inputs.
 function ModelSession({ state, modelId, agentConnected, toolsOpen }: { state: State; modelId: string; agentConnected: boolean; toolsOpen: boolean }) {
-  const [runId, setRunId] = useStoredState<string | null>(`possible-worlds:run:${modelId}`, null);
+  const model = state.models.find(item => item.id === modelId)!;
+  const current = state.versions.find(item => item.id === model.currentVersionId)!;
+  const importedRun = current.origin.kind === "capsule" ? state.runs.find(item => item.modelId === modelId && item.versionId === current.id) : null;
+  const [runId, setRunId] = useStoredState<string | null>(`possible-worlds:run:${modelId}`, importedRun?.id ?? null);
   return <>
+    {current.origin.kind === "capsule" && <div style={{ padding: "12px 16px" }}><CapsuleOrigin version={current}/></div>}
     <div hidden={toolsOpen}><ModelWorkspace state={state} modelId={modelId} agentConnected={agentConnected} runId={runId} onRun={setRunId}/></div>
     <div hidden={!toolsOpen}><ModelTools state={state} modelId={modelId} runId={runId} onRun={setRunId} active={toolsOpen}/></div>
   </>;
@@ -335,6 +340,7 @@ function EmptyState({ state, onCancel }: { state: State; onCancel: (() => void) 
             </button>
           ))}
         </div>
+        <Capsule version={null} dataset={null} run={null}/>
         {proposals.length > 0 && (
           <div className="stack">
             <h3 className="section-title">Claude からの新しいモデルの提案</h3>

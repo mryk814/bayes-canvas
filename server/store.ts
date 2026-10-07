@@ -37,6 +37,7 @@ import { stanProgram } from "../shared/stan.ts";
 import { migrate } from "./migrate.ts";
 import { datasetProblems, runProblems } from "../shared/evidence-validation.ts";
 import { evaluateSavedCheck } from "../shared/run-check.ts";
+import { readCapsule } from "../shared/capsule.ts";
 
 export class HttpError extends Error {
   status: number;
@@ -75,12 +76,13 @@ export class Store {
     return parsed.data;
   }
 
-  private commit(event: ChangeEvent) {
+  private commit(next: State, event: ChangeEvent) {
     mkdirSync(dirname(this.path), { recursive: true });
     const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify(this.state), "utf8");
+    writeFileSync(tmp, JSON.stringify(next), "utf8");
     if (existsSync(this.path)) copyFileSync(this.path, `${this.path}.bak`);
     renameSync(tmp, this.path);
+    this.state = next;
     for (const l of this.listeners) l(event);
   }
 
@@ -88,8 +90,7 @@ export class Store {
   private change<T>(fn: (draft: State) => T, event: (result: T) => ChangeEvent): T {
     const draft = structuredClone(this.state);
     const result = fn(draft);
-    this.state = StateSchema.parse(draft);
-    this.commit(event(result));
+    this.commit(StateSchema.parse(draft), event(result));
     return result;
   }
 
@@ -155,6 +156,28 @@ export class Store {
   }
 
   // ---- human side ------------------------------------------------------------
+
+  importCapsule(raw: unknown) {
+    const read = readCapsule(raw);
+    if (!read.ok) throw new HttpError(400, "カプセルを取り込めません", read.problems);
+    const source = read.capsule;
+    return this.change(d => {
+      const modelId = newId("mdl"), createdAt = now();
+      const version: ModelVersion = {
+        id: newId("ver"), modelId, number: 1, spec: source.modelVersion.spec, createdAt,
+        origin: { kind: "capsule", source: {
+          modelId: source.modelVersion.modelId, versionId: source.modelVersion.id, versionNumber: source.modelVersion.number,
+          datasetId: source.dataset.id, runId: source.run.id, createdAt: source.modelVersion.createdAt,
+        } },
+        summary: `カプセルから独立コピー: ${source.modelVersion.modelId} / ${source.modelVersion.id} (v${source.modelVersion.number})。提案・知識・版履歴は含みません。\n元の概要: ${source.modelVersion.summary}`,
+      };
+      const model: Model = { id: modelId, title: version.spec.title + "（カプセルのコピー）", createdAt, currentVersionId: version.id };
+      const dataset: Dataset = { ...source.dataset, id: newId("ds"), modelId };
+      const run: Run = { ...source.run, id: newId("run"), modelId, versionId: version.id, datasetId: dataset.id };
+      d.models.push(model); d.versions.push(version); d.datasets.push(dataset); d.runs.push(run);
+      return { model, version, dataset, run };
+    }, result => ({ kind: "model", id: result.model.id }));
+  }
 
   startExample(exampleId: string) {
     const ex = EXAMPLES.find((e) => e.id === exampleId);
