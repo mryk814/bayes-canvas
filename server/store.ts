@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   AgentDatasetInput,
   AgentProposeInput,
@@ -39,6 +39,12 @@ import { migrate } from "./migrate.ts";
 import { datasetProblems, runProblems } from "../shared/evidence-validation.ts";
 import { evaluateSavedCheck } from "../shared/run-check.ts";
 import { readCapsule } from "../shared/capsule.ts";
+import { buildPriorSpec } from "../shared/prior-workbench.ts";
+
+const PriorProposalInput = z.object({
+  baseVersionId: z.string().min(1), nodeName: z.string().min(1),
+  args: z.record(z.string(), z.number().finite()), reason: z.string().trim().min(1).max(2000),
+}).strict();
 
 export class HttpError extends Error {
   status: number;
@@ -157,6 +163,16 @@ export class Store {
   }
 
   // ---- human side ------------------------------------------------------------
+
+  proposePrior(raw: unknown) {
+    const input = PriorProposalInput.parse(raw);
+    const base = this.version(input.baseVersionId);
+    if (this.model(base.modelId).currentVersionId !== base.id) throw new HttpError(409, "priorは現在の版を基に提案してください");
+    let spec: ModelSpec;
+    try { spec = buildPriorSpec(base.spec, input.nodeName, input.args); }
+    catch (error) { throw new HttpError(400, error instanceof Error ? error.message : String(error)); }
+    return this.propose({ modelId: base.modelId, spec, summary: `${input.nodeName}のpriorを変更する提案: ${input.reason}`, knowledgeIds: [] });
+  }
 
   proposeQuestionContract(raw: unknown) {
     const input = HumanQuestionContractInput.parse(raw);
