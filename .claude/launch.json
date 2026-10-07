@@ -9,6 +9,19 @@
         "dev"
       ],
       "port": 5199
+    },
+    {
+      "name": "worlds-scratch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/main.ts",
+        "--dev"
+      ],
+      "env": {
+        "PORT": "5198",
+        "WORLDS_DATA": "work/worlds-test.json"
+      },
+      "port": 5198
     }
   ]
 }

@@ -5,9 +5,13 @@ import { readFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { ZodError } from "zod";
 import {
+  AgentDatasetInput,
   AgentProposeInput,
   AgentReplyInput,
+  AgentRunInput,
+  AgentSynthesizeInput,
   HumanChooseInput,
+  HumanExampleInput,
   HumanFollowUpInput,
   HumanIntentInput,
 } from "../shared/contracts.ts";
@@ -51,7 +55,7 @@ type Route = { method: string; pattern: RegExp; handle: (m: RegExpMatchArray, bo
 
 const routes: Route[] = [
   { method: "GET", pattern: /^\/api\/state$/, handle: () => ({ state: store.state, agentConnected: agentStreams.size > 0, dataPath }) },
-  { method: "POST", pattern: /^\/api\/human\/example$/, handle: () => store.startExample() },
+  { method: "POST", pattern: /^\/api\/human\/example$/, handle: async (_, b) => store.startExample(HumanExampleInput.parse(await b()).exampleId) },
   { method: "POST", pattern: /^\/api\/human\/intents$/, handle: async (_, b) => store.createIntent(HumanIntentInput.parse(await b())) },
   {
     method: "POST",
@@ -79,6 +83,17 @@ const routes: Route[] = [
   },
   { method: "POST", pattern: /^\/api\/agent\/reply$/, handle: async (_, b) => store.reply(AgentReplyInput.parse(await b())) },
   { method: "POST", pattern: /^\/api\/agent\/proposals$/, handle: async (_, b) => store.propose(AgentProposeInput.parse(await b())) },
+  { method: "POST", pattern: /^\/api\/agent\/datasets$/, handle: async (_, b) => store.attachDataset(AgentDatasetInput.parse(await b())) },
+  { method: "POST", pattern: /^\/api\/agent\/datasets\/synthesize$/, handle: async (_, b) => store.synthesize(AgentSynthesizeInput.parse(await b())) },
+  {
+    method: "POST",
+    pattern: /^\/api\/agent\/inference-bundle$/,
+    handle: async (_, b) => {
+      const { versionId, datasetId, backend } = (await b()) as { versionId: string; datasetId: string; backend?: "stan" | "numpyro" };
+      return store.inferenceBundle(versionId, datasetId, backend === "numpyro" ? "numpyro" : "stan");
+    },
+  },
+  { method: "POST", pattern: /^\/api\/agent\/runs$/, handle: async (_, b) => store.attachRun(AgentRunInput.parse(await b())) },
 ];
 
 function openStream(req: IncomingMessage, res: ServerResponse, agent: boolean) {

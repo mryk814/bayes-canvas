@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
-import { IconCopy, IconDownload, IconPlugConnected, IconPlugConnectedX } from "@tabler/icons-react";
+import { useEffect, useMemo, useState } from "react";
+import { IconCopy, IconDownload, IconPlus, IconPlugConnected, IconPlugConnectedX } from "@tabler/icons-react";
 import type { Mark, SceneRef, State } from "../shared/contracts.ts";
-import { compileSpec, simulateWorlds } from "../shared/sim.ts";
+import { EXAMPLES } from "../shared/example.ts";
+import { compileSpec, datasetPoints, drawCount, runInputs, simulateWorld, viewPoints, type World } from "../shared/sim.ts";
 import { post, useAction, useAppData, useStoredState } from "./api.ts";
 import { DraftTray, IntentCard } from "./Conversation.tsx";
-import { ErrorNote, KnowledgeList, ModelSummary, ProposalCard, VersionList } from "./Ledger.tsx";
-import { Stage, type Focus } from "./Stage.tsx";
-import { sharedYDomain, type Tool } from "./WorldPlot.tsx";
+import { ErrorNote, EvidenceList, KnowledgeList, ModelSummary, ProposalCard, VersionList } from "./Ledger.tsx";
+import { Stage, type Focus, type Source } from "./Stage.tsx";
+import { sharedDomains, type Tool } from "./WorldPlot.tsx";
 
 const WORLD_COUNT = 12;
 
@@ -20,54 +21,23 @@ export function App() {
   return <Workspace state={data.state} agentConnected={data.agentConnected} dataPath={data.dataPath} live={live} />;
 }
 
-type Tab = "talk" | "proposals" | "knowledge" | "model";
+type Tab = "talk" | "proposals" | "knowledge" | "evidence" | "model";
 
 function Workspace({ state, agentConnected, dataPath, live }: { state: State; agentConnected: boolean; dataPath: string; live: boolean }) {
-  const current = state.versions.find((v) => v.id === state.currentVersionId) ?? null;
-  const [seed, setSeed] = useStoredState("possible-worlds:seed", 1);
-  const [draft, setDraft] = useStoredState<Draft>("possible-worlds:draft", EMPTY_DRAFT);
-  const [focus, setFocus] = useState<Focus>(null);
-  const [tool, setTool] = useState<Tool>("look");
-  const [showObs, setShowObs] = useState(true);
-  const [tab, setTab] = useState<Tab>("talk");
-  const send = useAction();
+  const [modelId, setModelId] = useStoredState<string | null>("possible-worlds:model", null);
+  const [creating, setCreating] = useState(false);
+  const model = state.models.find((m) => m.id === modelId) ?? state.models[state.models.length - 1] ?? null;
+  const showEmpty = creating || !model;
 
-  const compiled = useMemo(() => (current ? compileSpec(current.spec) : null), [current]);
-  const worlds = useMemo(() => (compiled?.ok ? simulateWorlds(compiled.compiled, seed, WORLD_COUNT) : []), [compiled, seed]);
-  const yDomain = useMemo(() => sharedYDomain(worlds), [worlds]);
-
-  const scene: SceneRef | null = current ? { modelVersionId: current.id, seed } : null;
-  const draftMatches = draft.scene === null || (scene !== null && draft.scene.modelVersionId === scene.modelVersionId && draft.scene.seed === scene.seed);
-  const stageMarks = draftMatches ? draft.marks : [];
-
-  const addMark = (m: Mark) => {
-    if (!scene) return;
-    setDraft((d) => {
-      const base = d.scene ? d : { ...d, scene };
-      if (m.kind === "verdict") {
-        const existing = base.marks.find((x) => x.kind === "verdict" && x.world === m.world);
-        const others = base.marks.filter((x) => !(x.kind === "verdict" && x.world === m.world));
-        const same = existing?.kind === "verdict" && existing.verdict === m.verdict;
-        return { ...base, marks: same ? others : [...others, m] };
-      }
-      return { ...base, marks: [...base.marks, m] };
-    });
-  };
-
-  const sendDraft = () =>
-    send.run(async () => {
-      if (!scene) return;
-      await post("/api/human/intents", { scene: draft.scene ?? scene, marks: draft.marks, utterance: draft.utterance });
-      setDraft(EMPTY_DRAFT);
-      setTab("talk");
-    });
-
-  const intents = [...state.intents].reverse();
-  const open = intents.filter((i) => i.status === "pending" || i.status === "answered");
-  const closed = intents.filter((i) => i.status === "resolved" || i.status === "dismissed");
-  const proposals = state.proposals.filter((p) => p.status === "proposed");
-  const answered = state.intents.filter((i) => i.status === "answered").length;
-  const confirmed = state.knowledge.filter((k) => k.status === "confirmed").length;
+  // Follow a model the person just created.
+  const [knownModels, setKnownModels] = useState(state.models.length);
+  useEffect(() => {
+    if (state.models.length > knownModels) {
+      setModelId(state.models[state.models.length - 1].id);
+      setCreating(false);
+    }
+    if (state.models.length !== knownModels) setKnownModels(state.models.length);
+  }, [state.models, knownModels, setModelId]);
 
   return (
     <div className="app">
@@ -81,10 +51,28 @@ function Workspace({ state, agentConnected, dataPath, live }: { state: State; ag
             </svg>
           </span>
           <h1>Possible Worlds</h1>
-          {current && (
-            <span className="topbar-model">
-              <span className="num">v{current.number}</span> {current.spec.title}
-            </span>
+          {state.models.length > 0 && (
+            <select
+              className="model-switch"
+              aria-label="モデルを切り替える"
+              value={showEmpty ? "" : model!.id}
+              onChange={(e) => {
+                setModelId(e.target.value);
+                setCreating(false);
+              }}
+            >
+              {showEmpty && <option value="">新しいモデル</option>}
+              {state.models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.title}
+                </option>
+              ))}
+            </select>
+          )}
+          {state.models.length > 0 && !showEmpty && (
+            <button className="btn btn-quiet" onClick={() => setCreating(true)} title="新しいモデルを始める" aria-label="新しいモデルを始める">
+              <IconPlus size={16} />
+            </button>
           )}
         </div>
         <div className="topbar-right">
@@ -98,101 +86,201 @@ function Workspace({ state, agentConnected, dataPath, live }: { state: State; ag
           </a>
         </div>
       </header>
-
-      {!current ? (
-        <EmptyState proposals={proposals.length > 0} state={state} seed={seed} />
+      {showEmpty ? (
+        <EmptyState state={state} onCancel={state.models.length ? () => setCreating(false) : null} />
       ) : (
-        <main className="layout">
-          {compiled && !compiled.ok ? (
-            <div className="error-note">いまの版を描けません: {compiled.problems.join(" / ")}</div>
-          ) : (
-            <Stage
-              spec={current.spec}
-              versionNumber={current.number}
-              seed={seed}
-              worlds={worlds}
-              yDomain={yDomain}
-              marks={stageMarks}
-              focus={focus}
-              tool={tool}
-              showObs={showObs}
-              reseedBlocked={draft.marks.length > 0}
-              onFocus={(f) => {
-                setFocus(f);
-                setTool(f === "all" ? "sketch" : "look");
-              }}
-              onTool={setTool}
-              onShowObs={setShowObs}
-              onReseed={() => {
-                setSeed(Math.floor(Math.random() * 1e6));
-                setFocus(null);
-              }}
-              onMark={addMark}
-            />
-          )}
-
-          <aside className="side">
-            <nav className="tabs" role="tablist">
-              <TabButton id="talk" tab={tab} onTab={setTab} label="対話" count={answered} />
-              <TabButton id="proposals" tab={tab} onTab={setTab} label="提案" count={proposals.length} />
-              <TabButton id="knowledge" tab={tab} onTab={setTab} label="知識" count={confirmed} quiet />
-              <TabButton id="model" tab={tab} onTab={setTab} label="モデルと版" />
-            </nav>
-            <div className="tab-body">
-              {tab === "talk" && (
-                <div className="stack">
-                  {!draftMatches && draft.marks.length > 0 && (
-                    <p className="warn-note">
-                      このメモは別の版または seed の世界を指しています。そのまま渡すと、指した時点の世界として Claude に伝わります。
-                    </p>
-                  )}
-                  <DraftTray
-                    spec={current.spec}
-                    marks={draft.marks}
-                    utterance={draft.utterance}
-                    onUtterance={(u) => setDraft((d) => ({ ...d, utterance: u }))}
-                    onRemove={(i) => setDraft((d) => ({ ...d, marks: d.marks.filter((_, k) => k !== i) }))}
-                    onClear={() => setDraft(EMPTY_DRAFT)}
-                    onSend={sendDraft}
-                    busy={send.busy}
-                    error={send.error}
-                  />
-                  {open.map((i) => (
-                    <IntentCard key={i.id} intent={i} state={state} agentConnected={agentConnected} />
-                  ))}
-                  {closed.length > 0 && (
-                    <details className="history">
-                      <summary>済んだ対話 {closed.length} 件</summary>
-                      <div className="stack">
-                        {closed.map((i) => (
-                          <IntentCard key={i.id} intent={i} state={state} agentConnected={agentConnected} />
-                        ))}
-                      </div>
-                    </details>
-                  )}
-                </div>
-              )}
-              {tab === "proposals" && (
-                <div className="stack">
-                  {proposals.length === 0 && <p className="empty-note">開いている提案はありません。候補を選ぶか、Claude Code に変更を頼むとここに届きます。</p>}
-                  {proposals.map((p) => (
-                    <ProposalCard key={p.id} proposal={p} state={state} seed={seed} />
-                  ))}
-                </div>
-              )}
-              {tab === "knowledge" && <KnowledgeList state={state} />}
-              {tab === "model" && (
-                <div className="stack">
-                  <ModelSummary spec={current.spec} />
-                  <h3 className="section-title">版の履歴</h3>
-                  <VersionList state={state} />
-                </div>
-              )}
-            </div>
-          </aside>
-        </main>
+        <ModelWorkspace key={model!.id} state={state} modelId={model!.id} agentConnected={agentConnected} />
       )}
     </div>
+  );
+}
+
+function ModelWorkspace({ state, modelId, agentConnected }: { state: State; modelId: string; agentConnected: boolean }) {
+  const model = state.models.find((m) => m.id === modelId)!;
+  const current = state.versions.find((v) => v.id === model.currentVersionId)!;
+  const [seed, setSeed] = useStoredState(`possible-worlds:seed:${modelId}`, 1);
+  const [runId, setRunId] = useStoredState<string | null>(`possible-worlds:run:${modelId}`, null);
+  const [draft, setDraft] = useStoredState<Draft>(`possible-worlds:draft:${modelId}`, EMPTY_DRAFT);
+  const [focus, setFocus] = useState<Focus>(null);
+  const [opened, setOpened] = useState<number | null>(null);
+  const [tool, setTool] = useState<Tool>("look");
+  const [showObs, setShowObs] = useState(true);
+  const [tab, setTab] = useState<Tab>("talk");
+  const send = useAction();
+
+  const run = state.runs.find((r) => r.id === runId && r.modelId === modelId) ?? null;
+  const dataset = run ? (state.datasets.find((d) => d.id === run.datasetId) ?? null) : null;
+  // A run is shown with the version it was computed for, never silently with the current one.
+  const viewVersion = run ? (state.versions.find((v) => v.id === run.versionId) ?? current) : current;
+  const source: Source = run && dataset ? { kind: "run", run, dataset, stale: run.versionId !== current.id } : { kind: "prior" };
+
+  const compiled = useMemo(() => compileSpec(viewVersion.spec), [viewVersion]);
+  const worlds: World[] = useMemo(() => {
+    if (!compiled.ok) return [];
+    const c = compiled.compiled;
+    if (!run || !dataset) return Array.from({ length: WORLD_COUNT }, (_, i) => simulateWorld(c, seed, i));
+    const K = drawCount(run);
+    const picks = [...new Set(Array.from({ length: Math.min(WORLD_COUNT, K) }, (_, j) => Math.round((j * (K - 1)) / Math.max(1, WORLD_COUNT - 1))))];
+    return picks.map((k) => simulateWorld(c, seed, k, runInputs(c, run, dataset, k)));
+  }, [compiled, seed, run, dataset]);
+  const points = useMemo(() => (compiled.ok ? worlds.map((w) => viewPoints(compiled.compiled, w)) : []), [compiled, worlds]);
+  const data = useMemo(
+    () => (compiled.ok && dataset && worlds[0] ? datasetPoints(compiled.compiled, dataset, worlds[0]) : []),
+    [compiled, worlds, dataset],
+  );
+  const domains = useMemo(() => sharedDomains(points, data), [points, data]);
+
+  const scene: SceneRef = { modelVersionId: viewVersion.id, seed, runId: run?.id ?? null };
+  const draftMatches =
+    draft.scene === null ||
+    (draft.scene.modelVersionId === scene.modelVersionId && draft.scene.seed === scene.seed && draft.scene.runId === scene.runId);
+  const stageMarks = draftMatches ? draft.marks : [];
+
+  const addMark = (m: Mark) => {
+    setDraft((d) => {
+      const base = d.scene ? d : { ...d, scene };
+      const same = (x: Mark) =>
+        (m.kind === "verdict" && x.kind === "verdict" && x.world === m.world) ||
+        (m.kind === "point" && x.kind === "point" && x.world === m.world && x.unit === m.unit) ||
+        (m.kind === "layer" && x.kind === "layer" && x.world === m.world && x.unit === m.unit && x.node === m.node);
+      if (m.kind === "verdict" || m.kind === "point" || m.kind === "layer") {
+        const existing = base.marks.find(same);
+        const others = base.marks.filter((x) => !same(x));
+        const toggledOff = !!existing && (existing.kind !== "verdict" || (m.kind === "verdict" && existing.verdict === m.verdict));
+        return { ...base, marks: toggledOff ? others : [...others, m] };
+      }
+      return { ...base, marks: [...base.marks, m] };
+    });
+  };
+
+  const sendDraft = () =>
+    send.run(async () => {
+      await post("/api/human/intents", { scene: draft.scene ?? scene, marks: draft.marks, utterance: draft.utterance });
+      setDraft(EMPTY_DRAFT);
+      setTab("talk");
+    });
+
+  const intents = state.intents.filter((i) => i.modelId === modelId).reverse();
+  const open = intents.filter((i) => i.status === "pending" || i.status === "answered");
+  const closed = intents.filter((i) => i.status === "resolved" || i.status === "dismissed");
+  const proposals = state.proposals.filter((p) => p.status === "proposed" && p.modelId === modelId);
+  const answered = intents.filter((i) => i.status === "answered").length;
+  const confirmed = state.knowledge.filter((k) => k.modelId === modelId && k.status === "confirmed").length;
+  const runs = state.runs.filter((r) => r.modelId === modelId);
+  const runOptions = runs
+    .slice()
+    .reverse()
+    .map((r) => {
+      const v = state.versions.find((x) => x.id === r.versionId);
+      return { id: r.id, label: `事後 · v${v?.number} · ${r.method}${r.versionId !== current.id ? " · 旧版" : ""}` };
+    });
+  const freshRuns = runs.filter((r) => r.versionId === current.id).length;
+  const showRun = (id: string | null) => {
+    setRunId(id);
+    setFocus(null);
+    setOpened(null);
+  };
+
+  return (
+    <main className="layout">
+      {!compiled.ok ? (
+        <div className="error-note">この版を描けません: {compiled.problems.join(" / ")}</div>
+      ) : (
+        <Stage
+          compiled={compiled.compiled}
+          versionNumber={viewVersion.number}
+          seed={seed}
+          source={source}
+          runOptions={runOptions}
+          worlds={worlds}
+          points={points}
+          data={data}
+          domains={domains}
+          marks={stageMarks}
+          focus={focus}
+          tool={tool}
+          showObs={showObs}
+          reseedBlocked={draft.marks.length > 0}
+          opened={opened}
+          onSource={showRun}
+          onFocus={(f) => {
+            setFocus(f);
+            setOpened(null);
+            setTool(f === "all" ? "sketch" : "look");
+          }}
+          onTool={setTool}
+          onShowObs={setShowObs}
+          onReseed={() => {
+            setSeed(Math.floor(Math.random() * 1e6));
+            setFocus(null);
+            setOpened(null);
+          }}
+          onMark={addMark}
+          onOpen={setOpened}
+        />
+      )}
+
+      <aside className="side">
+        <nav className="tabs" role="tablist">
+          <TabButton id="talk" tab={tab} onTab={setTab} label="対話" count={answered} />
+          <TabButton id="proposals" tab={tab} onTab={setTab} label="提案" count={proposals.length} />
+          <TabButton id="knowledge" tab={tab} onTab={setTab} label="知識" count={confirmed} quiet />
+          <TabButton id="evidence" tab={tab} onTab={setTab} label="推論" count={freshRuns} quiet />
+          <TabButton id="model" tab={tab} onTab={setTab} label="モデル" />
+        </nav>
+        <div className="tab-body">
+          {tab === "talk" && (
+            <div className="stack">
+              {!draftMatches && draft.marks.length > 0 && (
+                <p className="warn-note">このメモは別の版・seed・run の世界を指しています。そのまま渡すと、指した時点の世界として Claude に伝わります。</p>
+              )}
+              <DraftTray
+                spec={viewVersion.spec}
+                posterior={source.kind === "run"}
+                marks={draft.marks}
+                utterance={draft.utterance}
+                onUtterance={(u) => setDraft((d) => ({ ...d, utterance: u }))}
+                onRemove={(i) => setDraft((d) => ({ ...d, marks: d.marks.filter((_, k) => k !== i) }))}
+                onClear={() => setDraft(EMPTY_DRAFT)}
+                onSend={sendDraft}
+                busy={send.busy}
+                error={send.error}
+              />
+              {open.map((i) => (
+                <IntentCard key={i.id} intent={i} state={state} agentConnected={agentConnected} />
+              ))}
+              {closed.length > 0 && (
+                <details className="history">
+                  <summary>済んだ対話 {closed.length} 件</summary>
+                  <div className="stack">
+                    {closed.map((i) => (
+                      <IntentCard key={i.id} intent={i} state={state} agentConnected={agentConnected} />
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+          {tab === "proposals" && (
+            <div className="stack">
+              {proposals.length === 0 && <p className="empty-note">開いている提案はありません。候補を選ぶか、Claude Code に変更を頼むとここに届きます。</p>}
+              {proposals.map((p) => (
+                <ProposalCard key={p.id} proposal={p} state={state} seed={seed} />
+              ))}
+            </div>
+          )}
+          {tab === "knowledge" && <KnowledgeList state={state} modelId={modelId} />}
+          {tab === "evidence" && <EvidenceList state={state} modelId={modelId} onShowRun={showRun} />}
+          {tab === "model" && (
+            <div className="stack">
+              <ModelSummary spec={current.spec} />
+              <h3 className="section-title">版の履歴</h3>
+              <VersionList state={state} modelId={modelId} />
+            </div>
+          )}
+        </div>
+      </aside>
+    </main>
   );
 }
 
@@ -205,18 +293,16 @@ function TabButton({ id, tab, onTab, label, count, quiet }: { id: Tab; tab: Tab;
   );
 }
 
-const START_PHRASE = "Possible Worlds に、温度と材料強度のモデルを提案してください";
+const START_PHRASE = "Possible Worlds に、私の問題に合うモデルを提案してください。";
 
-function EmptyState({ proposals, state, seed }: { proposals: boolean; state: State; seed: number }) {
+function EmptyState({ state, onCancel }: { state: State; onCancel: (() => void) | null }) {
   const { run, busy, error } = useAction();
-  const open = state.proposals.filter((p) => p.status === "proposed");
+  const proposals = state.proposals.filter((p) => p.status === "proposed" && p.modelId === null);
   return (
     <main className="empty">
       <div className="empty-inner">
-        <h2>まだモデルがありません</h2>
-        <p>
-          Claude Code にモデルを提案してもらうか、模式例から始めます。モデルが決まると、その prior から生まれる世界がここに並びます。
-        </p>
+        <h2>新しいモデルを始める</h2>
+        <p>Claude Code に問題を話してモデルを提案してもらうか、模式例から始めます。</p>
         <div className="copy-line">
           <code>{START_PHRASE}</code>
           <button className="btn btn-quiet" onClick={() => void navigator.clipboard.writeText(START_PHRASE)}>
@@ -224,15 +310,26 @@ function EmptyState({ proposals, state, seed }: { proposals: boolean; state: Sta
           </button>
         </div>
         <ErrorNote error={error} />
-        <button className="btn" disabled={busy} onClick={() => run(() => post("/api/human/example"))}>
-          模式例で始める
-        </button>
-        {proposals && (
+        <div className="examples">
+          {EXAMPLES.map((ex) => (
+            <button key={ex.id} className="example" disabled={busy} onClick={() => run(() => post("/api/human/example", { exampleId: ex.id }))}>
+              <strong>{ex.label}</strong>
+              <span className="muted small">{ex.summary}</span>
+            </button>
+          ))}
+        </div>
+        {proposals.length > 0 && (
           <div className="stack">
-            {open.map((p) => (
-              <ProposalCard key={p.id} proposal={p} state={state} seed={seed} />
+            <h3 className="section-title">Claude からの新しいモデルの提案</h3>
+            {proposals.map((p) => (
+              <ProposalCard key={p.id} proposal={p} state={state} seed={1} />
             ))}
           </div>
+        )}
+        {onCancel && (
+          <button className="btn btn-quiet" onClick={onCancel}>
+            戻る
+          </button>
         )}
       </div>
     </main>

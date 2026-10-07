@@ -1,10 +1,11 @@
 import { useMemo } from "react";
-import { IconArrowBackUp, IconCopy } from "@tabler/icons-react";
-import { KIND_LABELS, type Knowledge, type ModelSpec, type Proposal, type State } from "../shared/contracts.ts";
-import { compileSpec, diffSpecs, simulateWorlds } from "../shared/sim.ts";
+import { IconArrowBackUp, IconCopy, IconEye } from "@tabler/icons-react";
+import { KIND_LABELS, ROLE_LABELS, type Knowledge, type ModelSpec, type Proposal, type State } from "../shared/contracts.ts";
+import { compileSpec, diffSpecs, drawCount, simulateWorlds, viewPoints } from "../shared/sim.ts";
 import { post, useAction, type ApiError } from "./api.ts";
-import { distTex, exprHtml, texHtml, texName } from "./tex.ts";
-import { WorldPlot, sharedYDomain } from "./WorldPlot.tsx";
+import { fmt } from "./format.ts";
+import { nodeHtml } from "./tex.ts";
+import { WorldPlot, sharedDomains } from "./WorldPlot.tsx";
 
 export function ErrorNote({ error }: { error: ApiError | null }) {
   if (!error) return null;
@@ -23,29 +24,41 @@ export function ErrorNote({ error }: { error: ApiError | null }) {
 }
 
 export function ModelSummary({ spec }: { spec: ModelSpec }) {
-  const noise = spec.noise.family === "studentt" ? `\\operatorname{StudentT}_{${spec.noise.nu}}` : "\\operatorname{Normal}";
+  const groups: { key: string; title: string }[] = [
+    { key: "", title: "全体で一つ" },
+    ...spec.plates.map((p) => ({ key: p.name, title: `${p.label}ごと（既定 ${p.size}）` })),
+  ];
   return (
     <div className="model-summary">
       <h3>{spec.title}</h3>
       {spec.question && <p className="muted">{spec.question}</p>}
-      <div className="formula" dangerouslySetInnerHTML={{ __html: texHtml(`${texName(spec.y.name)} \\sim ${noise}(\\mu, \\sigma_y)`) }} />
-      <div className="formula">
-        <span dangerouslySetInnerHTML={{ __html: texHtml("\\mu =") }} /> <span dangerouslySetInnerHTML={{ __html: exprHtml(spec.mean) }} />
-      </div>
-      <div className="formula">
-        <span dangerouslySetInnerHTML={{ __html: texHtml("\\sigma_y =") }} /> <span dangerouslySetInnerHTML={{ __html: exprHtml(spec.noise.sigma) }} />
-      </div>
-      <table className="prior-table">
-        <tbody>
-          {spec.params.map((p) => (
-            <tr key={p.name}>
-              <th>{p.label}</th>
-              <td dangerouslySetInnerHTML={{ __html: texHtml(`${texName(p.name)} \\sim ${distTex(p.prior)}`) }} />
-              <td className="muted">{p.unit}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {spec.data.length > 0 && (
+        <p className="small muted">
+          既知の入力: {spec.data.map((d) => `${d.label}（${d.name}${d.indexOf ? ` → ${d.indexOf}` : ""}）`).join("、")}
+        </p>
+      )}
+      {groups.map((g) => {
+        const nodes = spec.nodes.filter((n) => (n.plate ?? "") === g.key);
+        if (!nodes.length) return null;
+        return (
+          <div key={g.key} className="node-group">
+            <h4>{g.title}</h4>
+            <table className="prior-table">
+              <tbody>
+                {nodes.map((n) => (
+                  <tr key={n.name}>
+                    <th>
+                      <span className={`role-chip role-${n.role}`}>{ROLE_LABELS[n.role]}</span> {n.label}
+                      {n.note && <div className="muted small">{n.note}</div>}
+                    </th>
+                    <td dangerouslySetInnerHTML={{ __html: nodeHtml(n) }} />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -81,53 +94,56 @@ export function SideBySide({ before, after, seed }: { before: ModelSpec | null; 
     const b = before ? compileSpec(before) : null;
     const a = compileSpec(after);
     if (!a.ok) return { ok: false as const, problems: a.problems };
-    const aw = simulateWorlds(a.compiled, seed, 6);
-    const bw = b?.ok ? simulateWorlds(b.compiled, seed, 6) : [];
-    return { ok: true as const, aw, bw, y: sharedYDomain([...aw, ...bw]) };
+    const ap = simulateWorlds(a.compiled, seed, 6).map((w) => viewPoints(a.compiled, w));
+    const bp = b?.ok ? simulateWorlds(b.compiled, seed, 6).map((w) => viewPoints(b.compiled, w)) : [];
+    return { ok: true as const, ap, bp, domains: sharedDomains([...ap, ...bp]) };
   }, [before, after, seed]);
   if (!result.ok) return <p className="error-note">この案は描けません: {result.problems.join(" / ")}</p>;
-  const row = (label: string, spec: ModelSpec, worlds: typeof result.aw) => (
+  const row = (label: string, pts: typeof result.ap) => (
     <div className="sbs-row">
       <span className="sbs-label">{label}</span>
       <div className="sbs-worlds">
-        {worlds.map((w) => (
-          <WorldPlot key={w.index} spec={spec} worlds={[w]} yDomain={result.y} width={160} height={92} />
+        {pts.map((w, i) => (
+          <WorldPlot key={i} points={[w]} domains={result.domains} width={160} height={92} />
         ))}
       </div>
     </div>
   );
   return (
     <div className="sbs" aria-label="同じ seed で今の版と提案を比べる">
-      {before && result.bw.length > 0 && row("いま", before, result.bw)}
-      {row("提案", after, result.aw)}
-      <p className="muted small">同じ seed・同じ縦軸で描いています。パラメータの数が変わると、同じ番号でも別の世界になります。</p>
+      {result.bp.length > 0 && row("いま", result.bp)}
+      {row("提案", result.ap)}
+      <p className="muted small">同じ seed・同じ縦軸の prior の世界です。ノードの数や順が変わると、同じ番号でも別の世界になります。</p>
     </div>
   );
 }
 
 export function ProposalCard({ proposal, state, seed }: { proposal: Proposal; state: State; seed: number }) {
   const { run, busy, error } = useAction();
-  const current = state.versions.find((v) => v.id === state.currentVersionId) ?? null;
-  const stale = proposal.baseVersionId !== state.currentVersionId;
+  const model = state.models.find((m) => m.id === proposal.modelId) ?? null;
+  const current = model ? (state.versions.find((v) => v.id === model.currentVersionId) ?? null) : null;
+  const stale = model !== null && proposal.baseVersionId !== model.currentVersionId;
   const sources = proposal.knowledgeIds.map((id) => state.knowledge.find((k) => k.id === id)).filter(Boolean) as Knowledge[];
+  const invalidated = current ? state.runs.filter((r) => r.versionId === current.id) : [];
   return (
     <article className="card proposal">
       <header>
-        <span className="badge badge-proposal">提案</span>
+        <span className="badge badge-proposal">{model ? "変更の提案" : "新しいモデルの提案"}</span>
         <h3>{proposal.summary}</h3>
       </header>
-      {sources.length > 0 && (
-        <p className="from-knowledge">
-          根拠: {sources.map((k) => `「${k.statement}」`).join(" ")}
-        </p>
-      )}
+      {sources.length > 0 && <p className="from-knowledge">根拠: {sources.map((k) => `「${k.statement}」`).join(" ")}</p>}
       <SpecDiff before={current?.spec ?? null} after={proposal.spec} />
       <SideBySide before={current?.spec ?? null} after={proposal.spec} seed={seed} />
+      {invalidated.length > 0 && !stale && (
+        <p className="warn-note">
+          採用すると、今の版で計算した run {invalidated.length} 件は「旧版の結果」になります。新しい版で推論し直すまで、事後の世界は古い仮定のものです。
+        </p>
+      )}
       {stale && <p className="warn-note">この提案は別の版を基にしています。採用するには Claude に今の版で出し直してもらってください。</p>}
       <ErrorNote error={error} />
       <div className="row-actions">
         <button className="btn btn-primary" disabled={busy || stale} onClick={() => run(() => post(`/api/human/proposals/${proposal.id}/adopt`))}>
-          この版を採用する
+          {model ? "この版を採用する" : "このモデルで始める"}
         </button>
         <button className="btn" disabled={busy} onClick={() => run(() => post(`/api/human/proposals/${proposal.id}/reject`))}>
           見送る
@@ -137,12 +153,13 @@ export function ProposalCard({ proposal, state, seed }: { proposal: Proposal; st
   );
 }
 
-export function KnowledgeList({ state }: { state: State }) {
+export function KnowledgeList({ state, modelId }: { state: State; modelId: string }) {
   const { run, busy, error } = useAction();
-  const items = [...state.knowledge].reverse();
+  const items = state.knowledge.filter((k) => k.modelId === modelId).reverse();
   const copy = () => {
-    const md = state.knowledge
+    const md = items
       .filter((k) => k.status === "confirmed")
+      .reverse()
       .map((k) => `- [${KIND_LABELS[k.kind]}] ${k.statement}`)
       .join("\n");
     void navigator.clipboard.writeText(md);
@@ -165,6 +182,7 @@ export function KnowledgeList({ state }: { state: State }) {
             <header>
               <span className={`badge kind-${k.kind}`}>{KIND_LABELS[k.kind]}</span>
               {k.status === "withdrawn" && <span className="badge">取り下げ</span>}
+              {k.scene?.runId && <span className="badge badge-posterior">事後の世界で指した</span>}
               {usedIn.map((v) => (
                 <span key={v.id} className="badge badge-version">
                   v{v.number} に反映
@@ -188,18 +206,74 @@ export function KnowledgeList({ state }: { state: State }) {
   );
 }
 
-export function VersionList({ state }: { state: State }) {
+export function EvidenceList({ state, modelId, onShowRun }: { state: State; modelId: string; onShowRun: (runId: string) => void }) {
+  const model = state.models.find((m) => m.id === modelId)!;
+  const datasets = state.datasets.filter((d) => d.modelId === modelId);
+  const runs = state.runs.filter((r) => r.modelId === modelId).reverse();
+  if (!datasets.length && !runs.length) {
+    return (
+      <p className="empty-note">
+        データと推論の結果はまだありません。Claude Code に「データを付けて推論して」と頼むと、NumPyro で計算した結果がここに届きます。
+      </p>
+    );
+  }
+  return (
+    <div className="stack">
+      {runs.map((r) => {
+        const v = state.versions.find((x) => x.id === r.versionId);
+        const ds = datasets.find((d) => d.id === r.datasetId);
+        const stale = r.versionId !== model.currentVersionId;
+        const d = r.diagnostics;
+        return (
+          <article key={r.id} className="card run">
+            <header>
+              <span className="badge badge-posterior">run</span>
+              <span className="num">v{v?.number}</span>
+              {stale && <span className="badge badge-warn">旧版の結果</span>}
+              <span className="muted small">{new Date(r.createdAt).toLocaleString("ja-JP")}</span>
+            </header>
+            <p className="small">
+              {r.method} · {drawCount(r)} draws · データ「{ds?.label}」
+            </p>
+            <p className="small mono">
+              R̂ ≤ {d.maxRhat === null ? "?" : fmt(d.maxRhat)} · ESS ≥ {d.minEss === null ? "?" : Math.round(d.minEss)} · 発散 {d.divergences ?? "?"}
+            </p>
+            <div className="row-actions end">
+              <button className="btn btn-quiet" onClick={() => onShowRun(r.id)}>
+                <IconEye size={16} /> この run の世界を見る
+              </button>
+            </div>
+          </article>
+        );
+      })}
+      {datasets.map((d) => (
+        <article key={d.id} className="card dataset">
+          <header>
+            <span className={`badge ${d.provenance === "synthetic" ? "badge-illustrative" : "badge-data"}`}>{d.provenance === "synthetic" ? "合成データ" : "実データ"}</span>
+            <strong>{d.label}</strong>
+          </header>
+          <p className="small muted">
+            {Object.entries(d.plates)
+              .map(([k, v]) => `${k} ${v}`)
+              .join(" · ")}
+            {d.note && ` · ${d.note}`}
+          </p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+export function VersionList({ state, modelId }: { state: State; modelId: string }) {
   const { run, busy, error } = useAction();
-  const versions = [...state.versions].reverse();
+  const model = state.models.find((m) => m.id === modelId)!;
+  const versions = state.versions.filter((v) => v.modelId === modelId).reverse();
   return (
     <div className="stack">
       <ErrorNote error={error} />
       {versions.map((v) => {
-        const isCurrent = v.id === state.currentVersionId;
-        const sources =
-          v.origin.kind === "proposal"
-            ? v.origin.knowledgeIds.map((id) => state.knowledge.find((k) => k.id === id)?.statement).filter(Boolean)
-            : [];
+        const isCurrent = v.id === model.currentVersionId;
+        const sources = v.origin.kind === "proposal" ? v.origin.knowledgeIds.map((id) => state.knowledge.find((k) => k.id === id)?.statement).filter(Boolean) : [];
         return (
           <article key={v.id} className={`card version ${isCurrent ? "is-current" : ""}`}>
             <header>

@@ -3,19 +3,24 @@ import { IconCopy, IconSend, IconTrash, IconX } from "@tabler/icons-react";
 import { KIND_LABELS, type Candidate, type Intent, type Mark, type ModelSpec, type State } from "../shared/contracts.ts";
 import { post, useAction } from "./api.ts";
 import { ErrorNote, SideBySide, SpecDiff } from "./Ledger.tsx";
-import { pad } from "./Stage.tsx";
+import { pad } from "./format.ts";
 
 export const ASK_PHRASE = "Possible Worlds に届いた意図を見て、候補を返してください";
 
-export function markLabel(m: Mark, spec: ModelSpec | null) {
-  const where = m.world === null ? "重ね表示" : `世界 ${pad(m.world)}`;
+export function markLabel(m: Mark, spec: ModelSpec | null, posterior = false) {
+  const where = m.world === null ? "重ね表示" : posterior ? `draw ${m.world}` : `世界 ${pad(m.world)}`;
+  const nodeLabel = (name: string) => spec?.nodes.find((n) => n.name === name)?.label ?? name;
   if (m.kind === "verdict") return `${where} · ${m.verdict === "implausible" ? "あり得ない" : "あり得る"}`;
   if (m.kind === "sketch") return `${where} · なぞり線`;
-  return `${where} · ${spec?.x.name ?? "x"} ${m.from}–${m.to}${spec?.x.unit ? ` ${spec.x.unit}` : ""}`;
+  if (m.kind === "point") return `${where} · 点 ${m.unit}`;
+  if (m.kind === "layer") return `${where} · 点 ${m.unit} の「${nodeLabel(m.node)}」`;
+  const x = spec ? [...spec.data, ...spec.nodes].find((n) => n.name === spec.view.x) : null;
+  return `${where} · ${x?.label ?? "x"} ${m.from}–${m.to}${x?.unit ? ` ${x.unit}` : ""}`;
 }
 
 type DraftProps = {
   spec: ModelSpec;
+  posterior: boolean;
   marks: Mark[];
   utterance: string;
   onUtterance: (s: string) => void;
@@ -36,7 +41,7 @@ export function DraftTray(p: DraftProps) {
         <ul className="chips">
           {p.marks.map((m, i) => (
             <li key={i} className={`chip chip-${m.kind}`}>
-              {markLabel(m, p.spec)}
+              {markLabel(m, p.spec, p.posterior)}
               <button className="chip-x" aria-label="このしるしを外す" onClick={() => p.onRemove(i)}>
                 <IconX size={12} />
               </button>
@@ -75,6 +80,9 @@ export function IntentCard({ intent, state, agentConnected }: { intent: Intent; 
   const { run, busy, error } = useAction();
   const [reply, setReply] = useState("");
   const version = state.versions.find((v) => v.id === intent.scene.modelVersionId) ?? null;
+  const model = state.models.find((m) => m.id === intent.modelId);
+  const currentSpec = state.versions.find((v) => v.id === model?.currentVersionId)?.spec ?? null;
+  const sceneRun = intent.scene.runId ? state.runs.find((r) => r.id === intent.scene.runId) : null;
   const resolvedCandidate = intent.resolution ? intent.candidates.find((c) => c.id === intent.resolution!.candidateId) : null;
   const statusLabel = {
     pending: "Claude を待っています",
@@ -87,13 +95,15 @@ export function IntentCard({ intent, state, agentConnected }: { intent: Intent; 
     <article className={`card intent status-${intent.status}`}>
       <header>
         <span className={`badge badge-${intent.status}`}>{statusLabel}</span>
-        <span className="muted small">v{version?.number ?? "?"} · seed {intent.scene.seed}</span>
+        <span className="muted small">
+          v{version?.number ?? "?"} · {sceneRun ? `事後予測（${sceneRun.method}）` : `prior · seed ${intent.scene.seed}`}
+        </span>
       </header>
       {intent.marks.length > 0 && (
         <ul className="chips">
           {intent.marks.map((m, i) => (
             <li key={i} className={`chip chip-${m.kind}`}>
-              {markLabel(m, version?.spec ?? null)}
+              {markLabel(m, version?.spec ?? null, !!sceneRun)}
             </li>
           ))}
         </ul>
@@ -116,7 +126,7 @@ export function IntentCard({ intent, state, agentConnected }: { intent: Intent; 
             <CandidateCard
               key={c.id}
               candidate={c}
-              base={state.versions.find((v) => v.id === state.currentVersionId)?.spec ?? null}
+              base={currentSpec}
               seed={intent.scene.seed}
               busy={busy}
               onChoose={() => run(() => post(`/api/human/intents/${intent.id}/choose`, { candidateId: c.id }))}

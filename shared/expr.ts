@@ -3,7 +3,7 @@
 
 export type Expr =
   | { type: "num"; value: number }
-  | { type: "var"; name: string }
+  | { type: "var"; name: string; index?: string }
   | { type: "neg"; arg: Expr }
   | { type: "bin"; op: "+" | "-" | "*" | "/" | "^"; left: Expr; right: Expr }
   | { type: "call"; fn: string; args: Expr[] };
@@ -28,7 +28,8 @@ const CONSTANTS: Record<string, number> = { pi: Math.PI };
 export const EXPRESSION_HELP =
   "Arithmetic on numbers and names: + - * / ^, parentheses, unary minus. " +
   `Functions: ${Object.keys(FUNCTIONS).join(", ")}. Constant: pi. ` +
-  "step(z) is 1 when z > 0, else 0.";
+  "step(z) is 1 when z > 0, else 0. " +
+  "name[idx] reads element idx of a value on another plate, where idx is an index data column.";
 
 type Token = { kind: "num" | "id" | "op"; text: string; pos: number };
 
@@ -48,7 +49,7 @@ function tokenize(source: string): Token[] {
       const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(source.slice(i))!;
       tokens.push({ kind: "id", text: m[0], pos: i });
       i += m[0].length;
-    } else if ("+-*/^(),".includes(ch)) {
+    } else if ("+-*/^(),[]".includes(ch)) {
       tokens.push({ kind: "op", text: ch, pos: i });
       i++;
     } else {
@@ -137,6 +138,13 @@ export function parseExpr(source: string): Expr {
         }
         return { type: "call", fn: t.text, args };
       }
+      if (peek()?.text === "[") {
+        take("[");
+        const idx = take();
+        if (idx.kind !== "id") throw new ExprError("[ ] の中には添字の列の名前を書いてください", idx.pos);
+        take("]");
+        return { type: "var", name: t.text, index: idx.text };
+      }
       return { type: "var", name: t.text };
     }
     if (t.text === "(") {
@@ -153,31 +161,42 @@ export function parseExpr(source: string): Expr {
   return expr;
 }
 
-export function freeNames(expr: Expr, out = new Set<string>()): Set<string> {
+export type Ref = { name: string; index: string | null };
+
+// Every name an expression reads, with the index column used to read it (if any).
+export function refs(expr: Expr, out: Ref[] = []): Ref[] {
   switch (expr.type) {
     case "var":
-      if (!(expr.name in CONSTANTS)) out.add(expr.name);
+      if (!(expr.name in CONSTANTS) || expr.index) out.push({ name: expr.name, index: expr.index ?? null });
       break;
     case "neg":
-      freeNames(expr.arg, out);
+      refs(expr.arg, out);
       break;
     case "bin":
-      freeNames(expr.left, out);
-      freeNames(expr.right, out);
+      refs(expr.left, out);
+      refs(expr.right, out);
       break;
     case "call":
-      expr.args.forEach((a) => freeNames(a, out));
+      expr.args.forEach((a) => refs(a, out));
       break;
   }
   return out;
 }
 
-export function evaluate(expr: Expr, env: Record<string, number>): number {
+export function isConstant(name: string) {
+  return name in CONSTANTS;
+}
+
+// resolve(name, index) returns the value a name has at the current element.
+export type Resolve = (name: string, index: string | null) => number;
+
+export function evaluate(expr: Expr, env: Record<string, number> | Resolve): number {
   switch (expr.type) {
     case "num":
       return expr.value;
     case "var": {
-      const v = env[expr.name] ?? CONSTANTS[expr.name];
+      if (!expr.index && expr.name in CONSTANTS && (typeof env === "function" || !(expr.name in env))) return CONSTANTS[expr.name];
+      const v = typeof env === "function" ? env(expr.name, expr.index ?? null) : env[expr.name];
       if (v === undefined) throw new ExprError(`名前 ${expr.name} が定義されていません`, 0);
       return v;
     }
@@ -199,7 +218,6 @@ export function evaluate(expr: Expr, env: Record<string, number>): number {
           return Math.pow(a, b);
       }
     }
-    // falls through only on impossible op
     case "call":
       return FUNCTIONS[expr.fn].fn(...expr.args.map((a) => evaluate(a, env)));
   }
