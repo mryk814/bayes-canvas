@@ -119,6 +119,8 @@ npm run build
 
 ## 調査資料との対応
 
+先行試作は [`docs/experience-lab.md`](./docs/experience-lab.md) を参照。`npm run lab` で別の開発サーバーを起動し、`http://127.0.0.1:5227/lab/` で共同標本・CSV対応・保存検査を試せる。本体のデータやAPIには接続しない。
+
 元になった調査資料（2026-10-07 の補遺と前 Atlas）のどこまでを実装したかは [`docs/research-ledger.md`](./docs/research-ledger.md) に台帳として記録している。機能を足したら台帳も更新する。
 
 ## いまの限界
