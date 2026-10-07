@@ -171,6 +171,8 @@ export const MarkSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("range"), world: world.nullable(), from: z.number(), to: z.number() }),
   z.object({ kind: z.literal("point"), world, unit: z.number().int().nonnegative() }),
   z.object({ kind: z.literal("layer"), world, unit: z.number().int().nonnegative(), node: ident }),
+  // Two quantities that move together in a run, and two draws from opposite ends of that ridge.
+  z.object({ kind: z.literal("ridge"), a: ident, b: ident, worlds: z.tuple([world, world]) }),
 ]);
 export type Mark = z.infer<typeof MarkSchema>;
 

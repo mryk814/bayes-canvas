@@ -1498,3 +1498,208 @@ select {
   background: var(--posterior-soft);
   color: var(--posterior);
 }
+
+/* ---------- identifiability lens ---------- */
+
+.segmented {
+  display: inline-flex;
+}
+
+.segmented .btn {
+  border-radius: 0;
+}
+
+.segmented .btn:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.segmented .btn:last-child {
+  border-radius: 0 8px 8px 0;
+  margin-left: -1px;
+}
+
+.lens {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.lens-head h2 {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 20px;
+}
+
+.teach {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.teach th,
+.teach td {
+  text-align: left;
+  padding: 4px 10px 4px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.teach thead th {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.teach tbody th {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.legend-band {
+  display: inline-block;
+  width: 16px;
+  height: 8px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.legend-band.prior,
+.band-prior {
+  fill: var(--line);
+  background: var(--line);
+}
+
+.legend-band.post,
+.band-post {
+  fill: var(--accent);
+  background: var(--accent);
+}
+
+.band-median {
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+
+.teach-chip {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.teach-chip.data {
+  background: var(--yes-soft);
+  color: var(--yes);
+}
+
+.teach-chip.partial {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.teach-chip.prior {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.teach-chip.bad {
+  background: var(--no-soft);
+  color: var(--no);
+}
+
+.ridges {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.ridge.is-open {
+  border-color: var(--gesture);
+}
+
+.ridge .btn {
+  align-self: flex-start;
+}
+
+.scatter {
+  display: block;
+  background: var(--surface);
+  border-radius: 6px;
+}
+
+.sc-prior {
+  fill: var(--muted);
+  fill-opacity: 0.18;
+}
+
+.sc-post {
+  fill: var(--accent);
+  fill-opacity: 0.45;
+}
+
+.sc-end {
+  fill: none;
+  stroke: var(--gesture);
+  stroke-width: 2.4;
+}
+
+.sc-end-label {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
+  fill: var(--gesture);
+}
+
+.two-worlds {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 2px solid var(--gesture);
+  padding-top: 10px;
+}
+
+.two-worlds-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.two-worlds-grid figure {
+  margin: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.two-worlds-grid figcaption {
+  font-size: 13px;
+  padding: 0 4px 2px;
+}
+
+.compare {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.compare th,
+.compare td {
+  padding: 3px 14px 3px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.compare thead th {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.compare td.num {
+  text-align: right;
+}

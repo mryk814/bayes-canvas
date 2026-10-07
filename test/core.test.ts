@@ -227,3 +227,31 @@ test("the Stan program is typed, non-centred, censored and uses prefixed names",
   }
   assert.match(files["run_stan.py"], /KEEP = \["s20","decline","sigma_mat","true_strength","tau_bias","bias","sigma_meas"\]/);
 });
+
+test("the identifiability lens finds a sum-only ridge and prior-carried quantities", async () => {
+  const { identifiability, ridgeEnds } = await import("../shared/identify.ts");
+  const c = compile();
+  const K = 300;
+  const u = Array.from({ length: K }, (_, k) => (k + 0.5) / K);
+  // sigma_mat + sigma_meas = 30 in every draw: only the sum is known
+  const sm = u.map((v) => 5 + 20 * v);
+  const draws = {
+    s20: u.map((v) => [450 + 0.01 * Math.sin(v * 50)]),
+    decline: u.map((v) => [0.6 + 0.001 * Math.cos(v * 70)]),
+    sigma_mat: sm.map((v) => [v]),
+    sigma_meas: sm.map((v) => [30 - v]),
+    tau_bias: u.map((v) => [Math.abs(15 * Math.tan(Math.PI * (v - 0.5) * 0.9)) + 0.01]),
+    true_strength: u.map(() => Array(36).fill(400)),
+    bias: u.map(() => [0, 0, 0]),
+  };
+  const lens = identifiability(c, { draws });
+  const ridge = lens.ridges.find((r) => [r.a, r.b].sort().join() === "sigma_mat,sigma_meas");
+  assert.ok(ridge && ridge.rho < -0.99, "sum-only ridge found");
+  const [lo, hi] = ridgeEnds({ draws }, ridge!.a, ridge!.b, ridge!.rho);
+  const a = (k: number) => draws[ridge!.a as "sigma_mat"][k][0];
+  assert.ok(Math.abs(a(lo) - a(hi)) > 10, "ends sit at opposite ends of the ridge");
+  const s20 = lens.params.find((p) => p.name === "s20")!;
+  assert.ok(s20.contraction > 0.99, "a tightly known quantity is marked as taught by the data");
+  const tau = lens.params.find((p) => p.name === "tau_bias")!;
+  assert.ok(tau.contraction < 0.3, "a quantity left as wide as its prior is marked as prior-carried");
+});

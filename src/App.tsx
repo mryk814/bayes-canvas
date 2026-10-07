@@ -6,7 +6,7 @@ import { compileSpec, datasetPoints, drawCount, runInputs, simulateWorld, viewPo
 import { post, useAction, useAppData, useStoredState } from "./api.ts";
 import { DraftTray, IntentCard } from "./Conversation.tsx";
 import { ErrorNote, EvidenceList, KnowledgeList, ModelSummary, ProposalCard, VersionList } from "./Ledger.tsx";
-import { Stage, type Focus, type Source } from "./Stage.tsx";
+import { Stage, type Focus, type Source, type StageMode } from "./Stage.tsx";
 import { sharedDomains, type Tool } from "./WorldPlot.tsx";
 
 const WORLD_COUNT = 12;
@@ -106,6 +106,7 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
   const [tool, setTool] = useState<Tool>("look");
   const [showObs, setShowObs] = useState(true);
   const [tab, setTab] = useState<Tab>("talk");
+  const [mode, setMode] = useState<StageMode>("worlds");
   const send = useAction();
 
   const run = state.runs.find((r) => r.id === runId && r.modelId === modelId) ?? null;
@@ -142,8 +143,9 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
       const same = (x: Mark) =>
         (m.kind === "verdict" && x.kind === "verdict" && x.world === m.world) ||
         (m.kind === "point" && x.kind === "point" && x.world === m.world && x.unit === m.unit) ||
-        (m.kind === "layer" && x.kind === "layer" && x.world === m.world && x.unit === m.unit && x.node === m.node);
-      if (m.kind === "verdict" || m.kind === "point" || m.kind === "layer") {
+        (m.kind === "layer" && x.kind === "layer" && x.world === m.world && x.unit === m.unit && x.node === m.node) ||
+        (m.kind === "ridge" && x.kind === "ridge" && x.a === m.a && x.b === m.b);
+      if (m.kind === "verdict" || m.kind === "point" || m.kind === "layer" || m.kind === "ridge") {
         const existing = base.marks.find(same);
         const others = base.marks.filter((x) => !same(x));
         const toggledOff = !!existing && (existing.kind !== "verdict" || (m.kind === "verdict" && existing.verdict === m.verdict));
@@ -202,6 +204,8 @@ function ModelWorkspace({ state, modelId, agentConnected }: { state: State; mode
           showObs={showObs}
           reseedBlocked={draft.marks.length > 0}
           opened={opened}
+          mode={run ? mode : "worlds"}
+          onMode={setMode}
           onSource={showRun}
           onFocus={(f) => {
             setFocus(f);

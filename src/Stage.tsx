@@ -3,12 +3,14 @@ import { IconArrowsShuffle, IconPencil, IconPointer, IconRulerMeasure, IconX, Ic
 import type { Dataset, Mark, Run } from "../shared/contracts.ts";
 import type { Compiled, ViewPoint, World } from "../shared/sim.ts";
 import { Anatomy } from "./Anatomy.tsx";
+import { Lens } from "./Lens.tsx";
 import { fmt, groupName, pad } from "./format.ts";
 import { WorldPlot, type DataPoint, type Domains, type Tool } from "./WorldPlot.tsx";
 
 export type Focus = number | "all" | null;
 export type Source = { kind: "prior" } | { kind: "run"; run: Run; dataset: Dataset; stale: boolean };
 export type RunOption = { id: string; label: string };
+export type StageMode = "worlds" | "lens";
 
 type Props = {
   compiled: Compiled;
@@ -26,6 +28,8 @@ type Props = {
   showObs: boolean;
   reseedBlocked: boolean;
   opened: number | null;
+  mode: StageMode;
+  onMode: (m: StageMode) => void;
   onSource: (runId: string | null) => void;
   onFocus: (f: Focus) => void;
   onTool: (t: Tool) => void;
@@ -54,7 +58,7 @@ export function Stage(p: Props) {
   const labels = { x: label(spec.view.x), y: label(spec.view.y) };
   const focusIdx = typeof p.focus === "number" ? p.worlds.findIndex((w) => w.index === p.focus) : -1;
   const focusPoints = p.focus === "all" ? p.points : focusIdx >= 0 ? [p.points[focusIdx]] : [];
-  const focusMarks = p.marks.filter((m) => m.kind !== "verdict" && (p.focus === "all" ? m.world === null : m.world === p.focus));
+  const focusMarks = p.marks.filter((m) => m.kind !== "verdict" && m.kind !== "ridge" && (p.focus === "all" ? m.world === null : m.world === p.focus));
   const toggleVerdict = (world: number, verdict: "implausible" | "plausible") => p.onMark({ kind: "verdict", world, verdict });
   const group = spec.view.group;
   const groupValues = group ? [...new Set(p.points[0]?.map((q) => q.group).filter((g): g is number => g !== null))].sort((a, b) => a - b) : [];
@@ -76,6 +80,16 @@ export function Stage(p: Props) {
               ))}
             </select>
           </label>
+          {p.source.kind === "run" && (
+            <div className="segmented" role="group" aria-label="表示">
+              <button className={`btn ${p.mode === "worlds" ? "is-on" : ""}`} aria-pressed={p.mode === "worlds"} onClick={() => p.onMode("worlds")}>
+                世界を並べる
+              </button>
+              <button className={`btn ${p.mode === "lens" ? "is-on" : ""}`} aria-pressed={p.mode === "lens"} onClick={() => p.onMode("lens")}>
+                識別性
+              </button>
+            </div>
+          )}
           <label className="toggle">
             <input type="checkbox" checked={p.showObs} onChange={(e) => p.onShowObs(e.target.checked)} />
             {p.source.kind === "run" ? "予測点" : "観測点"}
@@ -115,6 +129,10 @@ export function Stage(p: Props) {
         </div>
       )}
 
+      {p.source.kind === "run" && p.mode === "lens" ? (
+        <Lens compiled={p.compiled} run={p.source.run} dataset={p.source.dataset} seed={p.seed} marks={p.marks} onMark={p.onMark} />
+      ) : (
+      <>
       <AnimatePresence initial={false}>
         {p.focus !== null && (
           <motion.div className="focus" key="focus" initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} transition={{ duration: 0.18 }}>
@@ -178,7 +196,7 @@ export function Stage(p: Props) {
       <motion.ol className="world-grid" layout>
         {p.worlds.map((w, i) => {
           const verdict = verdictOf(p.marks, w.index);
-          const own = p.marks.filter((m) => m.kind !== "verdict" && m.world === w.index);
+          const own = p.marks.filter((m) => m.kind !== "verdict" && m.kind !== "ridge" && m.world === w.index);
           return (
             <motion.li key={`${p.seed}-${w.index}`} className={`world-card ${verdict ?? ""} ${p.focus === w.index ? "is-focused" : ""}`} layout="position">
               <button className="world-open" onClick={() => p.onFocus(w.index)} aria-label={`${worldName(p.source, w.index)} を開く`}>
@@ -192,6 +210,8 @@ export function Stage(p: Props) {
           );
         })}
       </motion.ol>
+      </>
+      )}
     </section>
   );
 }

@@ -24,6 +24,7 @@ import {
   type SceneRef,
   type State,
 } from "../shared/contracts.ts";
+import { identifiability } from "../shared/identify.ts";
 import { anatomy, compileSpec, runInputs, simulateWorld, summarizeWorld, type Compiled, type World } from "../shared/sim.ts";
 import { EXAMPLES } from "../shared/example.ts";
 import { numpyroScript } from "../shared/codegen.ts";
@@ -388,7 +389,7 @@ export class Store {
       .filter((i) => i.status === "pending")
       .map((i) => {
         const v = this.version(i.scene.modelVersionId);
-        const worlds = [...new Set(i.marks.map((m) => m.world).filter((w): w is number => w !== null))];
+        const worlds = [...new Set(i.marks.flatMap((m) => (m.kind === "ridge" ? m.worlds : [m.world])).filter((w): w is number => w !== null))];
         const run = i.scene.runId ? this.run(i.scene.runId) : null;
         const referencedWorlds = worlds.map((w) => {
           const { compiled, world } = this.worldOf(i.scene, w);
@@ -400,8 +401,14 @@ export class Store {
           const y = compiled.spec.view.y;
           return [{ mark: m, dataValue: dataset ? (dataset.columns[y]?.[m.unit] ?? null) : null, layers: anatomy(compiled, world, y, m.unit) }];
         });
+        const lens =
+          run && i.marks.some((m) => m.kind === "ridge") ? identifiability(this.compiled(i.scene.modelVersionId), run) : null;
         return {
           ...i,
+          identifiability: lens && {
+            ...lens,
+            note: "contraction = 1 − 事後分散/事前分散（正の量は対数尺度）。0 に近い量はデータでほとんど絞られておらず prior が値を決めている。ridges は事後 draw の順位相関。局所的な手がかりで、識別可能性の証明ではない",
+          },
           modelVersion: { id: v.id, number: v.number, isCurrent: this.model(v.modelId).currentVersionId === v.id, spec: v.spec },
           source: run
             ? {

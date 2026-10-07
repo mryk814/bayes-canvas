@@ -8,8 +8,9 @@ import { pad } from "./format.ts";
 export const ASK_PHRASE = "Possible Worlds に届いた意図を見て、候補を返してください";
 
 export function markLabel(m: Mark, spec: ModelSpec | null, posterior = false) {
-  const where = m.world === null ? "重ね表示" : posterior ? `draw ${m.world}` : `世界 ${pad(m.world)}`;
   const nodeLabel = (name: string) => spec?.nodes.find((n) => n.name === name)?.label ?? name;
+  if (m.kind === "ridge") return `「${nodeLabel(m.a)}」と「${nodeLabel(m.b)}」が一緒に動く · draw ${m.worlds[0]} / ${m.worlds[1]}`;
+  const where = m.world === null ? "重ね表示" : posterior ? `draw ${m.world}` : `世界 ${pad(m.world)}`;
   if (m.kind === "verdict") return `${where} · ${m.verdict === "implausible" ? "あり得ない" : "あり得る"}`;
   if (m.kind === "sketch") return `${where} · なぞり線`;
   if (m.kind === "point") return `${where} · 点 ${m.unit}`;
