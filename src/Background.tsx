@@ -5,7 +5,7 @@ import { approximationTrusted } from "../shared/compare.ts";
 import { post, useAction, type LadderInfo } from "./api.ts";
 import { ErrorNote } from "./Ledger.tsx";
 
-export const STAGE_LABEL: Record<Job["stage"], string> = { approximate: "近似（Pathfinder）", quick: "短い NUTS（目安）", mcmc: "NUTS" };
+export const STAGE_LABEL: Record<Job["stage"], string> = { approximate: "近似（ラプラス / ADVI）", mcmc: "NUTS" };
 
 export function useNow(active: boolean) {
   const [now, setNow] = useState(() => Date.now());

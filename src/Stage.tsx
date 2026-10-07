@@ -250,7 +250,7 @@ function Provenance({ source, versionNumber, seed, pending }: { source: Source; 
     <div className="provenance">
       <span className="badge badge-posterior">事後予測の世界</span>
       {approx && (
-        <span className="badge badge-approx" title="速い近似。自動で見ているときは NUTS の結果が届くと置き換わります">
+        <span className="badge badge-approx" title="速い近似（ラプラスか ADVI）。自動で見ているときは NUTS の結果が届くと置き換わります">
           近似{d.paretoK !== null ? ` · Pareto k ${fmt(d.paretoK)}` : ""}
         </span>
       )}

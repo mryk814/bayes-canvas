@@ -306,20 +306,21 @@ test("the background ladder queues approximate then MCMC, and drops work for sup
   assert.deepEqual(byVersion(v2.id), ["running", "queued"]);
 });
 
-test("a Pathfinder run that fails its own check brings in a short NUTS chain before full MCMC", async () => {
+test("an approximation that fails its own check is recorded, never shown as the posterior, and MCMC still follows", async () => {
   const { Ladder } = await import("../server/ladder.ts");
+  const { approximationTrusted } = await import("../shared/compare.ts");
   const store = freshStore();
   const model = store.startExample("observation");
   const ds = store.synthesize({ modelId: model.id, label: "合成", note: "", truth: OBSERVATION_EXAMPLE, seed: 1, plates: {} });
   const ladder = new Ladder(store, mkdtempSync(join(tmpdir(), "auto-")), () => {}, { enabled: true, launch: () => {} });
   const w = simulateWorld(compile(), 1, 0);
   const draws = Object.fromEntries(["s20", "decline", "sigma_mat", "true_strength", "tau_bias", "bias", "sigma_meas"].map((k) => [k, [w.values[k]]]));
-  store.attachRun({
-    versionId: model.currentVersionId, datasetId: ds.id, method: "Stan Pathfinder", fidelity: "approximate", note: "", warnings: [],
-    diagnostics: { maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: 2.7 }, draws,
+  const run = store.attachRun({
+    versionId: model.currentVersionId, datasetId: ds.id, method: "NumPyro ADVI", fidelity: "approximate", note: "", warnings: [],
+    diagnostics: { maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: 1.33 }, draws,
   }, "auto");
+  assert.equal(approximationTrusted(run.diagnostics), false);
   const approxJob = ladder.jobs.find((j) => j.stage === "approximate")!;
   (ladder as unknown as { finish: (j: unknown, s: string, m: string) => void }).finish(approxJob, "done", "");
-  const order = ladder.jobs.filter((j) => j.status !== "done").map((j) => `${j.stage}:${j.status}`);
-  assert.deepEqual(order, ["mcmc:queued", "quick:running"]);
+  assert.deepEqual(ladder.jobs.filter((j) => j.status !== "done").map((j) => `${j.stage}:${j.status}`), ["mcmc:running"]);
 });

@@ -36,6 +36,13 @@ function broadcast(e: ChangeEvent) {
 store.subscribe(broadcast);
 const ladder = new Ladder(store, join(root, "work", "auto"), () => broadcast({ kind: "job" }));
 const ladderInfo = () => ({ enabled: ladder.enabled, reason: ladder.reason, jobs: ladder.jobs });
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    ladder.stop();
+    process.exit(0);
+  });
+}
+process.on("exit", () => ladder.stop());
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -109,7 +116,7 @@ const routes: Route[] = [
     pattern: /^\/api\/agent\/inference-bundle$/,
     handle: async (_, b) => {
       const { versionId, datasetId, backend } = (await b()) as { versionId: string; datasetId: string; backend?: "stan" | "numpyro" };
-      return store.inferenceBundle(versionId, datasetId, backend === "numpyro" ? "numpyro" : "stan");
+      return store.inferenceBundle(versionId, datasetId, backend === "stan" ? "stan" : "numpyro");
     },
   },
   { method: "POST", pattern: /^\/api\/agent\/runs$/, handle: async (_, b) => store.attachRun(AgentRunInput.parse(await b())) },

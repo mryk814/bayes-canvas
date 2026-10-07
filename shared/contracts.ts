@@ -305,8 +305,8 @@ export const AgentSynthesizeInput = z.object({
 export const AgentRunInput = RunSchema.omit({ id: true, createdAt: true, modelId: true, origin: true });
 
 // Background inference: one job per (version, dataset), climbing approximate → mcmc.
-// approximate: Pathfinder. quick: one short NUTS chain, used when Pathfinder fails its own check.
-export type JobStage = "approximate" | "quick" | "mcmc";
+// approximate: Laplace (no per-unit latents) or mean-field ADVI, checked with Pareto k. mcmc: NUTS.
+export type JobStage = "approximate" | "mcmc";
 export type Job = {
   id: string;
   modelId: string;

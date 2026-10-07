@@ -43,32 +43,33 @@ prior の世界はこのプログラムを前方シミュレーションして�
 
 ## 推論
 
-アプリは推論を内製しない。手元の CmdStan に任せる。
+アプリは推論の道具を内製しない。手元の NumPyro（と、検証用に CmdStan）に任せる。
 
 ### 裏で育つ事後分布
 
-モデルの版かデータが変わると、サーバーが自分で事後分布を計算する（`server/ladder.ts`）。
+モデルの版かデータが変わると、サーバーが自分で事後分布を計算する（`server/ladder.ts`）。NumPyro のワーカー（`inference/worker.py`）を 1 つ常駐させ、JAX の読み込みは最初の 1 回だけにする。
 
-1. **Pathfinder**（近似）。自身の検査 Pareto k が 0.7 を超えたら「信用できない近似」として記録だけ残し、表示に使わない
-2. その場合は **短い NUTS**（1 chain・目安）を自動で挟む
-3. **NUTS**（4 chain）。診断（R̂・ESS・発散）と、近似とのずれを警告として付ける
+1. **速い近似**。モデルの形で選ぶ
+   - 試料ごとの潜在変数がないモデル：**ラプラス近似**（BFGS で最頻値、そこでのヘッセ行列で正規近似）
+   - 潜在変数があるモデル：**平均場 ADVI**。結合事後分布の最頻値は「測定誤差 → 0」に崩れるので、ラプラス近似は原理的に使えない
+   - どちらも重要度重みの **Pareto k** で検査し、0.7 を超えたら記録だけ残して表示に使わない
+2. **NUTS**（4 chain）。診断（R̂・ESS・発散）と、近似とのずれを警告として付ける
 
-「見る世界」を「自動」にすると、いまの版のいちばん確かな結果を表示し、計算が進むとその場で差し替わる。上部バーに計算の段階と経過時間、推論タブにジョブの一覧（一時停止・やり直し）が出る。版がさらに変わると古い版のジョブは止まる。CmdStan が見つからないときは止まっている。`WORLDS_AUTO=0` でも止められる。作業ファイルは `work/auto/`。
+「見る世界」を「自動」にすると、いまの版のいちばん確かな結果を表示し、計算が進むとその場で差し替わる。上部バーに計算の段階と経過時間、推論タブにジョブの一覧（一時停止・やり直し）が出る。版がさらに変わると古い版のジョブは止まる。`WORLDS_AUTO=0` で止められる。作業ファイルは `work/auto/`。
 
-### 手で走らせる
+実測（このリポジトリの例、Windows・CPU）:
 
-別の書き出し先や設定で走らせたいときは、Claude Code が `worlds_prepare_inference` で書き出したプログラムを手元で実行し、`worlds_attach_run` で結果を戻す。
-
-| backend | 書き出すもの | 実行 |
+| モデル | 近似 | NUTS |
 |---|---|---|
-| `stan`（既定） | `model.stan` + `run_stan.py`（CmdStanPy） | `uv run --with cmdstanpy python run_stan.py dataset.json run.json` |
-| `numpyro` | `model.py` | `uv run --with numpyro --with jax python model.py dataset.json run.json` |
+| 曲線（潜在変数なし） | ラプラス 11 秒・Pareto k 0.54（NUTS とほぼ一致） | 17 秒 |
+| 観測過程・繰り返し測定つき | ADVI 18 秒・Pareto k 0.99（信用できないので表示しない） | 39 秒 |
+| 同じモデルを Stan で | Pathfinder 25 秒・Pareto k 2.7 | 75 秒（コンパイル込み） |
 
-- 打ち切りは生存関数（`lccdf` / `1 - cdf`）で扱い、プレート上の正規の潜在変数は非中心化で書き出す。サイト名はノード名と同じなので draw がそのまま世界に戻る。
-- 発散が出たら `--target-accept 0.95`。
-- run は版とデータセットに結びつく。版が変わると古い run は「旧版の結果」と表示し、黙って最新扱いしない。
+### 手で走らせる・Stan で確かめる
 
-### Stan の準備（Windows）
+別の設定や書き出し先で走らせたいときは、Claude Code が `worlds_prepare_inference`（既定は NumPyro、`backend: "stan"` で CmdStanPy）で書き出したプログラムを実行し、`worlds_attach_run` で結果を戻す。NumPyro の書き出しは `model.py` と `pw_numpyro.py`（`--method approx|nuts`）。Stan は版ごとにコンパイルが要るので、自動の階段には使わず、別の PPL による最終確認として使う。
+
+### Stan の準備（Windows・任意）
 
 CmdStan は C++ ツールチェーンが要る。`%USERPROFILE%\.cmdstan` に入れる。
 
@@ -78,8 +79,6 @@ uv run --with cmdstanpy python -m cmdstanpy.install_cmdstan
 ```
 
 cmdstanpy 1.x の RTools インストーラ呼び出しは失敗することがある。その場合は `%USERPROFILE%\.cmdstan\RTools40.exe` を `/DIR="%USERPROFILE%\.cmdstan\RTools40"` 付きで直接実行し、`RTools40\usr\bin\bash.exe -lc "pacman -Sy mingw-w64-x86_64-make --noconfirm"` のあと `cmdstan-<版>` で `mingw32-make build` する。`run_stan.py` は実行時に RTools を PATH に足す。Git Bash では `HOME` の形式で cmdstanpy が迷うので PowerShell から実行する。
-
-不要になったら `%USERPROFILE%\.cmdstan` を消し、RTools は Windows の「アプリ」からアンインストールする。依存は合計 2〜3 GB ほど（JAX 約 0.5 GB、RTools + CmdStan 約 2 GB）。
 
 ## 三種類の操作を混ぜない
 
@@ -102,6 +101,7 @@ cmdstanpy 1.x の RTools インストーラ呼び出しは失敗することが�
 
 ```text
 shared/   契約（zod）、式言語、前方シミュレーションと観測点の解剖、意味の差分、Stan / NumPyro への書き出し
+inference/ NumPyro の推論（pw_numpyro.py：ラプラス / ADVI / NUTS と Pareto k、worker.py：常駐ワーカー）
 server/   正本の保存、移行、HTTP API（/api/human/* と /api/agent/*）、変更の通知（SSE）
 bridge/   Claude Code が起動する MCP ブリッジ（状態を持たず、サーバーへ中継する）
 src/      React の画面（世界の劇場、観測点の解剖、メモ、対話、提案、知識、推論、モデル）

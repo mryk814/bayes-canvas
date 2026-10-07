@@ -1,7 +1,7 @@
 // The single source of truth: one JSON file, written atomically, with the
 // previous version kept as .bak. Every change goes through these functions.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { z } from "zod";
 import {
@@ -556,7 +556,8 @@ export class Store {
       return { backend, files, entry: "run_stan.py", uvWith: ["cmdstanpy"], warnings, dataset };
     }
     const { code, warnings } = numpyroScript(v.spec, v.id);
-    return { backend, files: { "model.py": code }, entry: "model.py", uvWith: ["numpyro", "jax"], warnings, dataset };
+    const library = readFileSync(join(import.meta.dirname, "..", "inference", "pw_numpyro.py"), "utf8");
+    return { backend, files: { "model.py": code, "pw_numpyro.py": library }, entry: "model.py", uvWith: ["numpyro", "jax"], warnings, dataset };
   }
 
   attachRun(raw: z.input<typeof AgentRunInput>, origin: "auto" | "agent" = "agent") {

@@ -24,7 +24,7 @@ Answering the person:
 2. Work out which part of the model produces what they object to. Use worlds_sample if you need more worlds.
 3. worlds_reply with 2–4 genuinely different readings (e.g. a mechanism in the observation process vs. in the material; a hard constraint vs. a softer prior; a check to run). Each has a kind, a one-sentence statement written as the person's knowledge, and optionally an edit: a full new spec plus a summary. Ask a short question instead if it is too ambiguous. Write in Japanese, concise and calm.
 
-Background inference: when a model's current version has data that fits it, the app itself computes the posterior with Stan in the background — Pathfinder (approximate) first, then NUTS — and attaches runs with origin "auto", fidelity, and warnings (diagnostics, approximation gaps). worlds_overview shows backgroundInference.jobs. Do not start your own run for the same version and data unless the person asks for something different (another backend, more draws, a custom program).
+Background inference: when a model's current version has data that fits it, the app itself computes the posterior with NumPyro in a long-lived worker — first a fast approximation (Laplace for models without per-unit latent variables, mean-field ADVI otherwise, both checked with PSIS Pareto k; above 0.7 it is recorded but never shown as the posterior), then NUTS — and attaches runs with origin "auto", fidelity and warnings. worlds_overview shows backgroundInference.jobs. Do not start your own run for the same version and data unless the person asks for something different (Stan for a final check, more draws, a custom program).
 
 Running inference by hand when asked:
 1. worlds_overview to find the model, current version and datasets. If there is no data, ask; for checking recovery you may create a synthetic dataset with worlds_synthesize_dataset from a stated truth (say what the truth is in its note).
@@ -127,7 +127,7 @@ const tools: Tool[] = [
   {
     name: "worlds_prepare_inference",
     description:
-      "Write an inference program for a version and the dataset it should fit into work/<name>/. backend 'stan' (CmdStanPy; default, most trusted diagnostics) or 'numpyro'. Returns the files and the command to run.",
+      "Write an inference program for a version and the dataset it should fit into work/<name>/. backend 'numpyro' (the app's own engine) or 'stan' (CmdStanPy; slow to compile, use it as an independent final check). Returns the files and the command to run.",
     inputSchema: schema(
       z.object({ versionId: z.string(), datasetId: z.string(), backend: z.enum(["stan", "numpyro"]).optional(), name: z.string().regex(/^[\w-]+$/).optional() }),
     ),
