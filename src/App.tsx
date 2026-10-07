@@ -10,6 +10,7 @@ import { Stage, type Focus, type Source, type StageMode } from "./Stage.tsx";
 import { sharedDomains, type Tool } from "./WorldPlot.tsx";
 import { ModelTools } from "./ModelTools.tsx";
 import { Capsule } from "./Capsule.tsx";
+import { displayDrawIndices } from "../shared/view-contract.ts";
 
 const WORLD_COUNT = 12;
 
@@ -138,7 +139,7 @@ function ModelWorkspace({ state, modelId, agentConnected, runId, onRun }: { stat
     const c = compiled.compiled;
     if (!run || !dataset) return Array.from({ length: WORLD_COUNT }, (_, i) => simulateWorld(c, seed, i));
     const K = drawCount(run);
-    const picks = [...new Set(Array.from({ length: Math.min(WORLD_COUNT, K) }, (_, j) => Math.round((j * (K - 1)) / Math.max(1, WORLD_COUNT - 1))))];
+    const picks = displayDrawIndices(K, WORLD_COUNT);
     return picks.map((k) => simulateWorld(c, seed, k, runInputs(c, run, dataset, k)));
   }, [compiled, seed, run, dataset]);
   const points = useMemo(() => (compiled.ok ? worlds.map((w) => viewPoints(compiled.compiled, w)) : []), [compiled, worlds]);
@@ -208,6 +209,7 @@ function ModelWorkspace({ state, modelId, agentConnected, runId, onRun }: { stat
       ) : (
         <Stage
           compiled={compiled.compiled}
+          versionId={viewVersion.id}
           versionNumber={viewVersion.number}
           seed={seed}
           source={source}

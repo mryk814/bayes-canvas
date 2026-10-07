@@ -6,6 +6,7 @@ import { getStroke } from "perfect-freehand";
 import type { Mark } from "../shared/contracts.ts";
 import type { ViewPoint } from "../shared/sim.ts";
 import { plotTicks, spacedTickIndices } from "./plot-ticks.ts";
+import { showsGeneratedPoints } from "../shared/view-contract.ts";
 
 export type Tool = "look" | "sketch" | "range";
 export type Domains = { x: [number, number]; y: [number, number] };
@@ -198,8 +199,7 @@ export function WorldPlot({
           return (
             <g key={wi} className={overlay ? "world overlaid" : "world"}>
               {withLine.length > 1 && <path className="curve" d={path(withLine.map((p) => [p.x, p.line!])) ?? ""} />}
-              {showObs &&
-                !(overlay && withLine.length > 1) &&
+              {showsGeneratedPoints(showObs, overlay, withLine.length) &&
                 pts.map((p) =>
                   p.censored ? (
                     <path key={p.unit} className={`censored g${p.group ?? "n"}`} d={`M${x(p.x)},${y(clampY(p.y)) - r * 1.6} l${r * 1.4},${r * 2.4} l${-r * 2.8},0 Z`} />

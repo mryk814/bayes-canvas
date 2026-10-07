@@ -5,6 +5,7 @@ import type { Compiled, ViewPoint, World } from "../shared/sim.ts";
 import { Anatomy } from "./Anatomy.tsx";
 import { Lens } from "./Lens.tsx";
 import { Shape } from "./Shape.tsx";
+import { ViewContract } from "./ViewContract.tsx";
 import { fmt, groupName, pad } from "./format.ts";
 import { WorldPlot, type DataPoint, type Domains, type Tool } from "./WorldPlot.tsx";
 
@@ -15,6 +16,7 @@ export type StageMode = "worlds" | "lens" | "shape";
 
 type Props = {
   compiled: Compiled;
+  versionId: string;
   versionNumber: number;
   seed: number;
   source: Source;
@@ -111,6 +113,8 @@ export function Stage(p: Props) {
           </button>
         </div>
       </div>
+
+      {p.mode === "worlds" && <ViewContract compiled={p.compiled} versionId={p.versionId} versionNumber={p.versionNumber} seed={p.seed} source={p.source} worlds={p.worlds} points={p.points} data={p.data} domains={p.domains} showObs={p.showObs} focus={p.focus}/>}
 
       {groupValues.length > 1 && (
         <div className="legend" aria-label="凡例">
