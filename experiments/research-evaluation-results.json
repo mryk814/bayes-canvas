@@ -1,0 +1,172 @@
+{
+  "scope": "合成データ上の点予測例。欠測機構の補正、汎化性能の保証、本体への接続は含まない。",
+  "existingGroups": {
+    "target": "既存の装置で次に測る値",
+    "counts": {
+      "total": 11,
+      "train": 7,
+      "test": 4,
+      "scoreable": 3,
+      "missingTestOutcome": 1,
+      "excluded": 0
+    },
+    "conditions": {
+      "model": "group-mean-with-training-median-fallback-v1",
+      "data": "29da6204d36f8c35ba6fcee8f7491606affd9078bdb74a498cf7f28afc15acd0",
+      "preprocessing": "no-imputation-training-observed-only-v1",
+      "task": "既存の装置で次に測る値",
+      "split": "0cf1eb5ccbfcf401bdfa398c5893df8205d0f87ccc9ed88970c22c239ec343de",
+      "quantity": "observed-test-outcome-MAE",
+      "unit": "MPa"
+    },
+    "trainingRowIds": [
+      "a1",
+      "a2",
+      "a3",
+      "b1",
+      "b2",
+      "b3",
+      "c1"
+    ],
+    "missingOutcomeIds": [
+      "c3"
+    ],
+    "predictions": [
+      {
+        "id": "a4",
+        "observed": 13,
+        "predicted": 11,
+        "absoluteError": 2
+      },
+      {
+        "id": "b4",
+        "observed": 33,
+        "predicted": 31,
+        "absoluteError": 2
+      },
+      {
+        "id": "c2",
+        "observed": 101,
+        "predicted": 100,
+        "absoluteError": 1
+      }
+    ],
+    "mae": 1.6666666666666667
+  },
+  "newGroup": {
+    "target": "初めて見る装置で測る値",
+    "counts": {
+      "total": 11,
+      "train": 8,
+      "test": 3,
+      "scoreable": 2,
+      "missingTestOutcome": 1,
+      "excluded": 0
+    },
+    "conditions": {
+      "model": "group-mean-with-training-median-fallback-v1",
+      "data": "29da6204d36f8c35ba6fcee8f7491606affd9078bdb74a498cf7f28afc15acd0",
+      "preprocessing": "no-imputation-training-observed-only-v1",
+      "task": "初めて見る装置で測る値",
+      "split": "59e65439f7542fcc5bc1d368bd3e446fce32c42cc3a9d8cbbd83562cd61d74b0",
+      "quantity": "observed-test-outcome-MAE",
+      "unit": "MPa"
+    },
+    "trainingRowIds": [
+      "a1",
+      "a2",
+      "a3",
+      "a4",
+      "b1",
+      "b2",
+      "b3",
+      "b4"
+    ],
+    "missingOutcomeIds": [
+      "c3"
+    ],
+    "predictions": [
+      {
+        "id": "c1",
+        "observed": 100,
+        "predicted": 21.5,
+        "absoluteError": 78.5
+      },
+      {
+        "id": "c2",
+        "observed": 101,
+        "predicted": 21.5,
+        "absoluteError": 79.5
+      }
+    ],
+    "mae": 79
+  },
+  "comparison": {
+    "comparable": false,
+    "modelsDiffer": false,
+    "reasons": [
+      "task: 比較条件が一致しません",
+      "split: 比較条件が一致しません"
+    ]
+  },
+  "adoptedButUnchecked": {
+    "inspectable": true,
+    "automatic": false,
+    "reasons": [
+      "この結果の計算検査が未確認、または懸念があります"
+    ]
+  },
+  "pointAsPosterior": {
+    "inspectable": true,
+    "automatic": false,
+    "reasons": [
+      "この結果は事後標本ではありません"
+    ]
+  },
+  "pointForPrediction": {
+    "inspectable": true,
+    "automatic": true,
+    "reasons": []
+  },
+  "missingnessAssumptions": "別の合成例。欠測2行の基準条件付き平均を8 MPaと仮定し、δ MPaを加える。等重み、閾値10 MPa。補完データや事後確率ではなく、仮定別の期待値集計。",
+  "missingness": {
+    "threshold": 10,
+    "counts": {
+      "total": 4,
+      "observed": 2,
+      "missing": 2
+    },
+    "totalWeight": 4,
+    "observedWeight": 2,
+    "missingWeight": 2,
+    "missingWeightFraction": 0.5,
+    "observedOnlyMean": 11,
+    "scenarios": [
+      {
+        "delta": -5,
+        "weightedMean": 7,
+        "exceedsThreshold": false
+      },
+      {
+        "delta": 0,
+        "weightedMean": 9.5,
+        "exceedsThreshold": false
+      },
+      {
+        "delta": 1,
+        "weightedMean": 10,
+        "exceedsThreshold": false
+      },
+      {
+        "delta": 5,
+        "weightedMean": 12,
+        "exceedsThreshold": true
+      }
+    ]
+  },
+  "limits": [
+    "MAEは観測された保留行だけの成績",
+    "両成績は対象が違うので優劣を直接比較できない",
+    "候補資格は最終結果や採用を意味しない"
+  ]
+}
