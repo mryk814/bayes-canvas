@@ -1,0 +1,24 @@
+{
+  "id": "tensile-plateau-new-lot-v1",
+  "provenance": "synthetic",
+  "description": "架空の材料試験室から取り出した引張試験の小さな検討用データ。各行は別の試験片。outcome は出力された強度の数値で、null は数値が記録されていないことだけを表す。数値の生成・記録方法は、この表だけでは確定しない。",
+  "columns": {
+    "id": "行ID",
+    "specimen": "試験片ID",
+    "lot": "製造ロットID",
+    "machine": "試験機ID",
+    "temp": "試験時温度（℃）",
+    "outcome": "記録された引張強度（MPa）。null は数値の記録なし"
+  },
+  "rows": [
+    {"id":"R01","specimen":"S01","lot":"L-old","machine":"A","temp":20,"outcome":480},
+    {"id":"R02","specimen":"S02","lot":"L-old","machine":"A","temp":20,"outcome":493},
+    {"id":"R03","specimen":"S03","lot":"L-old","machine":"A","temp":20,"outcome":null},
+    {"id":"R04","specimen":"S04","lot":"L-old","machine":"B","temp":40,"outcome":508},
+    {"id":"R05","specimen":"S05","lot":"L-old","machine":"B","temp":40,"outcome":520},
+    {"id":"R06","specimen":"S06","lot":"L-new","machine":"C","temp":80,"outcome":520},
+    {"id":"R07","specimen":"S07","lot":"L-new","machine":"C","temp":80,"outcome":null},
+    {"id":"R08","specimen":"S08","lot":"L-new","machine":"C","temp":80,"outcome":517}
+  ],
+  "opening": "この520あたりの横並び、材料の天井なのかな。Cだけ散るのも気になる。来月の新ロットにも使いたい。"
+}

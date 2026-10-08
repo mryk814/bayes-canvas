@@ -1,0 +1,9 @@
+{
+  "turns": 3,
+  "threadMessages": 6,
+  "candidates": 4,
+  "status": "answered",
+  "stateUnchangedOutsideIntent": true,
+  "persisted": true,
+  "scope": "合成一時Storeの再生。対話品質の判定、MCP/GUI/推論実行の検証ではありません。"
+}
