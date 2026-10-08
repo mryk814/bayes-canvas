@@ -1,125 +1,269 @@
-# Bayes Canvas
+# Possible Worlds
 
-Visual Bayesian statistical modeling workbench.
+統合ブランチの対象・最新の検証・未検証の境界は[main集約の記録](docs/main-integration.md)を参照。以下の個別検証件数や実測値は各機能を実装した時点の記録。
 
-The goal is to make complex Bayesian models easier to design, inspect, export, and implement in PPLs such as PyMC, NumPyro, Stan, and Turing.jl.
+[専門家ペルソナの検証セット](docs/expert-persona.md)を追加。架空の材料試験担当者が現場事情を段階的に明かし、曖昧な相談を質問・仮定・候補へつなげられるか試す。初回3往復と専用Store再生を記録した。本番Claude/MCP/GUIの検証とは区別する。
 
-## Core idea
+ベイズモデルの prior や事後分布を、数値ではなく**そこから生まれる世界を見て、指して、話す**ことで育てるローカルアプリ。
+AI（Claude Code）は MCP を通じて同じ世界を数値で読み、人の言葉を「意味の候補」と「モデル変更の提案」に翻訳し、推論も実行する。モデルを確定するのは常に人。
 
-Bayes Canvas keeps the compiled `ModelDocument` and `LayoutDocument` as the portable source of truth, with the visual graph as the editing projection:
+研究用PCでの試行錯誤に向け、[推論・欠損・評価の調査レポート](reports/現実のデータで%20試行錯誤する%20推論作業場.md)と[独立検証台の実行方法](docs/research-workbench.md)を追加した。群／時間分割、比較条件、用途別の結果判定、欠損のδ感度計算、Gaussianの周辺化と同時分布復元を検証する。これらは本体未接続の先行部品で、Claudeの作業中エンジンとの接続が次段階。Node全153テスト・型検査、Python6テスト成功。実データ・新しいGUIは未検証。
 
 ```text
-Visual graph → ModelDocument + LayoutDocument → View projections → Review / Package / Handoff → Implementation receipt
+世界を見る → 指す（あり得ない／なぞる／範囲／観測点を開いて層を指す）と一言
+→ Claude が読み方の違う候補を返す → 人が選ぶ（知識として残る）
+→ 変更案を同じ seed で比べて採用 → 新しい版 → Claude が Stan / NumPyro で推論
+→ 事後予測の世界をデータと並べて、また指す
 ```
 
-Canvas, Story, Equations, Structure, and Contract are synchronized projections of the same canonical document. They do not store independent semantic state.
-
-The current semantic coverage and the distinction between distributions, observation processes, structural blocks, and constraints are documented in [`docs/model-coverage.md`](./docs/model-coverage.md).
-
-## MVP scope
-
-- Node-based visual model editor
-- Variables, priors, deterministic expressions, likelihoods, and plates
-- Shape/index awareness
-- Three-stage workflow for building, reviewing, and handing off a model
-- Multi-view projections for canvas editing, generative story, equations, structure, and contract review
-- Model IR export as JSON/YAML
-- AI implementation prompt export
-- AIの返答をそのまま貼り付けられるportable package / raw ModelDocument import
-- role・shape・unit・欠測を含むデータ契約からのDataノード生成
-- CSV / TSVの代表行から型・role・欠測候補を推定
-- 名前付きモデル案の保存とsemantic diff比較
-- 診断からの差分確認付きquick fixとUndo
-- prior predictive設計チェックと外部AI向け検証prompt
-- model scorecard、prior感度scenario、Evidence Ledger、Model Card
-- Causal estimandとDirichlet-process mixtureの正式block契約
-- 実装receiptのfingerprint照合
-- IndexedDB autosave restore prompt for local-first recovery
-- PyMC/NumPyro code generation target later
-
-## Workflow
-
-The header keeps the current task explicit:
-
-1. **組む** — add and edit model elements on the canvas.
-2. **確認** — inspect diagnostics, assumptions, and the compiled outline without losing canvas context.
-3. **渡す** — export the canonical document or prepare an implementation prompt. NumPyro is the default prompt target.
-
-Use **新規・テンプレート** to start from an empty canvas, choose a teaching template, or reopen a saved snapshot. **スナップショット** stores named checkpoints in the browser. Autosave remains separate and is offered as a recovery action after reloading.
-
-各サンプルが何の書き方を示すか、追加・統合するときの基準は
-[`docs/teaching-samples.md`](./docs/teaching-samples.md) にまとめています。
-
-外部AIとの往復、モデル案比較、診断修正、prior predictive、実装receiptは
-[`docs/model-workbench.md`](./docs/model-workbench.md) にまとめています。
-
-## Prototype stack
-
-- Vite + React + TypeScript
-- React Flow for the visual graph editor
-- Zod for validating model IR
-- YAML export via `yaml`
-
-## Development
-
-### Windows: easiest launch
-
-Double-click [`start-bayes-canvas.cmd`](./start-bayes-canvas.cmd). On the first launch it installs the locked dependencies, starts Bayes Canvas, and opens the browser automatically. Keep the terminal window open while using the app. Press `Ctrl+C` in that window to stop it.
-
-The same launcher is available from PowerShell:
-
-```powershell
-.\start-bayes-canvas.cmd
-```
-
-### Command-line launch
-
-Install dependencies once:
-
-```powershell
-npm.cmd --prefix app ci
-```
-
-Then start the app. The browser opens automatically, normally at `http://127.0.0.1:5173/`:
-
-```powershell
-npm.cmd start
-```
-
-Press `Ctrl+C` to stop it.
-
-For development without automatically opening a browser:
+## 起動
 
 ```bash
+npm install
 npm run dev
 ```
 
-The root scripts delegate to `app/`, so `npm run dev`, `npm run build`, and `npm run preview` can be run from the repository root.
+`http://127.0.0.1:5199/` を開く。本番ビルドで使う場合は `npm run build` のあと `npm start`。
 
-## Validation
+ローカルAPIは `localhost` / `127.0.0.1` のHost、同じOriginからのブラウザ要求、JSON形式の変更要求を受け付ける。Originを付けないローカルMCP/CLIも利用できる。別サイトや任意ホストのプロキシ経由では呼び出せない。推論アルゴリズムはローカルPythonで実行されるため、信頼できるコードのみを提案する（sandboxではない）。
 
-Run these checks from the repository root before handing off changes:
+## Claude Code とつなぐ
+
+このフォルダで Claude Code を開くと `.mcp.json` の `worlds`（`bridge/mcp.ts`）が起動を求められる。許可すればツールが使える。
+
+- **引き取り方式**: アプリで「Claude に渡す」を押したあと、Claude Code に「Possible Worlds に届いた意図を見て、候補を返してください」と送る。
+- **自動で届ける方式（CLI・研究プレビュー）**: `claude --dangerously-load-development-channels server:worlds` で起動すると、送った瞬間にセッションへ通知が入る。
+
+Claude が使えるツールは読む・提案する・証拠を付けるものだけ（`worlds_overview` / `worlds_pending_intents` / `worlds_sample` / `worlds_reply` / `worlds_propose_model` / `worlds_attach_dataset` / `worlds_synthesize_dataset` / `worlds_prepare_inference` / `worlds_attach_run`）。**採用・却下・巻き戻しはアプリの画面からだけ。** ファイルの読み書きは `work/` に限る。
+
+## モデル：生成プログラム
+
+モデルは PPL に依存しない生成プログラムとして保存する。
+
+- `plates`: 添字の集合（試料、試験機…）と既定の大きさ
+- `data`: 既知の入力。添字の列は `indexOf` で別のプレートを指す（0 始まり）
+- `nodes`: 生成順のノード。`param` / `latent` / `deterministic` / `observed`。分布の引数は式。別プレートの値は `bias[machine_of]` のように読む。観測には `censorAbove`（記録上限による打ち切り）を付けられる
+- `view`: 世界の描き方（x, y, 線, 群）
+
+prior の世界はこのプログラムを前方シミュレーションして作る。run を見ているときは「識別性」に切り替えると、データが絞った量・prior のままの量・一緒に動く組と、その尾根の両端にある「同じ記録を作る二つの世界」を見られる（`shared/identify.ts`、`src/Lens.tsx`）。「形」では、観測の平均やばらつきがモデル上で x に沿ってどんな形かを関数の束で見せ、その上に信じる形をなぞれる。run があれば区間ごとの事後予測チェックも出す（`shared/shape.ts`、`src/Shape.tsx`）。事後予測の世界は run の joint draw でパラメータと潜在変数を固定し、観測だけを再シミュレーションする。
+
+例は2つ。「温度と強度の曲線」と、試料・試験機・記録上限を通って値が記録される「観測点を開く」。後者では点を押すと、記録 → 測定誤差 → 試験機の偏り → 真の強度 → パラメータ → 既知の入力、の層が開き、層を指して送れる。潜在の層は prior では「仮説の値」、事後では「draw の推定」と表示し、真値とは呼ばない。
+
+## 推論
+
+アプリは推論の道具を内製しない。手元の NumPyro（と、検証用に CmdStan）に任せる。
+
+### 裏で育つ事後分布
+
+モデルの版かデータが変わると、サーバーが自分で事後分布を計算する（`server/ladder.ts`）。NumPyro のワーカー（`inference/worker.py`）を 1 つ常駐させ、JAX の読み込みは最初の 1 回だけにする。
+
+1. **速い近似**。モデルの形で選ぶ
+   - 試料ごとの潜在変数がないモデル：**ラプラス近似**（BFGS で最頻値、そこでのヘッセ行列で正規近似）
+   - 潜在変数があるモデル：**平均場 ADVI**。観測過程の例で結合事後分布の最頻値が「測定誤差 → 0」に崩れたための暫定的な選択規則。潜在変数の有無だけでラプラス近似一般の可否を判定するものではない
+   - どちらも重要度重みの **Pareto k** で検査し、0.7 を超えたら記録だけ残して表示に使わない
+2. **NUTS**（4 chain）。診断（R̂・ESS・発散）と、近似とのずれを警告として付ける
+
+「見る世界」を「自動」にすると、いまの版のいちばん確かな結果を表示し、計算が進むとその場で差し替わる。上部バーに計算の段階と経過時間、推論タブにジョブの一覧（一時停止・やり直し）が出る。版がさらに変わると古い版のジョブは止まる。`WORLDS_AUTO=0` で止められる。作業ファイルは `work/auto/`。
+
+実測（このリポジトリの例、Windows・CPU）:
+
+| モデル | 近似 | NUTS |
+|---|---|---|
+| 曲線（潜在変数なし） | ラプラス 11 秒・Pareto k 0.54（NUTS とほぼ一致） | 17 秒 |
+| 観測過程・繰り返し測定つき | ADVI 18 秒・Pareto k 0.99（信用できないので表示しない） | 39 秒 |
+| 同じモデルを Stan で | Pathfinder 25 秒・Pareto k 2.7 | 75 秒（コンパイル込み） |
+
+### 推論のエンジン：AI が書くアルゴリズムと成績表
+
+モデルは「何を」、アルゴリズムは「どう」推論するか。NUTS が苦しむ版（発散、1 秒あたりの有効サンプル数が少ない）では、Claude Code がその版のためのサンプラーを書いて提案できる。正規の潜在層を解析的に積分して後で引き直す崩壊型、共役なブロックのギブス、打ち切りのデータ拡大、楕円スライスなど。人はコードを読まず、成績表を見て採用するかを決める。採用したアルゴリズムは、その版で NUTS の代わりに裏の計算を担う。
+
+約束事（`inference/pw_numpyro.py` の ALGORITHM CONTRACT）: モジュールは `NAME` と `make(mod, sizes, options) -> fit` を持ち、`fit(key, data, chains, draws, warmup)` は生成モデルの全ての量の draw（積分で消した量も引き直したもの）を返す。`make` で一度コンパイルし、実データ・学習用の分割・較正用の模擬データへ使い回す。
+
+裏の計算は、採用の前に次の三つを別々に記録する。一つの「正しい」にはまとめない。
+
+| | 何をするか | 何を言えるか |
+|---|---|---|
+| 試走 | 実データで 4 chain。R̂・ESS・発散・秒、NUTS とのずれ | 速さ（1 秒あたりの有効サンプル数の比） |
+| 計算の検査（較正） | アプリ自身のシミュレータで事前分布から 40 組のデータを作り、真の値が事後分布のどこに落ちるか（SBC）。各量の周辺に加えて、潜在値の和（実際の記録が指す試料と試験機の組など）も見る。順位の分布・位置・広がりの三つで検定し、量の数で補正 | 偏りを検出したか。検出しないことは正しさの証明ではない |
+| 予測 | 記録を取っておいて推論し、当てられるかを CRPS・誤差・90% 区間で採点。「記録の 20% をランダムに」と「試料の 20% を丸ごと」は別の問いとして分け、一つの順位にしない。観測の量ごと（単位ごと）に採点し、方法どうしは同じ記録での差 ± 標準誤差で比べる | ベイズの枠の外での役立ち。近似やほかの方法も同じ表に並ぶ |
+
+近似が自分の検査（Pareto k）に落ちても、予測では最良と並ぶことがある。成績表はそれをそのまま見せる（パラメータを読むには使えないが、予測が目的なら足りるかもしれない）。
+
+実測（観測過程・繰り返し測定つき、試料 80・試験機 3・記録 100、Windows・CPU）:
+
+| | 秒 | 最小 ESS | 発散 | 1 秒あたり ESS |
+|---|---|---|---|---|
+| NUTS（生成モデルそのまま） | 19 | 130 | 17 | 6.8 |
+| 崩壊型 NUTS（真の強度と試験機のずれを積分、Claude が書いた） | 5〜7 | 1336 | 1 | 205（30 倍） |
+
+素朴だけれどパラメータの多い場合（同じモデルで試料 500・試験機 10・記録 750、潜在変数 510 個）:
+
+| | 秒 | R̂ | 最小 ESS | 発散 |
+|---|---|---|---|---|
+| NUTS | 39 | 1.045（収束していない） | 58 | 45 |
+| 崩壊型 NUTS | 32 | 1.003 | 2798 | 0 |
+
+| 予測の採点（CRPS、20 件） | 見た試料の次の記録 | まだ見ていない試料 |
+|---|---|---|
+| 近似（ADVI、Pareto k 0.99 で不合格） | 9.00（最良との差 +1.07 ± 0.63） | 10.2（最良） |
+| NUTS | 7.93（最良） | 10.6（+0.40 ± 0.48） |
+| 崩壊型 | 8.19（+0.26 ± 0.19） | 10.4（+0.14 ± 0.38） |
+
+較正の検出力を、わざと誤りを入れたサンプラーで確かめた（40 組 × 21 量）。
+
+| 入れた誤り | 結果 |
+|---|---|
+| なし（正しい崩壊型） | 偏りは検出されず |
+| 周辺尤度の行列式から 1 項を落とす | 検出（試験機間のばらつきの真の値が、40 組中 32 組で全 draw より下） |
+| 試験機のずれを draw の間でシャッフル（各量の周辺は正確、相関だけ壊す） | 検出（`true_strength[0]+bias[0]` の順位だけが中央に寄る。周辺だけの検査では見えない） |
+| 試験機のずれを条件付き独立に引き直す（相関 −0.88 → −0.81、和の幅 +17%） | 検出されず。40 組ではこの大きさの誤りは見えない |
+
+### 手で走らせる・Stan で確かめる
+
+別の設定や書き出し先で走らせたいときは、Claude Code が `worlds_prepare_inference`（既定は NumPyro、`backend: "stan"` で CmdStanPy）で書き出したプログラムを実行し、`worlds_attach_run` で結果を戻す。NumPyro の書き出しは `model.py` と `pw_numpyro.py`（`--method approx|nuts|custom`）。アルゴリズムを書くときは `worlds_algorithm_context` で材料を `work/` に書き出し、手元で試してから `worlds_propose_algorithm` で提案する。Stan は版ごとにコンパイルが要るので、自動の階段には使わず、別の PPL による最終確認として使う。
+
+### Stan の準備（Windows・任意）
+
+CmdStan は C++ ツールチェーンが要る。`%USERPROFILE%\.cmdstan` に入れる。
+
+```powershell
+uv run --with cmdstanpy python -m cmdstanpy.install_cxx_toolchain
+uv run --with cmdstanpy python -m cmdstanpy.install_cmdstan
+```
+
+cmdstanpy 1.x の RTools インストーラ呼び出しは失敗することがある。その場合は `%USERPROFILE%\.cmdstan\RTools40.exe` を `/DIR="%USERPROFILE%\.cmdstan\RTools40"` 付きで直接実行し、`RTools40\usr\bin\bash.exe -lc "pacman -Sy mingw-w64-x86_64-make --noconfirm"` のあと `cmdstan-<版>` で `mingw32-make build` する。`run_stan.py` は実行時に RTools を PATH に足す。Git Bash では `HOME` の形式で cmdstanpy が迷うので PowerShell から実行する。
+
+## 三種類の操作を混ぜない
+
+| 操作 | 例 | 保存のされ方 |
+|---|---|---|
+| 表示の変更 | 別の世界を引く、prior と run の切り替え、重ねて見る | 保存しない。モデルは変わらない |
+| 知識の表明 | 「あり得ない」、なぞり線、範囲、層を指す、一言 | 意図として送り、候補を選んだ時点で知識になる |
+| モデルの変更 | prior、観測過程、階層の変更 | 提案として届き、採用したときだけ新しい版になる |
+
+データセットと run は証拠であり、モデルを変えない。
+
+## データ
+
+- 正本: `data/worlds.json`（`WORLDS_DATA` で変更可）。書き込みは一時ファイル経由で置き換え、直前を `.bak` に残す。読めないファイルは上書きせず起動を止める。
+- `possible-worlds@1` のファイルは読み込み時に `@2` へ移行し、次の変更で書き戻す（`@1` は `.bak` に残る）。
+- 「書き出す」で全体を JSON として保存できる。
+- 推論の作業ファイルは `work/`（git 管理外）。
+
+## 構成
+
+```text
+shared/   契約（zod）、式言語、前方シミュレーションと観測点の解剖、意味の差分、Stan / NumPyro への書き出し、推論の成績表（evaluate.ts：較正・予測の分割と採点）
+inference/ NumPyro の推論（pw_numpyro.py：ラプラス / ADVI / NUTS と Pareto k、AI が書くアルゴリズムの約束事と実行、SBC、worker.py：常駐ワーカー）
+server/   正本の保存、移行、HTTP API（/api/human/* と /api/agent/*）、変更の通知（SSE）
+bridge/   Claude Code が起動する MCP ブリッジ（状態を持たず、サーバーへ中継する）
+src/      React の画面（世界の劇場、観測点の解剖、メモ、対話、提案、知識、推論、モデル）
+test/     契約・シミュレーション・書き出し・保存の流れのテスト
+```
+
+主なライブラリ: React 19 / Vite 8、`@modelcontextprotocol/sdk`、zod 4、d3-scale・d3-shape、perfect-freehand、motion、KaTeX、Tabler Icons、Fontsource。
+
+## 検証
 
 ```bash
+npm test
 npm run typecheck
-npm run test
-npm run cli:lint:sample
-npm run cli:handoff:sample
 npm run build
 ```
 
-`cli:lint:sample` compiles the hierarchical regression sample and fails on blocking diagnostics. `cli:handoff:sample` builds the PyMC handoff bundle from the same sample, which keeps the CLI export path covered by CI.
+## 確かめたこと
 
-## First example
+`work/scenario.mjs` で、実際の HTTP API（人の側）と MCP ブリッジ（Claude の側）を通して次を通した。
 
-Hierarchical regression:
+1. 「試験機 C だけ高温で測定が揺れる」真の過程から合成データ 60 本を作る（モデルはそれを知らない）
+2. v1 を推論 → 個体差と測定誤差が識別できず失敗（R̂ 1.33、発散多数）。それも run として残す
+3. 事後予測の世界で高温・試験機 C の点を開き、測定誤差の層を指して「熱くなると不安定。校正では 5 MPa くらい」
+4. Claude が4つの読み方を返し、「校正値＋試験機ごとの高温での揺れ」を選んで v2 に。v1 の run は旧版になる
+5. v2 を Stan と NumPyro で推論 → Stan で R̂ 1.003・ESS 656・発散 2。両者の事後はほぼ一致し、真の値（測定誤差 5、試験機 C の上乗せ約 40）を区間に含む。C だとはモデルに書いていない
+6. 識別性のレンズ（run を見ているとき「識別性」）で v1 を見ると、個体差と測定誤差の尾根（ρ = −0.77）と、中身は違うのに記録がほぼ同じ二つの世界が出る。v2 では尾根が消える代わりに測定誤差が「prior のまま」（縮み 4%）と出て、校正の知識が値を決めていることが分かる
+7. その組を指して「2 回ずつ測った記録がある」と伝えると、Claude が「測定」プレートを足す構造変更を提案。採用した v3 と繰り返し測定つきの合成データ（100 記録）を Stan で推論すると、校正の prior なしで尾根が消え、個体差 13.0 [10.2, 15.7]（真 12）・測定誤差 3.0 [0.8, 7.2]（真 5）に分かれる。試験機 C の揺れは 24.9 [17.3, 33.6] と真の約 40 より小さく、関数形の仮定（20°C から直線）と真の形（150°C から増える）の違いが残っている
+8. 「形」でその違いを指す。区間ごとの事後予測チェックではデータの点が少なく形を言えない（外れは 1 区間で、問題のない試験機 A にも偶然の外れが出る）。そこでモデルのばらつきの帯の上に「150°C まで平ら、そこから増える」をなぞり、「ヒーターが 150°C で入る」と送る。Claude が 3 つの関数形を返し、揺れ始めの温度を推定する折れ線（prior 150 ± 15°C）を採用した v4 では、100°C の上乗せが 0.0（v3 は 7.1）、300°C が 30.0 [21.5, 43.1]（真 40 を含む）、揺れ始めは 144.6 [123, 163]。揺れ始めの縮みは 32% で、形を決めたのは主に人の知識
 
-```text
-alpha_bar ~ Normal(0, 2)
-tau_alpha ~ HalfNormal(1)
-alpha[j] ~ Normal(alpha_bar, tau_alpha)
-beta ~ Normal(0, 1)
-sigma ~ HalfNormal(1)
-mu[i] = alpha[group_id[i]] + beta * x[i]
-y[i] ~ Normal(mu[i], sigma)
-```
+## 問いの道具
+
+上部の「問いの道具」で、世界とは別の画面に道具が並ぶ。世界と道具は同じ run 選択を共有し（「自動」なら裏の計算のいちばん確かな run）、往復しても入力は残る。道具の操作はモデルを変えない。モデルを変えるのは、ほかの提案と同じく差分を見て採用したときだけ。
+
+| 道具 | すること |
+|---|---|
+| 問いの契約 | 問いに対象母集団・推定したい量・判断への使い方を足し、版に結び付ける（提案 → 採用） |
+| 生成物語と式 | 版の入力とノードを生成順に文章と式で並べ、式の直接参照を辿る |
+| 同時条件 | 保存 run の同じ draw で二つの条件が同時に成り立つ割合。再生・一段送り・静止表 |
+| CSV 取り込み | 列・単位・群を人が対応づけ、プレビューを確かめてから Dataset に保存。採取・装置・前処理の申告（パスポート）も残せる |
+| 診断の次の一歩 | NUTS は R̂・ESS・発散、裏の近似は Pareto k を、不足と問題に分けて次に見ることを案内する |
+| 証拠カプセル | 版・Dataset・run を一つの JSON に書き出し、検証して独立したモデルとして取り込む |
+| 保存検査 | 区間・群・統計量（平均・最大・標準偏差・閾値超えの割合）を検査として保存し、別版の run へ明示的に再実行する |
+| 仮定の影響先 | 確定した知識から、採用版の変更が式の参照で届く量・観測・表示を辿る |
+| 観測のシャッター | 同じ生成測定値に別の記録上限を当て、元の記録と比べる |
+| 階層の共有先 | 群の値・共有中心・群 SD と、同じ draw での群差を読む |
+| priorを試す | 同じ分布族の数値引数を調整し、同じseed・共通軸で比較して変更提案へ進む |
+
+世界画面の「図の表示条件」は、いま見ている図の版・seed・証拠・軸範囲・軸外の点を示す。
+
+これらは Astra（GPT-6）が `codex/experience-lab` で先に作り、本体へ取り込んだ。各道具の範囲・検証・未検証の部分は [`docs/ledger-implementation.md`](./docs/ledger-implementation.md) にある。合成例だけの独立した試作は [`docs/experience-lab.md`](./docs/experience-lab.md)（`npm run lab` → `http://127.0.0.1:5227/lab/`、本体のデータには触れない）。
+
+## 調査資料との対応
+
+元になった調査資料（2026-10-07 の補遺と前 Atlas）のどこまでを実装したかは [`docs/research-ledger.md`](./docs/research-ledger.md) に台帳として記録している。機能を足したら台帳も更新する。
+
+### 各機能の過去の検証記録
+
+「仮定の影響先」は確定した知識から採用版と変更箇所を辿り、変更前後それぞれの式参照で到達できる量・観測・表示を一覧にする。複数の知識は提案全体の共同根拠として扱い、個々の変更を一つの発言へ帰属させない。取り下げた知識も採用時の履歴に残し、revert元と現行／旧版を表示する。参照が欠けたり対応が不整合なら「不明」とし、効果量・因果効果・感度は計算しない。既存の記録を読む機能で、保存schemaは変えていない。
+
+仮定の影響先の追加後は78テスト・型検証・本体buildが成功。専用合成fixtureとproductionサーバーで両モデルの知識・旧版・現行revert、取り下げ・未採用、変更前後の開閉、往復保持・reloadを確認した。1265×712・390×844の画像と条件は[`docs/assumptions-evidence/README.md`](./docs/assumptions-evidence/README.md)。今回ラボbuildは再実行していない（ラボの入力変更なし）。実データ・Claude統合・スマホ実機・利用者評価は未検証。
+
+7番目の「観測のシャッター」では、priorの16世界または保存runのdrawを選び、上限前の生成測定値・モデル本来の記録・試した一定上限での記録を比較する。上限操作では同じ測定値とノイズを固定し、元の上限式は行ごとに評価する。上限を超えた行だけ置き換え、等しい値は打ち切りとせず、行・群・添字を保つ。全点を含む共通軸と静止表で読み、版・run・seed・draw・上限と発言を既存の対話へ残せる。
+
+これは上限前の真値や実測値の復元ではなく、別尤度で推論し直した結果でもない。モデル・Dataset・runを変更せず、保存schemaや新規APIを追加しない。欠測・選択・検出下限は未対応。
+
+シャッター追加後は90テスト・型検証・本体buildが成功。デスクトップと390px幅のGUIで上限350→400でも生成測定値が不変であること、元へ戻す操作、旧runの32drawからの選択と戻ったときの再現、全行表の横スクロールを確認した。発言の永続保存と、意図以外の状態のSHAが変わらないことも確認。極端な上限−1.79e308の符号表示を検証した。実データ・実MCMC・スマホ実機・利用者評価は未検証。
+
+8番目の道具「階層の共有先」を接続した。群列が参照するプレート上のNormal量について、共有中心・群SD・各群値の周辺5/50/95%点、同じdrawでの群A−Bと閾値を超える割合、全draw表を読む。観測0件の群も残す。曲線例の測定点を群へ読み替えず、対象がない場合は理由を示す。条件と版・run・Dataset参照を既存intentへ保存し、モデルやrunは変更しない。100テスト・型検証・本体build成功。合成fixtureで条件操作・意図保存・reloadと狭幅表示を確認した。
+
+この道具は保存runにある共有構造と群差を読むもので、中心への近さやpriorからposteriorへの変化をpooling効果とみなさない。独立群モデルとの比較、縮約率、pooling強度を変えた再推論は未対応。
+
+合成fixtureで群A=2・B=0・閾値5の割合7/32（21.875%）、全32draw表、空閾値の拒否、旧版・対象なし・0件群の保持、画面往復とメモ保存後のreloadを確認。証拠は[`docs/pooling-evidence/`](./docs/pooling-evidence/groups-desktop.jpg)のJPEG 5枚。狭幅は390×844指定／画像実寸375×812、デスクトップ1265×712、対象なし1280×720。schema・APIは変更せず、ラボ入力不変のため今回ラボbuildは再実行していない。実MCMC・実データ・Claude実環境統合・スマホ実機・利用者評価は未検証。
+
+証拠カプセルの独立取り込みを接続した。`evidence-capsule@1`を検証し、人の明示操作で`POST /api/human/capsules`から新しいモデル・v1・Dataset・runを一度に保存する。すべて新IDにし、既存モデルや同じIDの証拠は上書きしない。spec・Dataset・全draw・診断・来歴・元の日時を保持し、参照だけを新IDへ対応させる。保存形式@3の版originに`capsule`と元参照を追加する。元の提案・知識・巻き戻し履歴は復元しない。署名や推論の再現も未対応。全104テスト・型検証・本体buildが成功し、専用合成fixtureでGUIの取り込み・再書き出し・reloadを確認した。
+
+カプセル取込は専用5237番の空の作業場で確認。観測例v2を独立v1として開き、取り込んだrunを自動表示、不正JSON・参照不一致の拒否、入力変更による保存操作の無効化、再書き出し時の全draw・全列一致、reload、同じローカルIDの再取込による別コピーを検証した。明示的なprior選択の再読込後保持と元コピーのrun保持、新規開始から戻る操作も確認。[JPEG 6枚と条件](docs/capsule-import-evidence/README.md)にはデスクトップ1265×712、狭幅390×844指定／画像実寸375×812を記録。出自は初期状態で閉じ、44px以上の見出しから展開する。ラボ入力不変のため今回ラボbuildは再実行していない。実MCMC・実データ・Claude統合・スマホ実機は未検証、署名・全履歴復元・推論再現は未対応。
+
+保存検査に「閾値を超える記録の割合」を接続した。区間・群に入る記録のうち、`y > threshold`の件数を全記録数Nで割る。等値は含めず、0件は拒否する。閾値は元のy単位で保存し、別版runでも同じ定義を使う。観測と全drawの新個体複製に適用し、結果は0〜1を保存、画面では%表示する。上限処理後の記録に対する割合で、潜在量の裾確率ではない。複製統計量が観測統計量以上となる既存の「上側割合」とは別の値である。
+
+`statistic=exceedance`には有限の閾値を必須とし、平均・最大・標準偏差には閾値指定を認めない。既存@3の閾値なし定義・結果を維持する。108テスト・型検証・本体／ラボbuildが成功し、合成fixtureで保存・別版再実行・reloadを確認した。過去104件などの結果は当時の記録として保持する。任意の検査構成は引き続き未対応。
+
+超過割合のGUIではx=180〜260・machine_of[1]・閾値300で、観測2/3=66.667%（N=3）を保存した。seed9001・各32複製の上側割合はv1で43.8%、同じ定義のv2再実行で46.9%。観測割合は同じで、reload後も両版の履歴を保持した。[超過割合の検証記録](docs/exceedance-evidence/README.md)。U16/RP24は任意検査構成や実環境検証が残るため部分を維持する。
+
+375×812の狭幅で閾値入力・複製値の%表示・表のキー操作を確認。平均へ切り替えた保存と世界へ戻る操作も確認した。証拠は上記のJPEG 3枚とソースmanifestを参照。
+
+9番目の道具「問いの契約」を接続した。問いの一文に加え、対象母集団・適用範囲、推定したい量・比較・単位、判断への使い方を版に結び付けて記録する。3項目は各trim後1〜2000文字で、既存モデルの未設定状態はそのまま読む。現在版から問い・契約だけの変更提案を作り、差分を確認して採用または見送る。提案のみでは版やrunを変えず、採用後も旧runを自動で付け替えない。
+
+仮定の影響先では契約の追加・変更・除去をメタデータとして示し、数式への影響を推定しない。任意の`questionContract`を@3のspecに追加してoverview・revert・カプセルでも保持する。対象母集団や推定量の記述を機械検証するものではなく、識別性・因果解釈・最適な意思決定は保証しない。合成fixtureで提案・差分・採用・見送り・旧版・再読込を確認した。U01は部分のまま。
+
+問いの契約では、必須空欄の拒否、4入力からの提案と4差分、採用v3、旧v2の読取専用表示・編集中入力の保持、明示的な最新版読込、decisionだけの1差分提案と見送りをGUI確認。reload後の採用契約と、世界へ戻ったモデル概要の表示も確認した。[JPEG 5枚と検証条件](docs/question-contract-evidence/README.md)。差分表示の最終修正後に全113テスト・型検証・本体／ラボbuildが成功し、GUI画像も最終buildで記録した。@3の任意項目追加で既存specを読めるが、旧アプリは未知項目を除去するため往復保存すると契約が失われる。旧アプリとの互換は保証しない。
+
+CSV取り込みに観測パスポートを接続した。Datasetの任意の`passport`へ採取・対象の選び方（sampling）、装置・測定条件（instrument）、取り込み前の前処理（preprocessing）を記録する。各項目は任意で、指定時はtrim後1〜2000文字、passportを指定するなら1項目以上を要求する。未記録は推測せず、全項目未入力ならpassportを省略できる。
+
+編集後はプレビューと確認を無効化し、列・単位・群対応とともに再確認して保存する。前処理の申告はアプリの単位変換・群添字化の自動来歴とは分ける。保存済み項目は読取専用とし、overview・カプセルにも保持する。@3の任意項目追加で既存Datasetは読めるが、旧アプリで往復保存すると未知項目除去でpassportが失われる可能性があり、旧アプリ互換は保証しない。追加4テストの失敗を確認後、全117テスト・型検査・本体／ラボbuildが成功。合成CSVのファイル選択から保存・再読込・カプセル独立取込までGUI確認した。[画像6枚と検証条件](docs/passport-evidence/README.md)。未記録表示、編集時の確認解除、狭幅での再確認、独立コピーのreload保持も確認。実推論・実データ・スマホ実機・Claude実環境統合は未確認。道具は9つのまま、U02/P06は部分を維持する。
+
+10番目の道具「生成物語と式」（U03）を接続した。同じモデル版の入力とノードを生成順に並べ、文章と式の選択を同期し、式のASTにある直接参照を辿る。runから独立して現行・旧版の定義を読み、選択した量・式・版への発言は既存intentへ保存する。全11分布の引数の意味を保ち、入力の生成方法は事前世界の例示と明記する。実際の生成履歴・因果の証明・posteriorの生成手順は示さない。
+
+追加4テストのRED確認後、全121テスト・型検査・本体build成功。ラボ入力は不変のため今回はラボbuildを再実行していない。両例・旧版・文章/式の同期・直接参照の遷移・狭幅をGUI確認し、世界との往復では選択と発言を保持、明示的な版変更では初期化した。旧v1への発言保存とreload後の対話表示を確認し、旧全記録は不変だった。[画像7枚と検証条件](docs/story-evidence/README.md)。自由文生成、文章編集から式への変更、因果の証明は対象外。Claude実環境統合・スマホ実機・利用者評価は未検証で、U03部分を維持する。117件などの結果は各時点の記録として残す。
+
+「世界を並べる」に、初期状態で閉じた「図の表示条件」（U36/U39）を接続した。表示版・seed・prior/run・Dataset・実測/合成・旧版・棚に選んだdraw、元viewの量と単位、実際の共通軸範囲を示す。保存runの表示抽出は最大12本とし、12本以下を欠落なく全表示する。生成点とDataset点を分けて非有限座標・軸外の件数を示し、点を隠す規則は描画と共有する。線を確率帯とは扱わず、開閉や表示変更で保存値を変えない。
+
+全126テスト・型検査・本体build成功。両例のprior/run、4draw全表示、32drawの抽出、旧版、点非表示、単独/重ね、狭幅をGUI確認した。[画像8枚と検証条件](docs/view-evidence/README.md)。道具は10個、保存形式・API変更なし。U36部分を維持し、U39をこの契約テストの範囲で部分へ変更した。実推論・スマホ実機は未検証で、全レンズやピクセル可視性を網羅する保証ではない。
+
+11番目の道具「priorを試す」（U05）を接続した。引数がすべて有限の数値リテラルである現在版のscalar paramだけを選び、既存の分布族の引数を調整する。全11分布の定義域を検証し、明示プレビューで基点と候補の6組のprior世界を同じseed・共通軸で隣接比較する。これは前方生成の試着で、事後推論や個体の反実仮想対応ではない。
+
+編集後はプレビューを無効化し、理由付きの通常提案から既存の採用/見送りへ進む。提案だけでは版・Dataset・runを変えず、旧基点・同値・不正値を拒否する。保存schema変更なし、人向けAPIを1本追加。全134テスト・型検査・本体build成功。両例・不正値と描画不能な極値の拒否・reset・seed変更・往復保持・旧runから独立した基点・採用/見送り・reloadをGUI確認した。[画像11枚と検証条件](docs/prior-evidence/README.md)。旧全証拠は不変で、最終状態には新しい版1件と、採用/見送りの提案2件が残る。実推論・スマホ実機・利用者評価は未検証。U05部分とU集計5/15/20を維持する。
+
+## いまの限界
+
+- 1ノードは1つのプレートにだけ載る（交差したプレート、行列・GP・常微分方程式などは未対応）
+- 離散の潜在変数は NUTS 系では扱えない（警告を出す）
+- 事後の世界は run に保存した draw（既定 400）から描く

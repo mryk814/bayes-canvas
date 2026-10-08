@@ -1,0 +1,6 @@
+{
+  "shared/codegen.ts": "147a3fc63c4a542e54d382ab0cf37ca546a37157e4e3bd38b9c9d697613561f8",
+  "inference/worker.py": "64839885f16ca9f6f7648bc454ac1223a96f1f7a5b1bb200d094db5311107d76",
+  "inference/pw_numpyro.py": "54b748ee0261d40e99337ccf8c4a3f6abf9b41f58bc85e63f0bbdd696e888a08",
+  "shared/example.ts": "76ce42a083988ae0e34bb6bd3a0c975fe807e5ccd319f188fc7adf0e7c3089b4"
+}

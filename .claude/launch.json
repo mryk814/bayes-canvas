@@ -2,12 +2,26 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "app",
+      "name": "worlds",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 5175,
-      "autoPort": true,
-      "cwd": "app"
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 5199
+    },
+    {
+      "name": "worlds-scratch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/main.ts",
+        "--dev"
+      ],
+      "env": {
+        "PORT": "5198",
+        "WORLDS_DATA": "work/worlds-test.json"
+      },
+      "port": 5198
     }
   ]
 }
