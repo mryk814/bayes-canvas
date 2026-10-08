@@ -1,0 +1,45 @@
+{
+  "exitCode": 0,
+  "wallSeconds": 12.712014100000001,
+  "runs": [
+    {
+      "job": "approx",
+      "method": "NumPyro Laplace",
+      "drawsPerSite": 64,
+      "sites": [
+        "s20",
+        "slope",
+        "curv",
+        "sigma"
+      ],
+      "diagnostics": {
+        "maxRhat": null,
+        "minEss": null,
+        "divergences": null,
+        "chains": null,
+        "paretoK": 0.39637689452148483,
+        "seconds": 8.55227509996621
+      }
+    },
+    {
+      "job": "nuts",
+      "method": "NumPyro NUTS 2x32 accept 0.9",
+      "drawsPerSite": 64,
+      "sites": [
+        "s20",
+        "slope",
+        "curv",
+        "sigma"
+      ],
+      "diagnostics": {
+        "maxRhat": 241249.42180510028,
+        "minEss": 1.015873015900107,
+        "divergences": 0,
+        "chains": 2,
+        "paretoK": null,
+        "seconds": 1.7253756999853067
+      }
+    }
+  ],
+  "scope": "Synthetic curve, generated model, two jobs in one real persistent worker process. Finite required draws and protocol only; no convergence or scientific quality claim."
+}

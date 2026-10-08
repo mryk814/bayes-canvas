@@ -1,0 +1,21 @@
+{
+  "exitCode": 0,
+  "wallSeconds": 5.8338889,
+  "method": "NumPyro NUTS 4x1000 accept 0.95",
+  "diagnostics": {
+    "maxRhat": 1.0035569357197918,
+    "minEss": 597.8013910439302,
+    "divergences": 0,
+    "chains": 4,
+    "paretoK": null,
+    "seconds": 2.6055239000124857
+  },
+  "drawsPerSite": 400,
+  "sites": [
+    "s20",
+    "slope",
+    "curv",
+    "sigma"
+  ],
+  "scope": "Default FULL-size NUTS on the same synthetic curve; output contract and observed diagnostics only, not scientific validation."
+}

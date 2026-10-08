@@ -124,9 +124,18 @@ export function SideBySide({ before, after, seed }: { before: ModelSpec | null; 
     const b = before ? compileSpec(before) : null;
     const a = compileSpec(after);
     if (!a.ok) return { ok: false as const, problems: a.problems };
-    const ap = simulateWorlds(a.compiled, seed, 6).map((w) => viewPoints(a.compiled, w));
-    const bp = b?.ok ? simulateWorlds(b.compiled, seed, 6).map((w) => viewPoints(b.compiled, w)) : [];
-    return { ok: true as const, ap, bp, domains: sharedDomains([...ap, ...bp]) };
+    if (b && !b.ok) return { ok: false as const, problems: b.problems };
+    const aw = simulateWorlds(a.compiled, seed, 6), bw = b?.ok ? simulateWorlds(b.compiled, seed, 6) : [];
+    if ([...aw, ...bw].some(w => w.broken || Object.values(w.values).some(values => values.some(value => !Number.isFinite(value))))) {
+      return { ok: false as const, problems: [`seed ${seed} の比較世界に非有限または不正な値が生じました。`] };
+    }
+    const ap = aw.map(w => viewPoints(a.compiled, w));
+    const bp = b?.ok ? bw.map(w => viewPoints(b.compiled, w)) : [];
+    const domains = sharedDomains([...ap, ...bp]);
+    if ([domains.x, domains.y].some(([lo, hi]) => !Number.isFinite(lo) || !Number.isFinite(hi) || !Number.isFinite(hi - lo) || hi <= lo)) {
+      return { ok: false as const, problems: [`seed ${seed} の生成値の範囲を共通軸で比較できません。`] };
+    }
+    return { ok: true as const, ap, bp, domains };
   }, [before, after, seed]);
   if (!result.ok) return <p className="error-note">この案は描けません: {result.problems.join(" / ")}</p>;
   const row = (label: string, pts: typeof result.ap) => (
@@ -143,7 +152,7 @@ export function SideBySide({ before, after, seed }: { before: ModelSpec | null; 
     <div className="sbs" aria-label="同じ seed で今の版と提案を比べる">
       {result.bp.length > 0 && row("いま", result.bp)}
       {row("提案", result.ap)}
-      <p className="muted small">同じ seed・同じ縦軸の prior の世界です。ノードの数や順が変わると、同じ番号でも別の世界になります。</p>
+      <p className="muted small">seed {seed}・同じ縦軸の prior の世界です。ノードの数や順が変わると、同じ番号でも別の世界になります。</p>
     </div>
   );
 }

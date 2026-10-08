@@ -92,7 +92,9 @@ export class Ladder {
       }
     }
     if (this.enabled) for (const m of s.models) this.planVersion(m.id, m.currentVersionId);
-    this.jobs = this.jobs.slice(-60);
+    const active = (job: Job) => job.status === "queued" || job.status === "running";
+    const history = this.jobs.filter(job => !active(job)).slice(-60);
+    this.jobs = this.jobs.filter(job => active(job) || history.includes(job));
     this.notify();
     this.pump();
   }

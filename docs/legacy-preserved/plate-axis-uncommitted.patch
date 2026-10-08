@@ -1,0 +1,274 @@
+diff --git a/app/src/lib/authoringSnapshot.ts b/app/src/lib/authoringSnapshot.ts
+index 3b89c6f..60d7c1a 100644
+--- a/app/src/lib/authoringSnapshot.ts
++++ b/app/src/lib/authoringSnapshot.ts
+@@ -43,17 +43,18 @@ export function canvasToAuthoringSnapshot({
+   edges,
+   modelName = 'bayes_canvas_model',
+ }: CanvasProjectorInput): AuthoringSnapshot {
+-  const axes = buildAxes(nodes);
+-  const plates = buildPlates(nodes, axes);
++  const plateAxisIds = resolvePlateAxisIds(nodes);
++  const axes = buildAxes(nodes, plateAxisIds);
++  const plates = buildPlates(nodes, plateAxisIds);
+   const generatedObservationIds = nodes
+     .filter((node) => node.data.kind === 'likelihood' && node.data.observed)
+     .map((node) => `obs_${node.id}`);
+   const entities = {
+-    ...Object.fromEntries(nodes.map((node) => [node.id, nodeToEntity(node)])),
++    ...Object.fromEntries(nodes.map((node) => [node.id, nodeToEntity(node, plateAxisIds)])),
+     ...Object.fromEntries(
+       nodes
+         .filter((node) => node.data.kind === 'likelihood' && node.data.observed)
+-        .map((node) => [`obs_${node.id}`, likelihoodObservationData(node)]),
++        .map((node) => [`obs_${node.id}`, likelihoodObservationData(node, plateAxisIds)]),
+     ),
+   };
+   const documentId = `model_${stableId(modelName)}`;
+@@ -139,10 +140,10 @@ function buildMacros(nodes: Node<BayesNodeData>[]): ModelDocument['macros'] | un
+   return Object.keys(macros).length ? macros : undefined;
+ }
+ 
+-function nodeToEntity(node: Node<BayesNodeData>): ModelEntity {
++function nodeToEntity(node: Node<BayesNodeData>, plateAxisIds: Map<string, string>): ModelEntity {
+   const data = node.data;
+   const symbol = parseNodeSymbol(data.name);
+-  const valueType = toValueType(data);
++  const valueType = toValueType(data, plateAxisIds);
+   const plateIds = data.plate ? [data.plate] : [];
+   const common = {
+     id: node.id,
+@@ -212,26 +213,53 @@ function nodeToEntity(node: Node<BayesNodeData>): ModelEntity {
+     transform: toCoreTransform(data.transform),
+     observedDataId: data.kind === 'likelihood' && data.observed ? `obs_${node.id}` : undefined,
+     observationProcess: toCoreObservationProcess(data.observationProcess),
+-    constraints: toCoreConstraints(data.constraints),
++    constraints: toCoreConstraints(data.constraints, plateAxisIds),
+     hints: toCoreHints(data.hints),
+   };
+ }
+ 
+-function likelihoodObservationData(node: Node<BayesNodeData>): ModelEntity {
++function likelihoodObservationData(node: Node<BayesNodeData>, plateAxisIds: Map<string, string>): ModelEntity {
+   return {
+     id: `obs_${node.id}`,
+     symbol: `${parseNodeSymbol(node.data.name)}_observed`,
+     label: `${node.data.name} observed values`,
+     kind: 'data',
+     dataRole: 'observed_value',
+-    valueType: toValueType({ ...node.data, kind: 'data' }),
++    valueType: toValueType({ ...node.data, kind: 'data' }, plateAxisIds),
+     plateIds: node.data.plate ? [node.data.plate] : [],
+     notes: 'Generated observation binding for the likelihood node.',
+     authorship: 'generated',
+   };
+ }
+ 
+-function buildAxes(nodes: Node<BayesNodeData>[]): Record<string, AxisDefinition> {
++/**
++ * A plate reuses the leading shape axis its members declare (alpha: shape [J],
++ * plate group -> plate axis j) so the plate's repetition is not appended as a
++ * second batch axis. Plates without one agreed shape axis keep their own axis.
++ */
++function resolvePlateAxisIds(nodes: Node<BayesNodeData>[]): Map<string, string> {
++  const candidates = new Map<string, Set<string>>();
++  for (const node of nodes) {
++    const plateId = node.data.plate;
++    if (!plateId) continue;
++    const plateCandidates = candidates.get(plateId) ?? new Set<string>();
++    candidates.set(plateId, plateCandidates);
++    const leading = node.data.shape?.[0]?.toLowerCase();
++    if (leading) plateCandidates.add(leading);
++  }
++
++  const plateAxisIds = new Map<string, string>();
++  const claimed = new Set<string>();
++  for (const [plateId, plateCandidates] of candidates) {
++    const [candidate] = plateCandidates;
++    const axisId = plateCandidates.size === 1 && candidate && !claimed.has(candidate) && !candidates.has(candidate) ? candidate : plateId;
++    plateAxisIds.set(plateId, axisId);
++    claimed.add(axisId);
++  }
++  return plateAxisIds;
++}
++
++function buildAxes(nodes: Node<BayesNodeData>[], plateAxisIds: Map<string, string>): Record<string, AxisDefinition> {
+   const axes: Record<string, AxisDefinition> = {};
+   const addAxis = (id: string, symbol = id.toUpperCase()) => {
+     if (!axes[id]) {
+@@ -247,23 +275,22 @@ function buildAxes(nodes: Node<BayesNodeData>[]): Record<string, AxisDefinition>
+   for (const node of nodes) {
+     for (const shape of node.data.shape ?? []) addAxis(shape.toLowerCase(), shape);
+     for (const shape of node.data.eventShape ?? []) addAxis(shape.toLowerCase(), shape);
+-    if (node.data.plate) addAxis(node.data.plate, node.data.plate.toUpperCase());
++    if (node.data.plate) addAxis(plateAxisIds.get(node.data.plate) ?? node.data.plate);
+   }
+ 
+   return axes;
+ }
+ 
+-function buildPlates(nodes: Node<BayesNodeData>[], axes: Record<string, AxisDefinition>): Record<string, PlateDefinition> {
++function buildPlates(nodes: Node<BayesNodeData>[], plateAxisIds: Map<string, string>): Record<string, PlateDefinition> {
+   const plates: Record<string, PlateDefinition> = {};
+ 
+   for (const node of nodes) {
+     const plateId = node.data.plate;
+     if (!plateId || plates[plateId]) continue;
+-    const axisId = axes[plateId] ? plateId : node.data.shape?.[0]?.toLowerCase() ?? plateId;
+     plates[plateId] = {
+       id: plateId,
+       label: plateId,
+-      axisId,
++      axisId: plateAxisIds.get(plateId) ?? plateId,
+       indexSymbol: inferIndexSymbol(plateId),
+       parentPlateIds: [],
+       assumption: 'conditionally_independent',
+@@ -291,13 +318,14 @@ function buildNotes(nodes: Node<BayesNodeData>[]): ModelDocument['notes'] {
+   return notes;
+ }
+ 
+-function toValueType(data: BayesNodeData): ValueType {
++function toValueType(data: BayesNodeData, plateAxisIds: Map<string, string>): ValueType {
+   const axes: AxisUse[] = (data.shape ?? []).map((shape) => ({
+     axisId: shape.toLowerCase(),
+     role: 'batch',
+   }));
+-  if (data.plate && !axes.some((axis) => axis.axisId === data.plate && axis.role === 'batch')) {
+-    axes.push({ axisId: data.plate, role: 'batch' });
++  const plateAxisId = data.plate ? plateAxisIds.get(data.plate) ?? data.plate : undefined;
++  if (plateAxisId && !axes.some((axis) => axis.axisId === plateAxisId && axis.role === 'batch')) {
++    axes.push({ axisId: plateAxisId, role: 'batch' });
+   }
+   axes.push(...(data.eventShape ?? []).map((shape) => ({
+     axisId: shape.toLowerCase(),
+@@ -344,10 +372,10 @@ function toDistributionCall(distribution?: DistributionSpec) {
+   };
+ }
+ 
+-function toCoreConstraints(constraints?: Constraint[]): ModelConstraint[] | undefined {
++function toCoreConstraints(constraints: Constraint[] | undefined, plateAxisIds: Map<string, string>): ModelConstraint[] | undefined {
+   const mapped = (constraints ?? []).flatMap((constraint): ModelConstraint[] => {
+     if (constraint.kind === 'sum_to_zero' && constraint.overPlateId) {
+-      return [{ kind: 'sum_to_zero', axisId: constraint.overPlateId }];
++      return [{ kind: 'sum_to_zero', axisId: plateAxisIds.get(constraint.overPlateId) ?? constraint.overPlateId }];
+     }
+     if (constraint.kind === 'cholesky_factor_corr') {
+       return [{ kind: 'custom', description: 'cholesky_factor_corr' }];
+diff --git a/app/src/lib/core/compiler.ts b/app/src/lib/core/compiler.ts
+index b6f51f5..f93ea71 100644
+--- a/app/src/lib/core/compiler.ts
++++ b/app/src/lib/core/compiler.ts
+@@ -23,6 +23,7 @@ import type {
+   EntityId,
+   ModelDocument,
+   ModelEntity,
++  PlateDefinition,
+   RandomVariableEntity,
+   SourceText,
+ } from './model.js';
+@@ -874,6 +875,8 @@ function lintEntities(document: ModelDocument, distributions: DistributionRegist
+           path: `${basePath}/valueType/axes`,
+           blocksHandoff: true,
+         }));
++      } else {
++        output.push(...lintAppendedPlateAxis(entity, plate, document, `${basePath}/valueType/axes`));
+       }
+     }
+ 
+@@ -885,6 +888,35 @@ function lintEntities(document: ModelDocument, distributions: DistributionRegist
+   return output;
+ }
+ 
++/**
++ * A plate axis appended after a separately declared batch axis (alpha: [j, group])
++ * usually means the shape and the plate describe the same repetition, which
++ * turns a vector into a J x GROUP tensor.
++ */
++function lintAppendedPlateAxis(
++  entity: ModelEntity,
++  plate: PlateDefinition,
++  document: ModelDocument,
++  path: string,
++): Diagnostic[] {
++  const batchAxisIds = entity.valueType.axes.filter((axis) => axis.role === 'batch').map((axis) => axis.axisId);
++  const plateAxisIds = new Set(Object.values(document.plates).map((candidate) => candidate.axisId));
++  const plateAxisIndex = batchAxisIds.indexOf(plate.axisId);
++  const leadingAxisIds = batchAxisIds.slice(0, plateAxisIndex).filter((axisId) => !plateAxisIds.has(axisId));
++  if (plateAxisIndex <= 0 || leadingAxisIds.length === 0) return [];
++  const shape = batchAxisIds.map((axisId) => document.axes[axisId]?.symbol ?? axisId).join(' x ');
++  return [diagnostic({
++    code: 'BC-SHAPE-004',
++    stage: 'shape',
++    severity: 'warning',
++    certainty: 'likely',
++    message: `Plate "${plate.label}" axis "${plate.axisId}" is added after "${leadingAxisIds.join('", "')}", making the batch shape ${shape}. If they are the same repetition, use one axis for the plate.`,
++    path,
++    related: [{ message: 'Plate axis.', path: `/plates/${escapePointer(plate.id)}/axisId` }],
++    blocksHandoff: false,
++  })];
++}
++
+ function lintRandomVariable(
+   entityId: EntityId,
+   entity: RandomVariableEntity,
+diff --git a/app/test/core.test.mjs b/app/test/core.test.mjs
+index c971b0e..8853ca8 100644
+--- a/app/test/core.test.mjs
++++ b/app/test/core.test.mjs
+@@ -255,6 +255,47 @@ test('compiles the canvas sample through ModelDocument and LayoutDocument', () =
+   assert.ok(compiled.semantic.dependencyEdges.some((edge) => edge.from === 'beta' && edge.to === 'mu'));
+ });
+ 
++test('reuses a declared shape axis as the plate axis instead of adding a second batch axis', () => {
++  const compiled = compileCanvas(initialNodes, initialEdges);
++  const { document } = compiled;
++  const batchAxes = (entityId) => document.entities[entityId].valueType.axes.map((axis) => axis.axisId);
++  assert.equal(document.plates.group.axisId, 'j');
++  assert.equal(document.plates.obs.axisId, 'n');
++  assert.deepEqual(batchAxes('alpha'), ['j']);
++  assert.deepEqual(batchAxes('x'), ['n']);
++  assert.deepEqual(batchAxes('y'), ['n']);
++  assert.deepEqual(batchAxes('obs_y'), ['n']);
++  assert.deepEqual(Object.keys(document.axes).sort(), ['j', 'n']);
++  assert.ok(!compiled.semantic.diagnostics.some((item) => item.code === 'BC-SHAPE-004' || item.code === 'BC-PLATE-007'));
++
++  const pkg = buildPortablePackage(document, compiled.layout, compiled.semantic);
++  const preview = previewPortablePackageImport(pkg);
++  const recompiled = compileCanvas(preview.projected.nodes, preview.projected.edges);
++  assert.deepEqual(recompiled.document.plates, document.plates);
++  assert.deepEqual(recompiled.document.axes, document.axes);
++  for (const entityId of ['alpha', 'x', 'group_id', 'mu', 'y']) {
++    assert.deepEqual(recompiled.document.entities[entityId].valueType.axes, document.entities[entityId].valueType.axes);
++  }
++});
++
++test('flags a plate axis appended after a separately declared batch axis', () => {
++  const { document } = compileCanvas(initialNodes, initialEdges);
++  const duplicated = structuredClone(document);
++  duplicated.axes.group = { id: 'group', symbol: 'GROUP', label: 'group', size: { source: 'GROUP' } };
++  duplicated.plates.group.axisId = 'group';
++  duplicated.entities.alpha.valueType.axes = [{ axisId: 'j', role: 'batch' }, { axisId: 'group', role: 'batch' }];
++  const findings = compileModel(duplicated, minimalDistributionRegistry).diagnostics.filter((item) => item.code === 'BC-SHAPE-004');
++  assert.equal(findings.length, 1);
++  assert.equal(findings[0].certainty, 'likely');
++  assert.equal(findings[0].path, '/entities/alpha/valueType/axes');
++  assert.equal(findings[0].blocksHandoff, false);
++
++  const matrix = structuredClone(document);
++  matrix.axes.k = { id: 'k', symbol: 'K', label: 'k', size: { source: 'K' } };
++  matrix.entities.x.valueType.axes = [{ axisId: 'n', role: 'batch' }, { axisId: 'k', role: 'batch' }];
++  assert.ok(!compileModel(matrix, minimalDistributionRegistry).diagnostics.some((item) => item.code === 'BC-SHAPE-004'));
++});
++
+ test('compiles model templates into canvas documents', () => {
+   assert.ok(modelTemplates.length >= 3);
+   assert.equal(new Set(modelTemplates.map((template) => template.id)).size, modelTemplates.length);
+@@ -302,7 +343,7 @@ test('preserves event axes for multivariate template nodes', () => {
+   assert.equal(compiled.document.entities.outcome_chol.valueType.domain?.kind, 'cholesky_factor_corr');
+   assert.deepEqual(
+     compiled.document.entities.y.valueType.axes.map((axis) => `${axis.role}:${axis.axisId}`),
+-    ['batch:n', 'batch:obs', 'event:k'],
++    ['batch:n', 'event:k'],
+   );
+   assert.equal(compiled.semantic.readiness.summary.errors, 0);
+ 

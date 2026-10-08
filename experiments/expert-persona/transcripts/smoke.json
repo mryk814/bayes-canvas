@@ -1,0 +1,116 @@
+{
+  "caseId": "tensile-plateau-new-lot-v1",
+  "date": "2026-10-08",
+  "execution": "Codex collaboration subagents; fork_turns=none for expert and answering agent",
+  "model": "session model inherited; exact model identifier and sampling parameters not recorded",
+  "expertInputs": [
+    "expert.md",
+    "public-case.json"
+  ],
+  "answererInputs": [
+    "public-case.json content",
+    "expert utterances as relayed"
+  ],
+  "answererSetup": "Offline Possible Worlds intent-interpretation proxy. No tools/files/web or hidden facts/rubric. Japanese JSON {message,candidates}, at most 4 candidates with known CandidateSchema kinds, no spec edits. Current illustrative Gaussian temperature-strength curve is not fitted and no Dataset imported. User confirms meanings before adoption. Do not claim executed computations.",
+  "toolConnection": false,
+  "stopReason": "bounded smoke: three answering turns; adoption and additional-experiment planning not reached",
+  "isolation": "Fresh conversational contexts and explicit allowed inputs; not filesystem sandboxing.",
+  "turns": [
+    {
+      "expert": "この520あたりの横並び、材料の天井なのかな。Cだけ散るのも気になる。来月の新ロットにも使いたい。",
+      "assistant": {
+        "message": "520付近が材料の上限という可能性はありますが、この表では温度・ロット・機械の違いを切り分けられません。「Cだけ散る」は、この表以外の測定も含む印象でしょうか。また、520は測定・記録の上限ですか？ nullになる理由も確認したいです。来月の新ロットでは、強度の予測と合否判断のどちらに使いたいですか。以下は確認用の候補で、まだモデルには採用しません。",
+        "candidates": [
+          {
+            "label": "材料の強度上限",
+            "kind": "hypothesis",
+            "statement": "温度を上げても、材料の強度が520 MPa付近で頭打ちになる可能性がある。",
+            "reasoning": "横並びを説明する候補だが、現在の表だけでは測定上限やロット・機械の影響と区別できない。"
+          },
+          {
+            "label": "測定・記録の仕組み",
+            "kind": "observation_process",
+            "statement": "520付近の値とnullが、どのような測定・記録手順で生じたか確認する。",
+            "reasoning": "nullから欠測理由は分からず、520が装置や記録上の上限かも不明なため。"
+          },
+          {
+            "label": "Cのばらつきの根拠",
+            "kind": "measurement_need",
+            "statement": "「Cだけ散る」が指す測定結果と比較対象を確認する。",
+            "reasoning": "この表のCには数値が2件しかなく、C特有のばらつきを判断する根拠が足りない。"
+          },
+          {
+            "label": "新ロットでの用途",
+            "kind": "preference",
+            "statement": "来月の新ロットで、強度予測と合否判断のどちらを目的にするか確認する。",
+            "reasoning": "用途によって必要な検証や許容できる誤差が変わるため。"
+          }
+        ]
+      }
+    },
+    {
+      "expert": "520は全試験機共通の書き出し上限で、超えた値も520になるので、R05・R06がちょうど520なのか、それ以上なのかは分かりませんし、生波形は今回渡せません。\nR03は通常の計測開始前に破断して数値がなく、R07は数値ファイルも原因の記録も残っていません。\n弱い試験片ほど記録から抜けているのではと心配していますが、それは私の仮説です。\n「Cだけ散る」は現場の印象で、Cには新ロットの高温試験を優先して回しており、この8行で確認できた話ではありません。\n来月の別の製造ロットを20℃で試したときに、弱い側の試験片が500 MPaを下回る心配を検討したくて、今は追加試験の相談用ですから出荷判定には使わず、許容する不適合率もまだ決めていません。\nこういう記録の事情だと、弱いものが抜けたと考えるかどうかで、来月の見通しは変わりますか。",
+      "assistant": {
+        "message": "はい、弱い試験片ほど数値が残りにくいなら、記録された数値だけでは強度を高めに見積もり、500 MPa未満になる心配を小さく見積もる可能性があります。ただし、開始前に破断したR03と原因不明のR07を、一律に500 MPa未満とは扱えません。520の2件も「520以上」であり、材料の天井の証拠にはなりません。\n追加試験の相談では、数値の欠落と強度が無関係な場合と、弱いほど欠落しやすい場合を比べると、見通しが仮定にどれだけ左右されるか整理できます。ただ、この8行から来月の別ロットの不適合率を決めることはできません。R03について、破断前にかかった荷重や、通常計測を始める条件は分かりますか。まずは以下の整理で合っていますか。",
+        "candidates": [
+          {
+            "label": "書き出し上限",
+            "kind": "observation_process",
+            "statement": "R05・R06の数値は520 MPa以上を表し、正確な強度は不明である。",
+            "reasoning": "全試験機で520を超える値も520として書き出されると確認されたため。"
+          },
+          {
+            "label": "欠落理由の区別",
+            "kind": "observation_process",
+            "statement": "R03は通常計測開始前の破断、R07は原因不明として区別する。どちらも現時点では500 MPa未満と確定しない。",
+            "reasoning": "数値が残らない事情が異なり、破断時の強度を判断できる情報も不足しているため。"
+          },
+          {
+            "label": "弱いほど欠落する可能性",
+            "kind": "hypothesis",
+            "statement": "弱い試験片ほど数値が残りにくい可能性を、未確認の仮説として検討する。",
+            "reasoning": "ユーザーの懸念であり、この表から確定した記録特性ではないため。"
+          },
+          {
+            "label": "来月の見通しの感度",
+            "kind": "check",
+            "statement": "別の製造ロットを20℃で試す場合の500 MPa未満になる懸念について、欠落と強度の関係を変えた複数の想定で比較する。",
+            "reasoning": "追加試験の相談に向けた検討であり、未知のロット差や記録の偏りを含めた単一の不適合率は、この8行から決められないため。"
+          }
+        ]
+      }
+    },
+    {
+      "expert": "はい、その整理で合っています。\nR03の破断前の荷重や、通常計測を始める詳しい条件は、今回私から出せる情報では分かりません。\n欠けた数値を決めつけず、弱いほど残りにくいと考えた場合も、その場で仮定を変えて見比べたいです。\nただ、温度も機械もロットも違うこの結果から来月の20℃を考えるとき、何を同じとみなすことになるのでしょうか。",
+      "assistant": {
+        "message": "来月へ見通しを持ち越すには、「温度と強度の関係」「ロットによる違い」「機械による測定の違い」「数値が残る仕組み」のどこを共通とみなすかを置くことになります。全部を同じにする必要はありません。違いの大きさも仮定として動かせます。\nこの表の20℃は旧ロット・機械Aだけです。来月の別ロットへ使うには、特に弱い側の強度分布がどれだけ変わり得るかを仮定します。80℃の結果も使うなら、さらに温度の影響をロット・機械の影響から分ける仮定が必要です。この8行だけでは、その分け方を確かめられません。\nしたがって、欠落の仮定だけでなく、ロット差や機械差も動かして見比べるのが目的に合います。ただし現在の温度曲線とガウス雑音は説明用で、この表に適合したモデルではありません。以下は、次に確認する仮定の候補です。来月の20℃試験には、どの試験機を使う予定ですか。",
+        "candidates": [
+          {
+            "label": "温度への反応の共通性",
+            "kind": "hypothesis",
+            "statement": "温度による強度の変わり方をロット間で共通とする場合と、異なる場合を比較する。",
+            "reasoning": "80℃の結果を別ロットの20℃へ使うには温度変化を橋渡しする必要があるが、表では温度とロットが重なっているため。"
+          },
+          {
+            "label": "新しいロットの弱い側",
+            "kind": "hypothesis",
+            "statement": "来月のロットについて、強度の中心・ばらつき・弱い側の裾が既存ロットと同程度の場合と、悪化する場合を比較する。",
+            "reasoning": "500 MPa未満になる割合は平均だけでは決まらず、別ロットへの移し替えには分布の仮定が必要なため。"
+          },
+          {
+            "label": "試験機の影響",
+            "kind": "hypothesis",
+            "statement": "機械による測定値のずれやばらつきがない場合と、ある場合を比較する。",
+            "reasoning": "Cには新ロットの高温試験が優先されており、機械自体の影響をこの表から切り分けられないため。"
+          },
+          {
+            "label": "記録されやすさ",
+            "kind": "hypothesis",
+            "statement": "欠落が強度と無関係な場合と、弱いほど数値が残りにくい場合を比較し、その関係をロット・機械間で共通とするかも明示する。",
+            "reasoning": "既存記録から真の強度分布を考える際の仮定であり、R03・R07の数値を一つに決める必要はないため。"
+          }
+        ]
+      }
+    }
+  ]
+}

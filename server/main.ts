@@ -67,6 +67,7 @@ function send(res: ServerResponse, status: number, body: unknown) {
 type Route = { method: string; pattern: RegExp; handle: (m: RegExpMatchArray, body: () => Promise<unknown>) => unknown };
 
 const routes: Route[] = [
+  { method: "POST", pattern: /^\/api\/human\/prior-proposals$/, handle: async (_, b) => store.proposePrior(await b()) },
   { method: "POST", pattern: /^\/api\/human\/question-contracts$/, handle: async (_, b) => store.proposeQuestionContract(await b()) },
   { method: "POST", pattern: /^\/api\/human\/capsules$/, handle: async (_, b) => store.importCapsule(await b()) },
   { method: "POST", pattern: /^\/api\/human\/checks$/, handle: async (_, b) => store.saveCheck(HumanSaveCheckInput.parse(await b())) },
@@ -160,6 +161,14 @@ function openStream(req: IncomingMessage, res: ServerResponse, agent: boolean) {
 }
 
 async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
+  const origin = req.headers.origin;
+  const site = req.headers["sec-fetch-site"];
+  if ((origin !== undefined && origin !== `http://${req.headers.host}`) || (site !== undefined && site !== "same-origin" && site !== "none")) {
+    return send(res, 403, { error: "この画面と同じローカルOriginから呼び出してください" });
+  }
+  if (req.method !== "GET" && req.method !== "HEAD" && req.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+    return send(res, 415, { error: "APIの変更要求はapplication/jsonで送信してください" });
+  }
   if (url.pathname === "/api/stream") return openStream(req, res, url.searchParams.get("role") === "agent");
   if (url.pathname === "/api/export") {
     res.writeHead(200, {
@@ -219,7 +228,14 @@ const vite = dev
   : null;
 
 const server = createServer((req, res) => {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const suffix = req.socket.localPort === 80 ? "" : `:${req.socket.localPort}`;
+  if (req.headers.host !== `127.0.0.1${suffix}` && req.headers.host !== `localhost${suffix}`) {
+    return send(res, 403, { error: "ローカルのlocalhostまたは127.0.0.1を使用してください" });
+  }
+  let url: URL;
+  try { url = new URL(req.url ?? "/", `http://${req.headers.host}`); }
+  catch { return send(res, 400, { error: "URLを読み取れません" }); }
+  if (url.origin !== `http://${req.headers.host}`) return send(res, 403, { error: "別OriginのURLは利用できません" });
   if (url.pathname.startsWith("/api/")) return void handleApi(req, res, url);
   if (vite) return vite.middlewares(req, res);
   void serveStatic(res, url);
