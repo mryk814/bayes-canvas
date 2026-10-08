@@ -275,9 +275,9 @@ test("the shape lens evaluates the model's own function and checks bins with new
 
 test("approximation gaps and diagnostics become plain warnings", async () => {
   const { approximationGaps, diagnosticWarnings } = await import("../shared/compare.ts");
-  assert.deepEqual(diagnosticWarnings({ maxRhat: 1.0, minEss: 900, divergences: 0, chains: 4, paretoK: null }), []);
-  assert.equal(diagnosticWarnings({ maxRhat: 1.05, minEss: 120, divergences: 3, chains: 4, paretoK: null }).length, 3);
-  assert.match(diagnosticWarnings({ maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: 4.7 })[0], /Pareto k = 4.70/);
+  assert.deepEqual(diagnosticWarnings({ maxRhat: 1.0, minEss: 900, divergences: 0, chains: 4, paretoK: null, seconds: null }), []);
+  assert.equal(diagnosticWarnings({ maxRhat: 1.05, minEss: 120, divergences: 3, chains: 4, paretoK: null, seconds: null }).length, 3);
+  assert.match(diagnosticWarnings({ maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: 4.7, seconds: null })[0], /Pareto k = 4.70/);
   const mk = (center: number, spread: number) => Array.from({ length: 200 }, (_, i) => [center + spread * ((i / 199) - 0.5)]);
   const mcmc = { draws: { s20: mk(500, 20), sigma_meas: mk(5, 4) } };
   assert.deepEqual(approximationGaps(OBSERVATION_EXAMPLE, { draws: { s20: mk(501, 20), sigma_meas: mk(5, 4) } }, mcmc), []);
@@ -296,14 +296,16 @@ test("the background ladder queues approximate then MCMC, and drops work for sup
 
   store.synthesize({ modelId: model.id, label: "合成", note: "", truth: OBSERVATION_EXAMPLE, seed: 1, plates: {} });
   const v1 = model.currentVersionId;
-  assert.deepEqual(ladder.jobs.map((j) => [j.stage, j.status]), [["approximate", "running"], ["mcmc", "queued"]]);
+  const posterior = () => ladder.jobs.filter((j) => j.stage === "approximate" || j.stage === "mcmc");
+  assert.deepEqual(posterior().map((j) => [j.stage, j.status]), [["approximate", "running"], ["mcmc", "queued"]]);
   assert.deepEqual(launched, [`${v1}:approximate`]);
 
   const p = store.propose({ modelId: model.id, spec: OBSERVATION_EXAMPLE, summary: "同じ", knowledgeIds: [] });
   const v2 = store.adopt(p.id);
-  const byVersion = (v: string) => ladder.jobs.filter((j) => j.versionId === v).map((j) => j.status);
+  const byVersion = (v: string) => posterior().filter((j) => j.versionId === v).map((j) => j.status);
   assert.deepEqual(byVersion(v1), ["cancelled", "cancelled"]);
   assert.deepEqual(byVersion(v2.id), ["running", "queued"]);
+  assert.ok(ladder.jobs.filter((j) => j.versionId === v1).every((j) => j.status === "cancelled"), "report cards for the old version stop too");
 });
 
 test("an approximation that fails its own check is recorded, never shown as the posterior, and MCMC still follows", async () => {
@@ -317,10 +319,10 @@ test("an approximation that fails its own check is recorded, never shown as the 
   const draws = Object.fromEntries(["s20", "decline", "sigma_mat", "true_strength", "tau_bias", "bias", "sigma_meas"].map((k) => [k, [w.values[k]]]));
   const run = store.attachRun({
     versionId: model.currentVersionId, datasetId: ds.id, method: "NumPyro ADVI", fidelity: "approximate", note: "", warnings: [],
-    diagnostics: { maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: 1.33 }, draws,
+    diagnostics: { maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: 1.33, seconds: null }, draws,
   }, "auto");
   assert.equal(approximationTrusted(run.diagnostics), false);
   const approxJob = ladder.jobs.find((j) => j.stage === "approximate")!;
   (ladder as unknown as { finish: (j: unknown, s: string, m: string) => void }).finish(approxJob, "done", "");
-  assert.deepEqual(ladder.jobs.filter((j) => j.status !== "done").map((j) => `${j.stage}:${j.status}`), ["mcmc:running"]);
+  assert.deepEqual(ladder.jobs.filter((j) => j.status === "running").map((j) => j.stage), ["mcmc"]);
 });

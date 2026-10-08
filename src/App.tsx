@@ -5,6 +5,7 @@ import { EXAMPLES } from "../shared/example.ts";
 import { compileSpec, datasetPoints, drawCount, runInputs, simulateWorld, viewPoints, type World } from "../shared/sim.ts";
 import { post, useAction, useAppData, useStoredState, type LadderInfo } from "./api.ts";
 import { bestRun, JobList, LadderStatus } from "./Background.tsx";
+import { EngineReport } from "./Engine.tsx";
 import { DraftTray, IntentCard } from "./Conversation.tsx";
 import { ErrorNote, EvidenceList, KnowledgeList, ModelSummary, ProposalCard, VersionList } from "./Ledger.tsx";
 import { Stage, type Focus, type Source, type StageMode } from "./Stage.tsx";
@@ -204,7 +205,7 @@ function ModelWorkspace({ state, ladder, modelId, agentConnected }: { state: Sta
       {arrived && (
         <div className="arrival" role="status">
           <span>
-            v{state.versions.find((v) => v.id === arrived.versionId)?.number} の事後分布が届きました（{arrived.fidelity === "approximate" ? "近似" : "NUTS"}）。
+            v{state.versions.find((v) => v.id === arrived.versionId)?.number} の事後分布が届きました（{arrived.algorithmId ? arrived.method : arrived.fidelity === "approximate" ? "近似" : "NUTS"}）。
           </span>
           <button
             className="btn btn-primary"
@@ -315,6 +316,7 @@ function ModelWorkspace({ state, ladder, modelId, agentConnected }: { state: Sta
           {tab === "evidence" && (
             <div className="stack">
               <JobList ladder={ladder} state={state} modelId={modelId} />
+              <EngineReport state={state} modelId={modelId} />
               <EvidenceList state={state} modelId={modelId} onShowRun={showRun} />
             </div>
           )}

@@ -149,12 +149,91 @@ export const RunSchema = z.object({
       chains: z.number().int().nullable().default(null),
       // Pathfinder's own check of its approximation; above 0.7 the approximation is not trustworthy
       paretoK: z.number().nullable().default(null),
+      // wall-clock seconds of the fit, compilation included
+      seconds: z.number().nullable().default(null),
     })
-    .default({ maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: null }),
+    .default({ maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: null, seconds: null }),
+  // set when the draws came from an inference algorithm written for this version
+  algorithmId: z.string().nullable().default(null),
   // draws[node][k] holds the node's values (one per plate element) in joint draw k.
   draws: z.record(z.string(), z.array(z.array(z.number()))),
 });
 export type Run = z.infer<typeof RunSchema>;
+
+// ---------- how to infer: algorithms written for one version, and their report cards ----
+// The model says what; an algorithm says how. An agent writes one (collapsed, Gibbs, ...);
+// the app runs it, checks it against the model (calibration, NUTS, held-out prediction),
+// and the person adopts it or not. An adopted algorithm replaces NUTS for that version.
+
+export const AlgorithmSchema = z.object({
+  id: z.string(),
+  modelId: z.string(),
+  versionId: z.string(),
+  createdAt: z.string(),
+  name: z.string().min(1).max(80),
+  // what it exploits and why it should be faster or steadier, in the person's words
+  note: z.string().default(""),
+  // a Python module following the algorithm contract in inference/pw_numpyro.py
+  code: z.string().min(1).max(100_000),
+  status: z.enum(["proposed", "adopted", "rejected"]).default("proposed"),
+  decidedAt: z.string().nullable().default(null),
+});
+export type Algorithm = z.infer<typeof AlgorithmSchema>;
+
+// who an evaluation is about: the ladder's own methods, or an algorithm (by id)
+const EvaluationBase = {
+  id: z.string(),
+  versionId: z.string(),
+  datasetId: z.string(),
+  createdAt: z.string(),
+  subject: z.string(),
+  method: z.string(),
+};
+export const EvaluationSchema = z.discriminatedUnion("kind", [
+  // the algorithm on the real data: diagnostics, and where it disagrees with NUTS
+  z.object({
+    ...EvaluationBase,
+    kind: z.literal("fit"),
+    diagnostics: RunSchema.shape.diagnostics,
+    gaps: z.array(z.string()).default([]),
+    reference: z.string().nullable().default(null),
+  }),
+  // fitted without some records, scored on predicting them: outside the Bayesian bookkeeping.
+  // One score per observed quantity, in its own unit; splits answer different questions
+  // ("records": the next record of a unit already seen, "groups:<plate>": an unseen unit).
+  z.object({
+    ...EvaluationBase,
+    kind: z.literal("holdout"),
+    split: z.string(),
+    plate: z.string(),
+    held: z.number().int(),
+    scores: z.array(
+      z.object({
+        node: z.string(), unit: z.string(), rows: z.number().int(),
+        crps: z.number(), mae: z.number(), coverage90: z.number(), width90: z.number(),
+        // per held-out record, in held order (null where it could not be scored), for paired comparisons
+        rowCrps: z.array(z.number().nullable()).default([]),
+      }),
+    ),
+    // whether the fit passed its own checks (Pareto k for approximations, R-hat/ESS/divergences for MCMC)
+    trusted: z.boolean().default(true),
+    seconds: z.number().nullable().default(null),
+  }),
+  // simulation-based calibration: ranks of true values among posterior draws. Not detecting a
+  // bias with this many datasets and quantities is not a proof of correctness.
+  z.object({
+    ...EvaluationBase,
+    kind: z.literal("calibration"),
+    reps: z.number().int(),
+    draws: z.number().int(),
+    params: z.array(z.object({ name: z.string(), p: z.number(), hist: z.array(z.number().int()) })),
+    divergences: z.number().int(),
+    seconds: z.number(),
+    biasDetected: z.boolean(),
+  }),
+]);
+export type Evaluation = z.infer<typeof EvaluationSchema>;
+export type EvaluationInput = Evaluation extends infer E ? (E extends Evaluation ? Omit<E, "id" | "createdAt"> : never) : never;
 
 // ---------- what the person points at ----------------------------------------------
 
@@ -263,11 +342,13 @@ export const StateSchema = z.object({
   proposals: z.array(ProposalSchema),
   datasets: z.array(DatasetSchema),
   runs: z.array(RunSchema),
+  algorithms: z.array(AlgorithmSchema).default([]),
+  evaluations: z.array(EvaluationSchema).default([]),
 });
 export type State = z.infer<typeof StateSchema>;
 
 export function emptyState(): State {
-  return { schema: STATE_SCHEMA, models: [], versions: [], intents: [], knowledge: [], proposals: [], datasets: [], runs: [] };
+  return { schema: STATE_SCHEMA, models: [], versions: [], intents: [], knowledge: [], proposals: [], datasets: [], runs: [], algorithms: [], evaluations: [] };
 }
 
 // ---------- inputs accepted at the boundary --------------------------------------
@@ -303,16 +384,28 @@ export const AgentSynthesizeInput = z.object({
   plates: z.record(z.string(), z.number().int().min(1).max(5000)).default({}),
 });
 export const AgentRunInput = RunSchema.omit({ id: true, createdAt: true, modelId: true, origin: true });
+export const AgentAlgorithmInput = z.object({
+  versionId: z.string(),
+  name: z.string().min(1).max(80),
+  note: z.string().default("").describe("What the algorithm exploits and why it should beat NUTS here, for the person"),
+  code: z.string().min(1).max(100_000).describe("Python module following the ALGORITHM CONTRACT in pw_numpyro.py"),
+});
 
-// Background inference: one job per (version, dataset), climbing approximate → mcmc.
-// approximate: Laplace (no per-unit latents) or mean-field ADVI, checked with Pareto k. mcmc: NUTS.
-export type JobStage = "approximate" | "mcmc";
+// Background inference: jobs per (version, dataset), climbing approximate → mcmc, then the
+// report cards. approximate: Laplace or mean-field ADVI, checked with Pareto k. mcmc: NUTS, or
+// the adopted algorithm. trial / calibrate: a proposed algorithm on the real data / on data
+// simulated from the prior. holdout: fit without 20% of the records, score predicting them.
+export type JobStage = "approximate" | "mcmc" | "trial" | "calibrate" | "holdout";
 export type Job = {
   id: string;
   modelId: string;
   versionId: string;
   datasetId: string;
   stage: JobStage;
+  // "approximate", "nuts", or an algorithm id
+  subject: string;
+  // holdout only: which records are held out
+  split: string | null;
   status: "queued" | "running" | "done" | "failed" | "cancelled";
   phase: string;
   startedAt: string | null;

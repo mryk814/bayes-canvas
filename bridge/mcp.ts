@@ -26,6 +26,8 @@ Answering the person:
 
 Background inference: when a model's current version has data that fits it, the app itself computes the posterior with NumPyro in a long-lived worker — first a fast approximation (Laplace for models without per-unit latent variables, mean-field ADVI otherwise, both checked with PSIS Pareto k; above 0.7 it is recorded but never shown as the posterior), then NUTS — and attaches runs with origin "auto", fidelity and warnings. worlds_overview shows backgroundInference.jobs. Do not start your own run for the same version and data unless the person asks for something different (Stan for a final check, more draws, a custom program).
 
+Writing an inference algorithm for a version (the model says what, an algorithm says how): when NUTS struggles here (divergences, low ESS per second, slow) or the structure invites it, write a sampler specialised to this version — integrate Gaussian latent layers out analytically and draw them back afterwards (collapsed), Gibbs with conjugate blocks, data augmentation for censored records, elliptical slice for latent fields with Gaussian priors, a better parameterisation. worlds_algorithm_context writes the generated model.py, the library with the ALGORITHM CONTRACT, and the dataset into work/ and returns what was tried and measured. Test your module there with the command it returns, compare with the NUTS run, then worlds_propose_algorithm. The app then tries it on the real data, calibrates it on 40 datasets simulated from the prior by its own simulator (marginal ranks and sums of latent values, which catch draws whose correlation is broken), and scores prediction of held-out records; the person adopts it or not, and an adopted algorithm replaces NUTS for that version. Calibration that detects no bias is not a proof of correctness: report what was checked, at what scale, and the speed honestly.
+
 Running inference by hand when asked:
 1. worlds_overview to find the model, current version and datasets. If there is no data, ask; for checking recovery you may create a synthetic dataset with worlds_synthesize_dataset from a stated truth (say what the truth is in its note).
 2. worlds_prepare_inference writes a Stan program and CmdStanPy runner (or a NumPyro script with backend 'numpyro') and the dataset into work/. Run it with the command it returns (uv run ...). The generated code is a starting point: if the sampler struggles, look at the model (identifiability, funnels, scales) before tuning the sampler, and tell the person what you found. Read the diagnostics honestly; do not call a run converged when R-hat > 1.01, ESS is low, or there are divergences — say so in a reply or message.
@@ -157,6 +159,46 @@ const tools: Tool[] = [
     description: "Attach a run.json written by a prepared script (path under work/). The server checks that draws match the version and dataset.",
     inputSchema: schema(z.object({ file: z.string() })),
     run: async (args) => withoutBulk(await api("POST", "/api/agent/runs", JSON.parse(readFileSync(inWork(String(args.file)), "utf8")))),
+  },
+  {
+    name: "worlds_algorithm_context",
+    description:
+      "Prepare to write an inference algorithm for a version: writes model.py (the generated NumPyro model), pw_numpyro.py (with the ALGORITHM CONTRACT) and dataset.json into work/<name>/, and returns the contract, the runs, earlier algorithms and their report cards, and a command to test a module locally.",
+    inputSchema: schema(z.object({ versionId: z.string(), name: z.string().regex(/^[\w-]+$/).optional() })),
+    run: async (args) => {
+      const ctx = (await api("GET", `/api/agent/algorithm-context/${args.versionId}`)) as Record<string, unknown> & { modelPy: string; dataset: { id: string } | null };
+      const dir = inWork(String(args.name ?? `alg-${args.versionId}`));
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "model.py"), ctx.modelPy, "utf8");
+      const bundle = ctx.dataset
+        ? ((await api("POST", "/api/agent/inference-bundle", { versionId: args.versionId, datasetId: ctx.dataset.id, backend: "numpyro" })) as unknown as { files: Record<string, string>; dataset: unknown })
+        : null;
+      if (bundle) {
+        writeFileSync(join(dir, "pw_numpyro.py"), bundle.files["pw_numpyro.py"], "utf8");
+        writeFileSync(join(dir, "dataset.json"), JSON.stringify(bundle.dataset), "utf8");
+      }
+      const { modelPy: _m, ...rest } = ctx;
+      return {
+        ...rest,
+        dir,
+        files: ["model.py", ...(bundle ? ["pw_numpyro.py", "dataset.json"] : [])].map((n) => join(dir, n)),
+        test: bundle
+          ? `uv run --with numpyro --with jax python "${join(dir, "model.py")}" "${join(dir, "dataset.json")}" "${join(dir, "run-custom.json")}" --method custom --algorithm "${join(dir, "algorithm.py")}"`
+          : "データがまだありません",
+      };
+    },
+  },
+  {
+    name: "worlds_propose_algorithm",
+    description:
+      "Propose an inference algorithm (a Python module under work/ following the ALGORITHM CONTRACT) for a version. The app tries, calibrates and scores it in the background; the person adopts or rejects it. note: what it exploits and why it should beat NUTS, in Japanese, for the person.",
+    inputSchema: schema(z.object({ versionId: z.string(), name: z.string().min(1).max(80), note: z.string().default(""), file: z.string() })),
+    run: async (args) => {
+      const code = readFileSync(inWork(String(args.file)), "utf8");
+      const a = (await api("POST", "/api/agent/algorithms", { versionId: args.versionId, name: args.name, note: args.note, code })) as Record<string, unknown>;
+      const { code: _c, ...rest } = a;
+      return { ...rest, next: "裏の計算が試走・較正・予測の採点を行います。worlds_overview の evaluations と backgroundInference.jobs で進み具合を確認できます。" };
+    },
   },
 ];
 

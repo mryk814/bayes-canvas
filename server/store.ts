@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { z } from "zod";
 import {
+  AgentAlgorithmInput,
   AgentDatasetInput,
   AgentProposeInput,
   AgentReplyInput,
@@ -15,7 +16,10 @@ import {
   HumanIntentInput,
   StateSchema,
   emptyState,
+  type Algorithm,
   type Dataset,
+  type Evaluation,
+  type EvaluationInput,
   type Intent,
   type Model,
   type ModelSpec,
@@ -156,7 +160,7 @@ export class Store {
     return r.compiled;
   }
 
-  private compiled(versionId: string): Compiled {
+  compiled(versionId: string): Compiled {
     let c = this.compiledCache.get(versionId);
     if (!c) {
       c = this.compileOrThrow(this.version(versionId).spec, "参照中");
@@ -374,8 +378,12 @@ export class Store {
             .filter((r) => r.modelId === m.id)
             .map((r) => ({
               id: r.id, versionId: r.versionId, datasetId: r.datasetId, method: r.method, diagnostics: r.diagnostics,
-              draws: Object.values(r.draws)[0]?.length ?? 0, stale: r.versionId !== m.currentVersionId,
+              algorithmId: r.algorithmId, draws: Object.values(r.draws)[0]?.length ?? 0, stale: r.versionId !== m.currentVersionId,
             })),
+          algorithms: s.algorithms
+            .filter((a) => a.modelId === m.id)
+            .map(({ code: _code, ...a }) => ({ ...a, stale: a.versionId !== m.currentVersionId })),
+          evaluations: s.evaluations.filter((e) => s.versions.some((v) => v.id === e.versionId && v.modelId === m.id)),
         };
       }),
       pendingIntents: s.intents.filter((i) => i.status === "pending").map((i) => i.id),
@@ -591,6 +599,91 @@ export class Store {
         return run;
       },
       (r) => ({ kind: "run", id: r.id }),
+    );
+  }
+  // ---- how to infer ---------------------------------------------------------
+
+  // What an agent needs to write an algorithm for a version: the generated model, the contract,
+  // the data's shape, and what has been tried and measured so far.
+  algorithmContext(versionId: string) {
+    const v = this.version(versionId);
+    const { code } = numpyroScript(v.spec, v.id);
+    const library = readFileSync(join(import.meta.dirname, "..", "inference", "pw_numpyro.py"), "utf8");
+    const contract = /ALGORITHM CONTRACT[\s\S]*?held-out data\./.exec(library)?.[0] ?? "";
+    const ds = [...this.state.datasets].reverse().find((d) => d.modelId === v.modelId && datasetProblems(v.spec, d).length === 0);
+    return {
+      versionId: v.id,
+      modelPy: code,
+      contract,
+      dataset: ds ? { id: ds.id, plates: ds.plates, columns: Object.fromEntries(Object.entries(ds.columns).map(([k, c]) => [k, { length: c.length, head: c.slice(0, 5) }])) } : null,
+      runs: this.state.runs
+        .filter((r) => r.versionId === v.id)
+        .map((r) => ({ id: r.id, method: r.method, fidelity: r.fidelity, algorithmId: r.algorithmId, diagnostics: r.diagnostics })),
+      algorithms: this.state.algorithms.filter((a) => a.versionId === v.id),
+      evaluations: this.state.evaluations.filter((e) => e.versionId === v.id),
+      checks: [
+        "trial: the algorithm on the real data (4 chains); R-hat, ESS, divergences, seconds, and gaps against NUTS",
+        "calibrate: 40 datasets simulated from the prior by the app's own simulator; ranks of the truth must be uniform",
+        "holdout: fit without 20% of the records, score predicting them (CRPS, absolute error, 90% coverage)",
+      ],
+    };
+  }
+
+  proposeAlgorithm(input: z.infer<typeof AgentAlgorithmInput>) {
+    const v = this.version(input.versionId);
+    const problems: string[] = [];
+    if (!/^NAME\s*=/m.test(input.code)) problems.push("NAME = \"...\" を定義してください");
+    if (!/^def make\(/m.test(input.code)) problems.push("def make(mod, sizes, options) を定義してください");
+    if (problems.length) throw new HttpError(400, "アルゴリズムが約束事に沿っていません", problems);
+    return this.change(
+      (d) => {
+        const a: Algorithm = {
+          id: newId("alg"), modelId: v.modelId, versionId: v.id, createdAt: now(),
+          name: input.name, note: input.note, code: input.code, status: "proposed", decidedAt: null,
+        };
+        d.algorithms.push(a);
+        return a;
+      },
+      (a) => ({ kind: "algorithm", id: a.id }),
+    );
+  }
+
+  // Human: adopting one algorithm for a version sets any other adopted one back to proposed.
+  decideAlgorithm(id: string, status: "adopted" | "rejected" | "proposed") {
+    return this.change(
+      (d) => {
+        const a = d.algorithms.find((x) => x.id === id);
+        if (!a) throw new HttpError(404, `アルゴリズム ${id} が見つかりません`);
+        if (status === "adopted") {
+          for (const o of d.algorithms) if (o.versionId === a.versionId && o.status === "adopted" && o.id !== a.id) o.status = "proposed";
+        }
+        a.status = status;
+        a.decidedAt = status === "proposed" ? null : now();
+        return a;
+      },
+      (a) => ({ kind: "algorithm", id: a.id }),
+    );
+  }
+
+  algorithm(id: string): Algorithm {
+    const a = this.state.algorithms.find((x) => x.id === id);
+    if (!a) throw new HttpError(404, `アルゴリズム ${id} が見つかりません`);
+    return a;
+  }
+
+  // The ladder's report cards: one per (version, dataset, subject, kind, split), the newest wins.
+  recordEvaluation(e: EvaluationInput) {
+    const split = (x: EvaluationInput | Evaluation) => (x.kind === "holdout" ? x.split : "");
+    return this.change(
+      (d) => {
+        d.evaluations = d.evaluations.filter(
+          (x) => !(x.versionId === e.versionId && x.datasetId === e.datasetId && x.subject === e.subject && x.kind === e.kind && split(x) === split(e)),
+        );
+        const full = { ...e, id: newId("evl"), createdAt: now() } as Evaluation;
+        d.evaluations.push(full);
+        return full;
+      },
+      (x) => ({ kind: "evaluation", id: x.id }),
     );
   }
 }

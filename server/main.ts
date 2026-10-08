@@ -8,6 +8,7 @@ import {
   AgentDatasetInput,
   AgentProposeInput,
   AgentReplyInput,
+  AgentAlgorithmInput,
   AgentRunInput,
   AgentSynthesizeInput,
   HumanChooseInput,
@@ -100,6 +101,9 @@ const routes: Route[] = [
   { method: "POST", pattern: /^\/api\/human\/proposals\/([\w-]+)\/adopt$/, handle: (m) => store.adopt(m[1]) },
   { method: "POST", pattern: /^\/api\/human\/proposals\/([\w-]+)\/reject$/, handle: (m) => store.reject(m[1]) },
   { method: "POST", pattern: /^\/api\/human\/versions\/([\w-]+)\/revert$/, handle: (m) => store.revert(m[1]) },
+  { method: "POST", pattern: /^\/api\/human\/algorithms\/([\w-]+)\/adopt$/, handle: (m) => store.decideAlgorithm(m[1], "adopted") },
+  { method: "POST", pattern: /^\/api\/human\/algorithms\/([\w-]+)\/reject$/, handle: (m) => store.decideAlgorithm(m[1], "rejected") },
+  { method: "POST", pattern: /^\/api\/human\/algorithms\/([\w-]+)\/undecide$/, handle: (m) => store.decideAlgorithm(m[1], "proposed") },
   { method: "GET", pattern: /^\/api\/agent\/overview$/, handle: () => ({ ...store.overview(), backgroundInference: ladderInfo() }) },
   { method: "GET", pattern: /^\/api\/agent\/intents$/, handle: () => store.pendingIntents() },
   {
@@ -120,6 +124,8 @@ const routes: Route[] = [
     },
   },
   { method: "POST", pattern: /^\/api\/agent\/runs$/, handle: async (_, b) => store.attachRun(AgentRunInput.parse(await b())) },
+  { method: "GET", pattern: /^\/api\/agent\/algorithm-context\/([\w-]+)$/, handle: (m) => store.algorithmContext(m[1]) },
+  { method: "POST", pattern: /^\/api\/agent\/algorithms$/, handle: async (_, b) => store.proposeAlgorithm(AgentAlgorithmInput.parse(await b())) },
 ];
 
 function openStream(req: IncomingMessage, res: ServerResponse, agent: boolean) {

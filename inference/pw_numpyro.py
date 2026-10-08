@@ -1,14 +1,32 @@
 """NumPyro fitting for Possible Worlds.
 
-Two methods, both writing the same run JSON the app reads back:
+Methods, all writing JSON the app reads back:
   approx   Laplace (mode + Hessian) for models without per-unit latents, mean-field ADVI
            for models with them. Checked with PSIS: the Pareto k of importance weights p/q.
   nuts     NUTS with several chains, R-hat / ESS / divergences.
+  custom   an inference algorithm written for this model (see ALGORITHM CONTRACT below),
+           with the same diagnostics as NUTS.
+  sbc      simulation-based calibration: fit many datasets simulated from the prior and
+           report where each true value falls among its posterior draws.
 
 A generated model module provides: model(data, sizes), build(centered), KEEP, VERSION_ID.
+
+ALGORITHM CONTRACT. An algorithm module defines
+  NAME: str                       short name shown in the app
+  make(mod, sizes, options) -> fit
+      mod is the generated model module; sizes the plate sizes. make may compile once;
+      fit is then called for several datasets with the same sizes (the real data,
+      a training split, and every simulated dataset of the calibration).
+  fit(key, data, *, chains, draws, warmup) -> {"samples": {name: array}, "divergences": int}
+      samples has every name in mod.KEEP, shaped (chains, draws, ...) on the model's
+      original scale: a collapsed algorithm must draw the variables it integrated out back.
+The algorithm must target the same posterior as mod.model. The app checks that with
+calibration (sbc), by comparing with NUTS, and by prediction on held-out data.
 """
+import importlib.util
 import json
 import sys
+import time
 
 import numpy as np
 
@@ -72,31 +90,117 @@ def _thin(flat, names, keep):
     return {k: np.asarray(flat[k])[pick].reshape(len(pick), -1).tolist() for k in names}
 
 
-def fit_nuts(mod, data, sizes, *, draws=1000, warmup=1000, chains=4, seed=0, keep=400, target_accept=0.9, centered=False):
-    import jax
+def _mcmc_result(method, by_chain, names, divergences, chains, keep, seconds):
     from numpyro.diagnostics import summary
-    from numpyro.infer import MCMC, NUTS
 
-    stage("sample")
-    mcmc = MCMC(
-        NUTS(mod.build(centered), target_accept_prob=target_accept),
-        num_warmup=warmup, num_samples=draws, num_chains=chains, progress_bar=False,
-    )
-    mcmc.run(jax.random.PRNGKey(seed), data, sizes, extra_fields=("diverging",))
-    by_chain = mcmc.get_samples(group_by_chain=True)
-    diag = summary({k: by_chain[k] for k in mod.KEEP})
+    by_chain = {k: np.asarray(by_chain[k]) for k in names}
+    diag = summary(by_chain)
+    flat = {k: v.reshape((-1,) + v.shape[2:]) for k, v in by_chain.items()}
     return {
-        "method": f"NumPyro NUTS {chains}x{draws} accept {target_accept}",
+        "method": method,
         "fidelity": "mcmc",
         "diagnostics": {
             "maxRhat": max(float(np.nanmax(v["r_hat"])) for v in diag.values()),
             "minEss": min(float(np.nanmin(v["n_eff"])) for v in diag.values()),
-            "divergences": int(np.asarray(mcmc.get_extra_fields()["diverging"]).sum()),
+            "divergences": int(divergences),
             "chains": chains,
             "paretoK": None,
+            "seconds": seconds,
         },
-        "draws": _thin(mcmc.get_samples(), mod.KEEP, keep),
+        "draws": _thin(flat, names, keep),
     }
+
+
+def _nuts_sampler(mod, sizes, centered, target_accept, chains, draws, warmup):
+    from numpyro.infer import MCMC, NUTS
+
+    # jit_model_args: the compiled sampler is reused for later datasets of the same shape.
+    # Plate sizes stay outside the traced arguments.
+    built = mod.build(centered)
+
+    def model(data):
+        return built(data, sizes)
+
+    return MCMC(
+        NUTS(model, target_accept_prob=target_accept),
+        num_warmup=warmup, num_samples=draws, num_chains=chains, progress_bar=False, jit_model_args=True,
+    )
+
+
+def fit_nuts(mod, data, sizes, *, draws=1000, warmup=1000, chains=4, seed=0, keep=400, target_accept=0.9, centered=False):
+    import jax
+
+    stage("sample")
+    start = time.perf_counter()
+    mcmc = _nuts_sampler(mod, sizes, centered, target_accept, chains, draws, warmup)
+    mcmc.run(jax.random.PRNGKey(seed), data, extra_fields=("diverging",))
+    divergences = np.asarray(mcmc.get_extra_fields()["diverging"]).sum()
+    return _mcmc_result(
+        f"NumPyro NUTS {chains}x{draws} accept {target_accept}", mcmc.get_samples(group_by_chain=True),
+        mod.KEEP, divergences, chains, keep, time.perf_counter() - start,
+    )
+
+
+def load_module(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def fit_custom(mod, data, sizes, *, algorithm, draws=1000, warmup=1000, chains=4, seed=0, keep=400, options=None):
+    import jax
+
+    alg = load_module(algorithm, f"pw_alg_{abs(hash(algorithm))}")
+    stage("sample")
+    start = time.perf_counter()
+    fit_fn = alg.make(mod, sizes, options or {})
+    out = fit_fn(jax.random.PRNGKey(seed), data, chains=chains, draws=draws, warmup=warmup)
+    return _mcmc_result(alg.NAME, out["samples"], mod.KEEP, out.get("divergences", 0), chains, keep, time.perf_counter() - start)
+
+
+def sbc(mod, datasets_path, *, algorithm=None, draws=500, warmup=500, thin=5, seed=0, centered=False, target_accept=0.9):
+    """Calibration: for each simulated dataset with known truth, the rank of the truth among
+    the thinned posterior draws. With a correct algorithm the ranks are uniform on 0..L."""
+    import jax
+
+    with open(datasets_path, encoding="utf-8") as f:
+        sims = json.load(f)
+    sizes = sims["plates"]
+    if algorithm:
+        alg = load_module(algorithm, f"pw_alg_sbc_{abs(hash(algorithm))}")
+        fit_fn = alg.make(mod, sizes, {})
+
+        def run(key, data):
+            out = fit_fn(key, data, chains=1, draws=draws, warmup=warmup)
+            return out["samples"], int(out.get("divergences", 0))
+    else:
+        mcmc = _nuts_sampler(mod, sizes, centered, target_accept, 1, draws, warmup)
+
+        def run(key, data):
+            mcmc.run(key, data, extra_fields=("diverging",))
+            return mcmc.get_samples(group_by_chain=True), int(np.asarray(mcmc.get_extra_fields()["diverging"]).sum())
+
+    ranks = {}
+    divergences = []
+    start = time.perf_counter()
+    total = len(sims["datasets"])
+    for r, sim in enumerate(sims["datasets"]):
+        stage(f"calibrate {r + 1}/{total}")
+        data = {k: np.asarray(v, dtype=float) for k, v in sim["columns"].items()}
+        samples, div = run(jax.random.PRNGKey(seed + r), data)
+        divergences.append(div)
+        # truth: {"node": v, "node[i]": v, "a[0]+b[0]": v}; sums test the joint draws, not only
+        # each margin. Draws are thinned against autocorrelation.
+        for name, truth in sim["truth"].items():
+            col = 0
+            for term in name.split("+"):
+                base, _, idx = term.partition("[")
+                arr = np.asarray(samples[base])
+                arr = arr.reshape((-1,) + arr.shape[2:])[::thin]
+                col = col + arr.reshape(arr.shape[0], -1)[:, int(idx[:-1]) if idx else 0]
+            ranks.setdefault(name, []).append(int(np.sum(col < truth)))
+    return {"ranks": ranks, "draws": int(-(-draws // thin)), "divergences": divergences, "seconds": time.perf_counter() - start}
 
 
 def fit_approx(mod, data, sizes, *, seed=0, keep=400, centered=False, check_draws=1000, steps=4000):
@@ -112,6 +216,7 @@ def fit_approx(mod, data, sizes, *, seed=0, keep=400, centered=False, check_draw
     from numpyro.infer.autoguide import AutoDiagonalNormal, AutoLaplaceApproximation
     from numpyro.infer.util import potential_energy
 
+    start = time.perf_counter()
     model = mod.build(centered)
     latent = bool(getattr(mod, "PLATED_LATENT", []))
     init = init_to_median(num_samples=31)
@@ -144,15 +249,25 @@ def fit_approx(mod, data, sizes, *, seed=0, keep=400, centered=False, check_draw
     return {
         "method": "NumPyro ADVI（平均場）" if latent else "NumPyro Laplace",
         "fidelity": "approximate",
-        "diagnostics": {"maxRhat": None, "minEss": None, "divergences": None, "chains": None, "paretoK": k if np.isfinite(k) else 99.0},
+        "diagnostics": {"maxRhat": None, "minEss": None, "divergences": None, "chains": None, "paretoK": k if np.isfinite(k) else 99.0, "seconds": time.perf_counter() - start},
         "draws": {name: np.asarray(samples[name]).reshape(keep, -1).tolist() for name in mod.KEEP},
     }
 
 
 def fit(mod, dataset_path, out_path, method, **options):
+    if method == "sbc":
+        result = sbc(mod, dataset_path, **options)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(result, f)
+        return result
     ds, data, sizes = load(dataset_path)
-    result = fit_approx(mod, data, sizes, **options) if method == "approx" else fit_nuts(mod, data, sizes, **options)
-    run = {"versionId": mod.VERSION_ID, "datasetId": ds["id"], "note": "", **result}
+    if method == "approx":
+        result = fit_approx(mod, data, sizes, **options)
+    elif method == "custom":
+        result = fit_custom(mod, data, sizes, **options)
+    else:
+        result = fit_nuts(mod, data, sizes, **options)
+    run ={"versionId": mod.VERSION_ID, "datasetId": ds["id"], "note": "", **result}
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(run, f)
     return run
@@ -164,7 +279,8 @@ def cli(mod):
     ap = argparse.ArgumentParser()
     ap.add_argument("dataset")
     ap.add_argument("out")
-    ap.add_argument("--method", choices=["nuts", "approx"], default="nuts", help="approx: Laplace, or ADVI when the model has per-unit latents")
+    ap.add_argument("--method", choices=["nuts", "approx", "custom"], default="nuts", help="approx: Laplace, or ADVI when the model has per-unit latents; custom: --algorithm")
+    ap.add_argument("--algorithm", help="an algorithm module following the ALGORITHM CONTRACT (with --method custom)")
     ap.add_argument("--draws", type=int, default=1000)
     ap.add_argument("--warmup", type=int, default=1000)
     ap.add_argument("--chains", type=int, default=4)
@@ -176,6 +292,10 @@ def cli(mod):
     setup(a.chains)
     if a.method == "approx":
         opts = {"seed": a.seed, "keep": a.keep, "centered": a.centered}
+    elif a.method == "custom":
+        if not a.algorithm:
+            ap.error("--method custom needs --algorithm")
+        opts = {"algorithm": a.algorithm, "draws": a.draws, "warmup": a.warmup, "chains": a.chains, "seed": a.seed, "keep": a.keep}
     else:
         opts = {"draws": a.draws, "warmup": a.warmup, "chains": a.chains, "seed": a.seed, "keep": a.keep, "target_accept": a.target_accept, "centered": a.centered}
     run = fit(mod, a.dataset, a.out, a.method, **opts)

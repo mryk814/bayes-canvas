@@ -1951,3 +1951,139 @@ select {
   }
 }
 .job-retry { grid-column: 1 / -1; justify-self: start; }
+
+/* ---- the inference report card ---- */
+.engine {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.engine-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.engine-table caption {
+  text-align: left;
+  padding-bottom: 2px;
+}
+
+.engine-table th,
+.engine-table td {
+  padding: 4px 5px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  font-weight: 400;
+}
+
+.engine-table th:first-child {
+  text-align: left;
+  white-space: normal;
+}
+
+.engine-prediction {
+  overflow-x: auto;
+}
+
+.engine-table thead th {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.engine-table tr.is-best td {
+  font-weight: 700;
+}
+
+.engine-table .badge {
+  margin-left: 6px;
+}
+
+.engine-verdict {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.engine-checks {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.engine-checks dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.engine-checks dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.engine-good {
+  color: var(--yes);
+}
+
+.engine-bad {
+  color: var(--no);
+}
+
+.engine-ranks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+}
+
+.engine-rank {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.engine-rank rect {
+  fill: var(--posterior);
+  opacity: 0.55;
+}
+
+.engine-rank.is-bad rect {
+  fill: var(--no);
+  opacity: 0.9;
+}
+
+.engine-rank.is-bad {
+  color: var(--no);
+}
+
+.engine-gaps {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--warn);
+}
+
+.engine-code {
+  margin-right: auto;
+  max-width: 100%;
+}
+
+.engine-code pre {
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  white-space: pre;
+}
+
+.engine-alg-rejected {
+  opacity: 0.6;
+}

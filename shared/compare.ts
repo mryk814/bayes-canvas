@@ -1,6 +1,6 @@
 // Checks that turn a finished run into plain warnings: MCMC diagnostics, and
 // disagreement between a fast approximation and MCMC for the same version and data.
-import type { ModelSpec, Run } from "./contracts.ts";
+import type { Algorithm, ModelSpec, Run } from "./contracts.ts";
 
 export const PARETO_K_LIMIT = 0.7;
 
@@ -45,4 +45,11 @@ export function approximationGaps(spec: ModelSpec, approx: Pick<Run, "draws">, m
     }
   }
   return out;
+}
+
+// Which runs may be shown as the posterior: NUTS (or any MCMC by hand), a trusted
+// approximation, or the run of an algorithm the person adopted.
+export function runShown(algorithms: Pick<Algorithm, "id" | "status">[], r: Pick<Run, "algorithmId" | "fidelity" | "diagnostics">) {
+  if (r.algorithmId === null) return r.fidelity === "mcmc" || approximationTrusted(r.diagnostics);
+  return algorithms.find((a) => a.id === r.algorithmId)?.status === "adopted";
 }

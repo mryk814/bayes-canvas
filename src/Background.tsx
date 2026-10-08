@@ -1,11 +1,26 @@
 import { useEffect, useState } from "react";
 import { IconPlayerPause, IconPlayerPlay, IconLoader2 } from "@tabler/icons-react";
 import type { Job, Run, State } from "../shared/contracts.ts";
-import { approximationTrusted } from "../shared/compare.ts";
+import { runShown } from "../shared/compare.ts";
+import { splitShort } from "./Engine.tsx";
 import { post, useAction, type LadderInfo } from "./api.ts";
 import { ErrorNote } from "./Ledger.tsx";
 
-export const STAGE_LABEL: Record<Job["stage"], string> = { approximate: "近似（ラプラス / ADVI）", mcmc: "NUTS" };
+export const STAGE_LABEL: Record<Job["stage"], string> = {
+  approximate: "近似（ラプラス / ADVI）",
+  mcmc: "NUTS",
+  trial: "試走",
+  calibrate: "較正（SBC）",
+  holdout: "予測の採点",
+};
+
+function jobLabel(j: Job, state: State) {
+  const alg = state.algorithms.find((a) => a.id === j.subject);
+  if (j.stage === "mcmc") return alg ? alg.name : "NUTS";
+  if (j.stage === "holdout") return `${STAGE_LABEL.holdout}（${splitShort(j.split ?? "records")}）：${alg?.name ?? (j.subject === "nuts" ? "NUTS" : "近似")}`;
+  if (alg) return `${STAGE_LABEL[j.stage]}：${alg.name}`;
+  return STAGE_LABEL[j.stage];
+}
 
 export function useNow(active: boolean) {
   const [now, setNow] = useState(() => Date.now());
@@ -23,13 +38,14 @@ function elapsed(from: string | null, now: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-// The most trustworthy finished run for the model's current version: MCMC over an approximation, newest first.
+// The most trustworthy finished run for the model's current version: the adopted algorithm's,
+// then MCMC, then an approximation, newest first.
 export function bestRun(state: State, modelId: string): Run | null {
   const model = state.models.find((m) => m.id === modelId);
   if (!model) return null;
-  // an approximation that failed its own check is kept as a record but never shown as "the posterior"
-  const runs = state.runs.filter((r) => r.versionId === model.currentVersionId && (r.fidelity === "mcmc" || approximationTrusted(r.diagnostics))).reverse();
-  return runs.find((r) => r.fidelity === "mcmc") ?? runs[0] ?? null;
+  // an approximation that failed its own check, or an algorithm not adopted, is kept as a record but never shown as "the posterior"
+  const runs = state.runs.filter((r) => r.versionId === model.currentVersionId && runShown(state.algorithms, r)).reverse();
+  return runs.find((r) => r.algorithmId !== null) ?? runs.find((r) => r.fidelity === "mcmc") ?? runs[0] ?? null;
 }
 
 export function LadderStatus({ ladder, state }: { ladder: LadderInfo; state: State }) {
@@ -67,7 +83,7 @@ export function JobList({ ladder, state, modelId }: { ladder: LadderInfo; state:
           className="btn btn-quiet"
           disabled={busy || (!ladder.enabled && ladder.reason.startsWith("CmdStan"))}
           onClick={() => run(() => post("/api/human/ladder", { enabled: !ladder.enabled }))}
-          title={ladder.reason || "版やデータが変わると、近似 → NUTS の順に事後分布を計算します"}
+          title={ladder.reason || "版やデータが変わると、近似 → NUTS（採用したアルゴリズム）の順に事後分布を計算し、そのあと成績表を作ります"}
         >
           {ladder.enabled ? <IconPlayerPause size={16} /> : <IconPlayerPlay size={16} />}
           {ladder.enabled ? "一時停止" : "再開"}
@@ -81,12 +97,12 @@ export function JobList({ ladder, state, modelId }: { ladder: LadderInfo; state:
         </p>
       ) : (
         <ol className="job-list">
-          {jobs.slice(0, 8).map((j) => {
+          {jobs.slice(0, 10).map((j) => {
             const v = state.versions.find((x) => x.id === j.versionId);
             return (
               <li key={j.id} className={`job job-${j.status}`}>
                 <span className="num">v{v?.number ?? "?"}</span>
-                <span>{STAGE_LABEL[j.stage]}</span>
+                <span>{jobLabel(j, state)}</span>
                 <span className={`badge job-badge-${j.status}`}>{j.status === "running" ? j.phase : { queued: "待ち", done: "完了", failed: "失敗", cancelled: "停止", running: "" }[j.status]}</span>
                 <span className="num muted">{j.status === "running" ? elapsed(j.startedAt, now) : ""}</span>
                 {j.message && <span className="job-message">{j.message}</span>}
