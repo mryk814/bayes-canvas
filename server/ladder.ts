@@ -13,7 +13,8 @@ import { randomUUID } from "node:crypto";
 import { AgentRunInput, type Job, type JobStage } from "../shared/contracts.ts";
 import { approximationGaps, approximationTrusted, diagnosticWarnings } from "../shared/compare.ts";
 import { calibrationSets, calibrationSummary, holdoutSplit, holdoutSplits, predictiveScores, seedOf, type SplitKind } from "../shared/evaluate.ts";
-import { datasetProblems, type Store } from "./store.ts";
+import { datasetProblems } from "../shared/evidence-validation.ts";
+import type { Store } from "./store.ts";
 
 const RANK: Record<JobStage, number> = { approximate: 0, mcmc: 1, trial: 2, calibrate: 3, holdout: 4 };
 const PHASES: Record<string, string> = {
@@ -114,7 +115,7 @@ export class Ladder {
     if (!runs.some((r) => r.fidelity === "mcmc" && (adopted ? r.algorithmId === adopted.id : true))) {
       wanted.push({ stage: "mcmc", subject: adopted?.id ?? "nuts" });
     }
-    const nutsRun = runs.find((r) => r.fidelity === "mcmc" && r.algorithmId === null);
+    const nutsRun = runs.find((r) => r.fidelity === "mcmc" && !r.algorithmId);
     for (const a of algorithms) {
       const fit = s.evaluations.find((e) => e.versionId === v.id && e.datasetId === ds.id && e.subject === a.id && e.kind === "fit");
       // a trial that ran before NUTS had nothing to compare with; run it again once NUTS is there
@@ -301,14 +302,14 @@ export class Ladder {
         : (d.maxRhat ?? 99) <= 1.01 && (d.divergences ?? 0) === 0 && (d.minEss ?? 0) >= 100;
       this.store.recordEvaluation({
         ...base, kind: "holdout", method: raw.method, split: split.split, plate: split.plate, held: split.held.length, scores, trusted,
-        seconds: raw.diagnostics.seconds,
+        seconds: raw.diagnostics.seconds ?? null,
       });
       return;
     }
     if (job.stage === "trial") {
       const ref = [...this.store.state.runs]
         .reverse()
-        .find((r) => r.versionId === job.versionId && r.datasetId === job.datasetId && r.fidelity === "mcmc" && r.algorithmId === null);
+        .find((r) => r.versionId === job.versionId && r.datasetId === job.datasetId && r.fidelity === "mcmc" && !r.algorithmId);
       this.store.recordEvaluation({
         ...base, kind: "fit", method: raw.method, diagnostics: raw.diagnostics,
         gaps: ref ? approximationGaps(spec, ref, raw) : [], reference: ref?.id ?? null,

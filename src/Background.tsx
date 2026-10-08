@@ -45,7 +45,7 @@ export function bestRun(state: State, modelId: string): Run | null {
   if (!model) return null;
   // an approximation that failed its own check, or an algorithm not adopted, is kept as a record but never shown as "the posterior"
   const runs = state.runs.filter((r) => r.versionId === model.currentVersionId && runShown(state.algorithms, r)).reverse();
-  return runs.find((r) => r.algorithmId !== null) ?? runs.find((r) => r.fidelity === "mcmc") ?? runs[0] ?? null;
+  return runs.find((r) => !!r.algorithmId) ?? runs.find((r) => r.fidelity === "mcmc") ?? runs[0] ?? null;
 }
 
 export function LadderStatus({ ladder, state }: { ladder: LadderInfo; state: State }) {

@@ -5,6 +5,8 @@ import { quantile } from "d3-array";
 import { getStroke } from "perfect-freehand";
 import type { Mark } from "../shared/contracts.ts";
 import type { ViewPoint } from "../shared/sim.ts";
+import { plotTicks, spacedTickIndices } from "./plot-ticks.ts";
+import { showsGeneratedPoints } from "../shared/view-contract.ts";
 
 export type Tool = "look" | "sketch" | "range";
 export type Domains = { x: [number, number]; y: [number, number] };
@@ -87,7 +89,9 @@ export function WorldPlot({
   worldIndex = null,
   showObs = true,
 }: Props) {
-  const m = detailed ? { top: 14, right: 16, bottom: 34, left: 56 } : { top: 6, right: 6, bottom: 6, left: 6 };
+  const tickValues = useMemo(() => detailed ? { x: scaleLinear().domain(domains.x).ticks(6), y: scaleLinear().domain(domains.y).ticks(5) } : { x: [], y: [] }, [domains, detailed]);
+  const ticks = plotTicks(tickValues.x, tickValues.y);
+  const m = detailed ? { top: 14, right: ticks.right, bottom: 34, left: ticks.left } : { top: 6, right: 6, bottom: 6, left: 6 };
   const x = useMemo(() => scaleLinear().domain(domains.x).range([m.left, width - m.right]), [domains, width, m.left, m.right]);
   const y = useMemo(() => scaleLinear().domain(domains.y).range([height - m.bottom, m.top]), [domains, height, m.bottom, m.top]);
   const clampY = (v: number) => Math.max(Math.min(v, domains.y[1] + (domains.y[1] - domains.y[0]) * 3), domains.y[0] - (domains.y[1] - domains.y[0]) * 3);
@@ -157,18 +161,18 @@ export function WorldPlot({
         </clipPath>
       </defs>
       {detailed &&
-        y.ticks(5).map((t) => (
+        tickValues.y.map((t, i) => (
           <g key={`y${t}`}>
             <line className="grid" x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} />
             <text className="tick" x={m.left - 6} y={y(t)} dy="0.32em" textAnchor="end">
-              {t}
+              {ticks.y[i]}
             </text>
           </g>
         ))}
       {detailed &&
-        x.ticks(6).map((t) => (
-          <text key={`x${t}`} className="tick" x={x(t)} y={height - m.bottom + 16} textAnchor="middle">
-            {t}
+        spacedTickIndices(ticks.x, tickValues.x.map(t => x(t))).map(i => (
+          <text key={`x${tickValues.x[i]}`} className="tick" x={x(tickValues.x[i])} y={height - m.bottom + 16} textAnchor="middle">
+            {ticks.x[i]}
           </text>
         ))}
       {detailed && labels && (
@@ -195,8 +199,7 @@ export function WorldPlot({
           return (
             <g key={wi} className={overlay ? "world overlaid" : "world"}>
               {withLine.length > 1 && <path className="curve" d={path(withLine.map((p) => [p.x, p.line!])) ?? ""} />}
-              {showObs &&
-                !(overlay && withLine.length > 1) &&
+              {showsGeneratedPoints(showObs, overlay, withLine.length) &&
                 pts.map((p) =>
                   p.censored ? (
                     <path key={p.unit} className={`censored g${p.group ?? "n"}`} d={`M${x(p.x)},${y(clampY(p.y)) - r * 1.6} l${r * 1.4},${r * 2.4} l${-r * 2.8},0 Z`} />

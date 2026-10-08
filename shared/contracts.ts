@@ -81,9 +81,16 @@ export const ViewSchema = z.object({
   group: ident.optional(),
 });
 
+export const QuestionContractSchema = z.object({
+  population: z.string().trim().min(1).max(2000),
+  estimand: z.string().trim().min(1).max(2000),
+  decision: z.string().trim().min(1).max(2000),
+}).strict();
+
 export const ModelSpecSchema = z.object({
   title: z.string().min(1),
   question: z.string().default(""),
+  questionContract: QuestionContractSchema.optional(),
   plates: z.array(PlateSchema).max(8).default([]),
   data: z.array(DataColumnSchema).max(32).default([]),
   nodes: z.array(NodeSchema).min(1).max(64),
@@ -109,6 +116,10 @@ export const ModelVersionSchema = z.object({
     z.object({ kind: z.literal("proposal"), proposalId: z.string(), knowledgeIds: z.array(z.string()) }),
     z.object({ kind: z.literal("example"), exampleId: z.string() }),
     z.object({ kind: z.literal("revert"), toVersionId: z.string() }),
+    z.object({ kind: z.literal("capsule"), source: z.object({
+      modelId: z.string(), versionId: z.string(), versionNumber: z.number().int().positive(),
+      datasetId: z.string(), runId: z.string(), createdAt: z.string(),
+    }) }),
   ]),
   summary: z.string(),
 });
@@ -116,12 +127,19 @@ export type ModelVersion = z.infer<typeof ModelVersionSchema>;
 
 // ---------- data and runs: evidence, never edits ----------------------------------
 
+export const DatasetPassportSchema = z.object({
+  sampling: z.string().trim().min(1).max(2000).optional(),
+  instrument: z.string().trim().min(1).max(2000).optional(),
+  preprocessing: z.string().trim().min(1).max(2000).optional(),
+}).strict().refine(v => Object.values(v).some(value => value !== undefined), "パスポートには少なくとも1項目を記録してください");
+
 export const DatasetSchema = z.object({
   id: z.string(),
   modelId: z.string(),
   createdAt: z.string(),
   label: z.string().min(1),
   provenance: z.enum(["real", "synthetic"]),
+  passport: DatasetPassportSchema.optional(),
   note: z.string().default(""),
   plates: z.record(z.string(), z.number().int().min(1).max(5000)),
   columns: z.record(z.string(), z.array(z.number())),
@@ -150,11 +168,11 @@ export const RunSchema = z.object({
       // Pathfinder's own check of its approximation; above 0.7 the approximation is not trustworthy
       paretoK: z.number().nullable().default(null),
       // wall-clock seconds of the fit, compilation included
-      seconds: z.number().nullable().default(null),
+      seconds: z.number().nullable().optional(),
     })
     .default({ maxRhat: null, minEss: null, divergences: null, chains: null, paretoK: null, seconds: null }),
   // set when the draws came from an inference algorithm written for this version
-  algorithmId: z.string().nullable().default(null),
+  algorithmId: z.string().nullable().optional(),
   // draws[node][k] holds the node's values (one per plate element) in joint draw k.
   draws: z.record(z.string(), z.array(z.array(z.number()))),
 });
@@ -331,7 +349,25 @@ export const ProposalSchema = z.object({
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 
-export const STATE_SCHEMA = "possible-worlds@2";
+const validCheckThreshold = (v: { statistic: string; threshold?: number }) => v.statistic === "exceedance" ? Number.isFinite(v.threshold) : v.threshold === undefined;
+const checkThresholdMessage = "超過割合には有限の閾値が必要です。他の統計量には閾値を指定できません";
+
+export const SavedCheckSchema = z.object({
+  id: z.string().min(1), modelId: z.string().min(1), datasetId: z.string().min(1), createdAt: z.string(),
+  label: z.string().trim().min(1).max(200), xMin: z.number(), xMax: z.number(), statistic: z.enum(["mean", "max", "sd", "exceedance"]), threshold: z.number().optional(),
+  x: ident, y: ident, xUnit: z.string(), yUnit: z.string(),
+  groupColumn: ident.nullable(), groupIndex: z.number().int().nonnegative().nullable(),
+}).refine(v => v.xMin <= v.xMax, "区間の下限は上限以下にしてください").refine(validCheckThreshold, { message: checkThresholdMessage, path: ["threshold"] });
+export type SavedCheck = z.infer<typeof SavedCheckSchema>;
+
+export const SavedCheckResultSchema = z.object({
+  id: z.string().min(1), checkId: z.string().min(1), modelId: z.string().min(1), versionId: z.string().min(1), datasetId: z.string().min(1), runId: z.string().min(1),
+  createdAt: z.string(), seed: z.number().int(), observedValue: z.number(), observedCount: z.number().int().positive(),
+  replicatedValues: z.array(z.number()).min(1), predictiveRange: z.tuple([z.number(), z.number()]), tailFraction: z.number().min(0).max(1),
+});
+export type SavedCheckResult = z.infer<typeof SavedCheckResultSchema>;
+
+export const STATE_SCHEMA = "possible-worlds@3";
 
 export const StateSchema = z.object({
   schema: z.literal(STATE_SCHEMA),
@@ -342,13 +378,15 @@ export const StateSchema = z.object({
   proposals: z.array(ProposalSchema),
   datasets: z.array(DatasetSchema),
   runs: z.array(RunSchema),
+  checks: z.array(SavedCheckSchema),
+  checkResults: z.array(SavedCheckResultSchema),
   algorithms: z.array(AlgorithmSchema).default([]),
   evaluations: z.array(EvaluationSchema).default([]),
 });
 export type State = z.infer<typeof StateSchema>;
 
 export function emptyState(): State {
-  return { schema: STATE_SCHEMA, models: [], versions: [], intents: [], knowledge: [], proposals: [], datasets: [], runs: [], algorithms: [], evaluations: [] };
+  return { schema: STATE_SCHEMA, models: [], versions: [], intents: [], knowledge: [], proposals: [], datasets: [], runs: [], checks: [], checkResults: [], algorithms: [], evaluations: [] };
 }
 
 // ---------- inputs accepted at the boundary --------------------------------------
@@ -362,6 +400,14 @@ export const HumanIntentInput = z.object({
 export const HumanFollowUpInput = z.object({ text: z.string().trim().min(1).max(4000) });
 export const HumanChooseInput = z.object({ candidateId: z.string() });
 export const HumanExampleInput = z.object({ exampleId: z.string() });
+export const HumanQuestionContractInput = z.object({
+  baseVersionId: z.string().min(1), question: z.string().trim().min(1).max(2000), questionContract: QuestionContractSchema,
+}).strict();
+export const HumanSaveCheckInput = z.object({
+  runId: z.string().min(1), label: z.string().trim().min(1).max(200), xMin: z.number(), xMax: z.number(),
+  statistic: z.enum(["mean", "max", "sd", "exceedance"]), threshold: z.number().optional(), groupIndex: z.number().int().nonnegative().nullable(), seed: z.number().int(),
+}).refine(v => v.xMin <= v.xMax, "区間の下限は上限以下にしてください").refine(validCheckThreshold, { message: checkThresholdMessage, path: ["threshold"] });
+export const HumanRerunCheckInput = z.object({ runId: z.string().min(1), seed: z.number().int() });
 
 export const AgentReplyInput = z.object({
   intentId: z.string(),

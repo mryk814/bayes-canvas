@@ -309,7 +309,7 @@ export function predictiveScores(c: Compiled, run: RunLike, ds: DataLike, plate:
 
 // ---------- what the card says ------------------------------------------------------------
 
-export function speedup(candidate: { minEss: number | null; seconds: number | null }, reference: { minEss: number | null; seconds: number | null }) {
+export function speedup(candidate: { minEss: number | null; seconds?: number | null }, reference: { minEss: number | null; seconds?: number | null }) {
   if (!candidate.minEss || !candidate.seconds || !reference.minEss || !reference.seconds) return null;
   return candidate.minEss / candidate.seconds / (reference.minEss / reference.seconds);
 }

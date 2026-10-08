@@ -14,6 +14,9 @@ import {
   HumanChooseInput,
   HumanFollowUpInput,
   HumanIntentInput,
+  HumanSaveCheckInput,
+  HumanRerunCheckInput,
+  HumanQuestionContractInput,
   StateSchema,
   emptyState,
   type Algorithm,
@@ -26,6 +29,8 @@ import {
   type ModelVersion,
   type Run,
   type SceneRef,
+  type SavedCheck,
+  type SavedCheckResult,
   type State,
 } from "../shared/contracts.ts";
 import { identifiability } from "../shared/identify.ts";
@@ -35,6 +40,9 @@ import { EXAMPLES } from "../shared/example.ts";
 import { numpyroScript } from "../shared/codegen.ts";
 import { stanProgram } from "../shared/stan.ts";
 import { migrate } from "./migrate.ts";
+import { datasetProblems, runProblems } from "../shared/evidence-validation.ts";
+import { evaluateSavedCheck } from "../shared/run-check.ts";
+import { readCapsule } from "../shared/capsule.ts";
 
 export class HttpError extends Error {
   status: number;
@@ -50,32 +58,6 @@ const newId = (prefix: string) => `${prefix}_${randomUUID().replace(/-/g, "").sl
 const now = () => new Date().toISOString();
 
 export type ChangeEvent = { kind: string; id?: string };
-
-// Which nodes a run must carry: everything unobserved that is sampled.
-export function runSites(spec: ModelSpec) {
-  return spec.nodes.filter((n) => n.role === "param" || n.role === "latent");
-}
-
-// A dataset fits a spec when every known input and every observation is present with the right length.
-export function datasetProblems(spec: ModelSpec, ds: Pick<Dataset, "plates" | "columns">): string[] {
-  const problems: string[] = [];
-  for (const p of spec.plates) if (!(p.name in ds.plates)) problems.push(`データにプレート ${p.name} の大きさがありません`);
-  const need = [
-    ...spec.data.map((d) => ({ name: d.name, plate: d.plate as string | null, indexOf: d.indexOf })),
-    ...spec.nodes.filter((n) => n.role === "observed").map((n) => ({ name: n.name, plate: n.plate, indexOf: null as string | null })),
-  ];
-  for (const c of need) {
-    const col = ds.columns[c.name];
-    const size = c.plate ? ds.plates[c.plate] : 1;
-    if (!col) problems.push(`データに列 ${c.name} がありません`);
-    else if (col.length !== size) problems.push(`列 ${c.name} の長さ ${col.length} が ${c.plate} の大きさ ${size} と合いません`);
-    else if (c.indexOf) {
-      const m = ds.plates[c.indexOf] ?? 0;
-      if (col.some((v) => !Number.isInteger(v) || v < 0 || v >= m)) problems.push(`添字の列 ${c.name} は 0〜${m - 1} の整数にしてください`);
-    }
-  }
-  return problems;
-}
 
 export class Store {
   path: string;
@@ -99,12 +81,13 @@ export class Store {
     return parsed.data;
   }
 
-  private commit(event: ChangeEvent) {
+  private commit(next: State, event: ChangeEvent) {
     mkdirSync(dirname(this.path), { recursive: true });
     const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify(this.state), "utf8");
+    writeFileSync(tmp, JSON.stringify(next), "utf8");
     if (existsSync(this.path)) copyFileSync(this.path, `${this.path}.bak`);
     renameSync(tmp, this.path);
+    this.state = next;
     for (const l of this.listeners) l(event);
   }
 
@@ -112,8 +95,7 @@ export class Store {
   private change<T>(fn: (draft: State) => T, event: (result: T) => ChangeEvent): T {
     const draft = structuredClone(this.state);
     const result = fn(draft);
-    this.state = StateSchema.parse(draft);
-    this.commit(event(result));
+    this.commit(StateSchema.parse(draft), event(result));
     return result;
   }
 
@@ -179,6 +161,39 @@ export class Store {
   }
 
   // ---- human side ------------------------------------------------------------
+
+  proposeQuestionContract(raw: unknown) {
+    const input = HumanQuestionContractInput.parse(raw);
+    const base = this.version(input.baseVersionId);
+    if (this.model(base.modelId).currentVersionId !== base.id) throw new HttpError(409, "問いの契約は現在の版を基に提案してください");
+    if (base.spec.question === input.question && (["population", "estimand", "decision"] as const).every(key => base.spec.questionContract?.[key] === input.questionContract[key])) {
+      throw new HttpError(400, "問いと契約が現在の版と同じです");
+    }
+    return this.propose({ modelId: base.modelId, spec: { ...base.spec, question: input.question, questionContract: input.questionContract },
+      summary: "問いと目的の契約を更新する提案", knowledgeIds: [] });
+  }
+
+  importCapsule(raw: unknown) {
+    const read = readCapsule(raw);
+    if (!read.ok) throw new HttpError(400, "カプセルを取り込めません", read.problems);
+    const source = read.capsule;
+    return this.change(d => {
+      const modelId = newId("mdl"), createdAt = now();
+      const version: ModelVersion = {
+        id: newId("ver"), modelId, number: 1, spec: source.modelVersion.spec, createdAt,
+        origin: { kind: "capsule", source: {
+          modelId: source.modelVersion.modelId, versionId: source.modelVersion.id, versionNumber: source.modelVersion.number,
+          datasetId: source.dataset.id, runId: source.run.id, createdAt: source.modelVersion.createdAt,
+        } },
+        summary: `カプセルから独立コピー: ${source.modelVersion.modelId} / ${source.modelVersion.id} (v${source.modelVersion.number})。提案・知識・版履歴は含みません。\n元の概要: ${source.modelVersion.summary}`,
+      };
+      const model: Model = { id: modelId, title: version.spec.title + "（カプセルのコピー）", createdAt, currentVersionId: version.id };
+      const dataset: Dataset = { ...source.dataset, id: newId("ds"), modelId };
+      const run: Run = { ...source.run, id: newId("run"), modelId, versionId: version.id, datasetId: dataset.id };
+      d.models.push(model); d.versions.push(version); d.datasets.push(dataset); d.runs.push(run);
+      return { model, version, dataset, run };
+    }, result => ({ kind: "model", id: result.model.id }));
+  }
 
   startExample(exampleId: string) {
     const ex = EXAMPLES.find((e) => e.id === exampleId);
@@ -373,7 +388,11 @@ export class Store {
           currentVersion: { id: cur.id, number: cur.number, spec: cur.spec, summary: cur.summary },
           versions: s.versions.filter((v) => v.modelId === m.id).map((v) => ({ id: v.id, number: v.number, summary: v.summary, origin: v.origin })),
           knowledge: s.knowledge.filter((k) => k.modelId === m.id),
-          datasets: s.datasets.filter((x) => x.modelId === m.id).map((x) => ({ id: x.id, label: x.label, provenance: x.provenance, note: x.note, plates: x.plates })),
+          checks: s.checks.filter((check) => check.modelId === m.id),
+          checkResults: s.checkResults.filter((result) => result.modelId === m.id).map(({ replicatedValues, ...summary }) => ({
+            ...summary, replicationCount: replicatedValues.length,
+          })),
+          datasets: s.datasets.filter((x) => x.modelId === m.id).map((x) => ({ id: x.id, label: x.label, provenance: x.provenance, note: x.note, plates: x.plates, ...(x.passport === undefined ? {} : { passport: x.passport }) })),
           runs: s.runs
             .filter((r) => r.modelId === m.id)
             .map((r) => ({
@@ -573,24 +592,7 @@ export class Store {
     const v = this.version(input.versionId);
     const ds = this.dataset(input.datasetId);
     if (ds.modelId !== v.modelId) throw new HttpError(400, "データセットと版が別のモデルです");
-    const problems = datasetProblems(v.spec, ds);
-    const sites = runSites(v.spec);
-    let k: number | null = null;
-    for (const n of sites) {
-      const draws = input.draws[n.name];
-      const size = n.plate ? ds.plates[n.plate] : 1;
-      if (!draws) {
-        problems.push(`draws に ${n.name} がありません`);
-        continue;
-      }
-      if (k === null) k = draws.length;
-      if (draws.length !== k) problems.push(`${n.name} の draw 数 ${draws.length} が他と揃っていません（${k}）`);
-      if (draws.some((row) => row.length !== size)) problems.push(`${n.name} の各 draw は長さ ${size} にしてください`);
-    }
-    if (k !== null && (k < 1 || k > 1000)) problems.push("draw 数は 1〜1000 にしてください");
-    for (const name of Object.keys(input.draws)) {
-      if (!sites.some((n) => n.name === name)) problems.push(`${name} はこの版のパラメータ・潜在変数ではありません`);
-    }
+    const problems = runProblems(v.spec, ds, input);
     if (problems.length) throw new HttpError(400, "run が版・データと合いません", problems);
     return this.change(
       (d) => {
@@ -685,5 +687,61 @@ export class Store {
       },
       (x) => ({ kind: "evaluation", id: x.id }),
     );
+  }
+
+  private checkResult(check: SavedCheck, runId: string, seed: number): SavedCheckResult {
+    const run = this.run(runId);
+    const version = this.version(run.versionId);
+    const dataset = this.dataset(run.datasetId);
+    if (check.modelId !== version.modelId || check.modelId !== run.modelId || check.datasetId !== dataset.id) {
+      throw new HttpError(400, "保存検査は同じモデル・データセットのrunで再実行してください");
+    }
+    try {
+      const values = evaluateSavedCheck(check, version, dataset, run, seed);
+      return { ...values, id: newId("check_result"), checkId: check.id, modelId: version.modelId, versionId: version.id, datasetId: dataset.id, runId: run.id, createdAt: now(), seed };
+    } catch (error) {
+      throw new HttpError(400, error instanceof Error ? error.message : "検査を計算できませんでした");
+    }
+  }
+
+  saveCheck(raw: z.infer<typeof HumanSaveCheckInput>) {
+    const input = HumanSaveCheckInput.parse(raw);
+    const run = this.run(input.runId);
+    const version = this.version(run.versionId);
+    const dataset = this.dataset(run.datasetId);
+    const view = version.spec.view;
+    const x = version.spec.data.find(d => d.name === view.x);
+    const y = version.spec.nodes.find(n => n.name === view.y && n.role === "observed");
+    const group = version.spec.data.find(d => d.name === view.group);
+    if (!x || !y || !Object.hasOwn(dataset.columns, view.x) || !Object.hasOwn(dataset.columns, view.y)) {
+      throw new HttpError(400, "検査にはデータセットの直接の入力x列と観測y列が必要です");
+    }
+    if (input.groupIndex !== null && (!group?.indexOf || !Object.hasOwn(dataset.columns, group.name))) {
+      throw new HttpError(400, "群の選択には既知の添字入力列が必要です");
+    }
+    const check: SavedCheck = {
+      id: newId("check"), modelId: version.modelId, datasetId: dataset.id, createdAt: now(),
+      label: input.label, xMin: input.xMin, xMax: input.xMax, statistic: input.statistic,
+      ...(input.threshold === undefined ? {} : { threshold: input.threshold }),
+      x: view.x, y: view.y, xUnit: x.unit, yUnit: y.unit,
+      groupColumn: view.group ?? null, groupIndex: input.groupIndex,
+    };
+    const result = this.checkResult(check, run.id, input.seed);
+    return this.change(draft => {
+      draft.checks.push(check);
+      draft.checkResults.push(result);
+      return { check, result };
+    }, () => ({ kind: "check", id: check.id }));
+  }
+
+  rerunCheck(checkId: string, raw: z.infer<typeof HumanRerunCheckInput>) {
+    const input = HumanRerunCheckInput.parse(raw);
+    const check = this.state.checks.find(c => c.id === checkId);
+    if (!check) throw new HttpError(404, "保存検査が見つかりません");
+    const result = this.checkResult(check, input.runId, input.seed);
+    return this.change(draft => {
+      draft.checkResults.push(result);
+      return result;
+    }, () => ({ kind: "check.result", id: result.id }));
   }
 }

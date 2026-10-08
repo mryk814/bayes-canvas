@@ -43,7 +43,7 @@ export function EngineReport({ state, modelId }: { state: State; modelId: string
   const datasetId = evals.at(-1)?.datasetId ?? null;
   const current = evals.filter((e) => e.datasetId === datasetId);
   const algorithms = state.algorithms.filter((a) => a.versionId === versionId).reverse();
-  const nuts = [...state.runs].reverse().find((r) => r.versionId === versionId && r.datasetId === datasetId && r.fidelity === "mcmc" && r.algorithmId === null) ?? null;
+  const nuts = [...state.runs].reverse().find((r) => r.versionId === versionId && r.datasetId === datasetId && r.fidelity === "mcmc" && !r.algorithmId) ?? null;
   const holdouts = current.filter((e): e is Holdout => e.kind === "holdout");
   if (!holdouts.length && !algorithms.length) return null;
   const splits = [...new Set(holdouts.map((h) => h.split))].sort((a, b) => (a === "records" ? -1 : b === "records" ? 1 : a.localeCompare(b)));
@@ -176,7 +176,7 @@ function AlgorithmCard({
             <span className="muted">未計測（実データでの試走を待っています）</span>
           ) : (
             <>
-              {fit.diagnostics.seconds !== null && <>{Math.round(fit.diagnostics.seconds)} 秒 · </>}
+              {fit.diagnostics.seconds != null && <>{Math.round(fit.diagnostics.seconds)} 秒 · </>}
               ESS ≥ {fit.diagnostics.minEss === null ? "?" : Math.round(fit.diagnostics.minEss)} · 発散 {fit.diagnostics.divergences ?? "?"} · R̂ ≤{" "}
               {fit.diagnostics.maxRhat === null ? "?" : fmt(fit.diagnostics.maxRhat)}
               {ratio !== null && (

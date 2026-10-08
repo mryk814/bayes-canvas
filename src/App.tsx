@@ -7,9 +7,12 @@ import { post, useAction, useAppData, useStoredState, type LadderInfo } from "./
 import { bestRun, JobList, LadderStatus } from "./Background.tsx";
 import { EngineReport } from "./Engine.tsx";
 import { DraftTray, IntentCard } from "./Conversation.tsx";
-import { ErrorNote, EvidenceList, KnowledgeList, ModelSummary, ProposalCard, VersionList } from "./Ledger.tsx";
+import { CapsuleOrigin, ErrorNote, EvidenceList, KnowledgeList, ModelSummary, ProposalCard, VersionList } from "./Ledger.tsx";
 import { Stage, type Focus, type Source, type StageMode } from "./Stage.tsx";
 import { sharedDomains, type Tool } from "./WorldPlot.tsx";
+import { ModelTools } from "./ModelTools.tsx";
+import { Capsule } from "./Capsule.tsx";
+import { displayDrawIndices } from "../shared/view-contract.ts";
 
 const WORLD_COUNT = 12;
 
@@ -28,6 +31,7 @@ type Tab = "talk" | "proposals" | "knowledge" | "evidence" | "model";
 function Workspace({ state, ladder, agentConnected, dataPath, live }: { state: State; ladder: LadderInfo; agentConnected: boolean; dataPath: string; live: boolean }) {
   const [modelId, setModelId] = useStoredState<string | null>("possible-worlds:model", null);
   const [creating, setCreating] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const model = state.models.find((m) => m.id === modelId) ?? state.models[state.models.length - 1] ?? null;
   const showEmpty = creating || !model;
 
@@ -78,6 +82,7 @@ function Workspace({ state, ladder, agentConnected, dataPath, live }: { state: S
           )}
         </div>
         <div className="topbar-right">
+          {!showEmpty && <button className="btn btn-quiet" aria-pressed={toolsOpen} onClick={() => setToolsOpen(!toolsOpen)}>{toolsOpen ? "世界に戻る" : "問いの道具"}</button>}
           {!live && <span className="badge badge-warn">サーバーとの接続が切れています</span>}
           <LadderStatus ladder={ladder} state={state} />
           <span className={`agent-status ${agentConnected ? "on" : "off"}`} title={agentConnected ? "MCP ブリッジが接続中" : "Claude Code の MCP ブリッジが未接続"}>
@@ -92,20 +97,35 @@ function Workspace({ state, ladder, agentConnected, dataPath, live }: { state: S
       {showEmpty ? (
         <EmptyState state={state} onCancel={state.models.length ? () => setCreating(false) : null} />
       ) : (
-        <ModelWorkspace key={model!.id} state={state} ladder={ladder} modelId={model!.id} agentConnected={agentConnected} />
+        <ModelSession key={model!.id} state={state} ladder={ladder} modelId={model!.id} agentConnected={agentConnected} toolsOpen={toolsOpen}/>
       )}
     </div>
   );
 }
 
-function ModelWorkspace({ state, ladder, modelId, agentConnected }: { state: State; ladder: LadderInfo; modelId: string; agentConnected: boolean }) {
+// One selection owns both views; hiding a view preserves its unfinished inputs.
+function ModelSession({ state, ladder, modelId, agentConnected, toolsOpen }: { state: State; ladder: LadderInfo; modelId: string; agentConnected: boolean; toolsOpen: boolean }) {
+  const model = state.models.find(item => item.id === modelId)!;
+  const current = state.versions.find(item => item.id === model.currentVersionId)!;
+  const importedRun = current.origin.kind === "capsule" ? state.runs.find(item => item.modelId === modelId && item.versionId === current.id) : null;
+  const [runId, setRunId] = useStoredState<string | null>(`possible-worlds:run:${modelId}`, importedRun?.id ?? null);
+  // The tools read a concrete run; "auto" means whichever background run is best right now.
+  const toolsRunId = runId === "auto" ? (bestRun(state, modelId)?.id ?? null) : runId;
+  return <>
+    {current.origin.kind === "capsule" && <div style={{ padding: "12px 16px" }}><CapsuleOrigin version={current}/></div>}
+    <div hidden={toolsOpen}><ModelWorkspace state={state} ladder={ladder} modelId={modelId} agentConnected={agentConnected} runId={runId} onRun={setRunId}/></div>
+    <div hidden={!toolsOpen}><ModelTools state={state} modelId={modelId} runId={toolsRunId} onRun={setRunId} active={toolsOpen}/></div>
+  </>;
+}
+
+function ModelWorkspace({ state, ladder, modelId, agentConnected, runId, onRun }: { state: State; ladder: LadderInfo; modelId: string; agentConnected: boolean; runId: string | null; onRun: (id: string | null) => void }) {
   const model = state.models.find((m) => m.id === modelId)!;
   const current = state.versions.find((v) => v.id === model.currentVersionId)!;
   const [seed, setSeed] = useStoredState(`possible-worlds:seed:${modelId}`, 1);
-  const [runId, setRunId] = useStoredState<string | null>(`possible-worlds:run:${modelId}`, null);
   const [draft, setDraft] = useStoredState<Draft>(`possible-worlds:draft:${modelId}`, EMPTY_DRAFT);
   const [focus, setFocus] = useState<Focus>(null);
   const [opened, setOpened] = useState<number | null>(null);
+  useEffect(() => { setFocus(null); setOpened(null); }, [runId]);
   const [tool, setTool] = useState<Tool>("look");
   const [showObs, setShowObs] = useState(true);
   const [tab, setTab] = useState<Tab>("talk");
@@ -132,7 +152,7 @@ function ModelWorkspace({ state, ladder, modelId, agentConnected }: { state: Sta
     const c = compiled.compiled;
     if (!run || !dataset) return Array.from({ length: WORLD_COUNT }, (_, i) => simulateWorld(c, seed, i));
     const K = drawCount(run);
-    const picks = [...new Set(Array.from({ length: Math.min(WORLD_COUNT, K) }, (_, j) => Math.round((j * (K - 1)) / Math.max(1, WORLD_COUNT - 1))))];
+    const picks = displayDrawIndices(K, WORLD_COUNT);
     return picks.map((k) => simulateWorld(c, seed, k, runInputs(c, run, dataset, k)));
   }, [compiled, seed, run, dataset]);
   const points = useMemo(() => (compiled.ok ? worlds.map((w) => viewPoints(compiled.compiled, w)) : []), [compiled, worlds]);
@@ -194,7 +214,7 @@ function ModelWorkspace({ state, ladder, modelId, agentConnected }: { state: Sta
   runOptions.unshift({ id: "auto", label: best ? "自動（いまの版のいちばん確かな事後）" : "自動（いまの版の事後を待っています）" });
   const freshRuns = runs.filter((r) => r.versionId === current.id).length;
   const showRun = (id: string | null) => {
-    setRunId(id);
+    onRun(id);
     setFocus(null);
     setOpened(null);
   };
@@ -226,6 +246,7 @@ function ModelWorkspace({ state, ladder, modelId, agentConnected }: { state: Sta
       ) : (
         <Stage
           compiled={compiled.compiled}
+          versionId={viewVersion.id}
           versionNumber={viewVersion.number}
           seed={seed}
           source={source}
@@ -367,6 +388,7 @@ function EmptyState({ state, onCancel }: { state: State; onCancel: (() => void) 
             </button>
           ))}
         </div>
+        <Capsule version={null} dataset={null} run={null}/>
         {proposals.length > 0 && (
           <div className="stack">
             <h3 className="section-title">Claude からの新しいモデルの提案</h3>

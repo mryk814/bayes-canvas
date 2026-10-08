@@ -1,0 +1,27 @@
+{
+  "branch": "codex/experience-lab",
+  "base": "d221526bb1acea74da7f08d142ccd2f5b9908ddd",
+  "sourceSha256": {
+    "lab/main.tsx": "93a4e980a3e58850268189f6f79814648917043eef80de66f770977e7657bd08",
+    "lab/style.css": "f0330bd4b60f21492ab7fd462f5ac466258456553f0119f1a75de3dd1f612edc",
+    "lab/joint.ts": "da79c4dae2bdc9edda710a61ee1b9d375c734d64788fe794670a52a371c0f22b",
+    "lab/csv.ts": "94cc562dcf3faaf1a90aab7ff78de19837adcb571adeece3aade82a240ae063b",
+    "lab/checks.ts": "624851d8e54823542a600357b2bc49dee88158d6e8cfa6c441fbb93c99d9e677"
+  },
+  "browser": "Codex in-app browser",
+  "desktopWidth": 1130,
+  "narrowViewport": {
+    "width": 390,
+    "height": 844
+  },
+  "screenshots": {
+    "joint-desktop.png": "negative fixture, first draw, stopped, utterance populated",
+    "checks-desktop.png": "mean, group A, x=2..3, v1 and v2 results"
+  },
+  "notVerified": [
+    "Android device",
+    "native file download completion",
+    "production data",
+    "main app integration"
+  ]
+}

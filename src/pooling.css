@@ -1,0 +1,11 @@
+.pooling { overflow-wrap:anywhere; }
+.pooling-axis { display:flex; justify-content:space-between; gap:16px; font-size:12px; color:var(--muted); }
+.pooling-axis span { max-width:48%; }
+.pooling-interval { display:grid; gap:5px; margin-top:16px; }
+.pooling-track { position:relative; height:22px; border-bottom:1px solid var(--line); }
+.pooling-span { position:absolute; top:9px; height:4px; background:var(--accent); }
+.pooling-median { position:absolute; top:5px; width:12px; height:12px; border-radius:50%; background:var(--accent); transform:translateX(-50%); }
+.pooling-values { overflow-wrap:anywhere; }
+.pooling-fields { display:flex; flex-wrap:wrap; gap:12px; min-width:0; margin:0; padding:0; border:0; }
+.pooling-fields label { flex:1 1 160px; min-width:0; }
+.pooling summary { min-height:44px; padding:10px 0; cursor:pointer; }

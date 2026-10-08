@@ -50,6 +50,6 @@ export function approximationGaps(spec: ModelSpec, approx: Pick<Run, "draws">, m
 // Which runs may be shown as the posterior: NUTS (or any MCMC by hand), a trusted
 // approximation, or the run of an algorithm the person adopted.
 export function runShown(algorithms: Pick<Algorithm, "id" | "status">[], r: Pick<Run, "algorithmId" | "fidelity" | "diagnostics">) {
-  if (r.algorithmId === null) return r.fidelity === "mcmc" || approximationTrusted(r.diagnostics);
+  if (!r.algorithmId) return r.fidelity === "mcmc" || approximationTrusted(r.diagnostics);
   return algorithms.find((a) => a.id === r.algorithmId)?.status === "adopted";
 }
